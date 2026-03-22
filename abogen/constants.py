@@ -123,15 +123,15 @@ VOICES_INTERNAL = [
 
 # Voice and sample text mapping
 SAMPLE_VOICE_TEXTS = {
-    "a": "This is a sample of the selected voice.",
-    "b": "This is a sample of the selected voice.",
-    "e": "Este es una muestra de la voz seleccionada.",
-    "f": "Ceci est un exemple de la voix sélectionnée.",
-    "h": "यह चयनित आवाज़ का एक नमूना है।",
-    "i": "Questo è un esempio della voce selezionata.",
-    "j": "これは選択した声のサンプルです。",
-    "p": "Este é um exemplo da voz selecionada.",
-    "z": "这是所选语音的示例。",
+    "a": "This is a sample of the selected voice. Next, listen for rhythm, tone, and clear consonants. The quick brown fox jumps over the lazy dog, while bright sunlight and gentle thunder roll through the valley.",
+    "b": "This is a sample of the selected voice. Next, listen for rhythm, tone, and clear consonants. A curious traveller quietly walks through the village square, hearing smooth rhythms, crisp consonants, and warm vowels.",
+    "e": "Esta es una muestra de la voz seleccionada. A continuación, escucha el ritmo y la claridad de los sonidos. El perro corre rápido por la calle, la niña sonríe, y el zorro rojo cruza el río con lluvia suave.",
+    "f": "Ceci est un exemple de la voix sélectionnée. Ensuite, écoutez le rythme et la clarté des sons. Un garçon curieux regarde la lune, prend un croissant chaud, puis chante doucement près du vieux pont.",
+    "h": "यह चयनित आवाज़ का एक नमूना है। अब लय, स्वर और स्पष्ट उच्चारण पर ध्यान दें। खिलते फूलों की खुशबू हवा में घुलती है, बच्चे छत पर हँसते हैं, और बारिश की बूँदें धीरे-धीरे धरती को छूती हैं।",
+    "i": "Questo è un esempio della voce selezionata. Ora ascolta il ritmo, il tono e la chiarezza dei suoni. La ragazza cammina nella piazza, ascolta il suono dolce della pioggia, e racconta una storia chiara e tranquilla.",
+    "j": "これは選択した声のサンプルです。次に、リズムと発音の明瞭さに注目してください。しずかな朝、しゃしんをとる少女が、きらきら光る川のそばで、ゆっくり歌を口ずさみます。",
+    "p": "Este é um exemplo da voz selecionada. Agora, ouça o ritmo e a clareza dos sons. O céu está claro, a chuva cai leve no chão, e o velho marinheiro conta histórias com emoção, ritmo e coração.",
+    "z": "这是所选语音的示例。接下来请注意语调、节奏和发音清晰度。清晨的风吹过小桥，张老师轻声讲故事，孩子们认真聆听，笑声在安静的院子里回荡。",
 }
 
 COLORS = {
