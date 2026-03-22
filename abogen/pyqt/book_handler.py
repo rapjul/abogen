@@ -1,44 +1,44 @@
-import re
 import base64
+import logging
+import os
+import re
+import textwrap
+import urllib.parse
+
 from bs4 import BeautifulSoup, NavigableString
-from PyQt6.QtGui import QMovie
-from PyQt6.QtWidgets import (
-    QDialog,
-    QTreeWidget,
-    QTreeWidgetItem,
-    QTextEdit,
-    QPushButton,
-    QVBoxLayout,
-    QHBoxLayout,
-    QDialogButtonBox,
-    QSplitter,
-    QWidget,
-    QCheckBox,
-    QTreeWidgetItemIterator,
-    QLabel,
-    QMenu,
-)
 from PyQt6.QtCore import (
+    QSize,
     Qt,
     QThread,
     pyqtSignal,
-    QSize,
+)
+from PyQt6.QtGui import QMovie
+from PyQt6.QtWidgets import (
+    QCheckBox,
+    QDialog,
+    QDialogButtonBox,
+    QHBoxLayout,
+    QLabel,
+    QMenu,
+    QPushButton,
+    QSplitter,
+    QTextEdit,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QTreeWidgetItemIterator,
+    QVBoxLayout,
+    QWidget,
+)
+
+from abogen.book_parser import get_book_parser
+from abogen.subtitle_utils import (
+    calculate_text_length,
+    clean_text,
 )
 from abogen.utils import (
     detect_encoding,
     get_resource_path,
 )
-from abogen.book_parser import get_book_parser
-
-from abogen.subtitle_utils import (
-    clean_text,
-    calculate_text_length,
-)
-
-import os
-import logging
-import urllib.parse
-import textwrap
 
 # Setup logging
 logging.basicConfig(
@@ -111,7 +111,9 @@ class HandlerDialog(QDialog):
         book_name = os.path.splitext(os.path.basename(book_path))[0]
 
         # Set window title based on file type and book name
-        item_type = "Chapters" if self.parser.file_type in ["epub", "markdown"] else "Pages"
+        item_type = (
+            "Chapters" if self.parser.file_type in ["epub", "markdown"] else "Pages"
+        )
         self.setWindowTitle(f"Select {item_type} - {book_name}")
         self.resize(1200, 900)
         self._block_signals = False  # Flag to prevent recursive signals
@@ -338,7 +340,12 @@ class HandlerDialog(QDialog):
         cfg = load_config()
         replace_single_newlines = cfg.get("replace_single_newlines", True)
 
-        cache_key = (self.book_path, mod_time, self.parser.file_type, replace_single_newlines)
+        cache_key = (
+            self.book_path,
+            mod_time,
+            self.parser.file_type,
+            replace_single_newlines,
+        )
 
         # Check if content is already cached
         if cache_key in HandlerDialog._content_cache:
@@ -349,7 +356,7 @@ class HandlerDialog(QDialog):
                 self.processed_nav_structure = cached_data["processed_nav_structure"]
             if "book_metadata" in cached_data:
                 self.book_metadata = cached_data["book_metadata"]
-            
+
             # Apply to parser so it stays in sync if used elsewhere
             self.parser.content_texts = self.content_texts
             self.parser.content_lengths = self.content_lengths
@@ -383,7 +390,6 @@ class HandlerDialog(QDialog):
         HandlerDialog._content_cache[cache_key] = cache_data
         logging.info(f"Cached content for {os.path.basename(self.book_path)}")
 
-
     def _build_tree(self):
         self.treeWidget.clear()
 
@@ -395,18 +401,21 @@ class HandlerDialog(QDialog):
         info_item.setFont(0, font)
 
         if self.processed_nav_structure:
-            self._build_tree_from_nav(
-                self.processed_nav_structure, self.treeWidget
-            )
+            self._build_tree_from_nav(self.processed_nav_structure, self.treeWidget)
         else:
-             # If no structure found but content exists (rare fallback), list flat
-             for ch_id, ch_len in self.content_lengths.items():
-                 # Simple flat list
-                 item = QTreeWidgetItem(self.treeWidget, [ch_id])
-                 item.setData(0, Qt.ItemDataRole.UserRole, ch_id)
-                 item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-                 if self.content_texts.get(ch_id):
-                     item.setCheckState(0, Qt.CheckState.Checked if ch_id in self.checked_chapters else Qt.CheckState.Unchecked)
+            # If no structure found but content exists (rare fallback), list flat
+            for ch_id, ch_len in self.content_lengths.items():
+                # Simple flat list
+                item = QTreeWidgetItem(self.treeWidget, [ch_id])
+                item.setData(0, Qt.ItemDataRole.UserRole, ch_id)
+                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                if self.content_texts.get(ch_id):
+                    item.setCheckState(
+                        0,
+                        Qt.CheckState.Checked
+                        if ch_id in self.checked_chapters
+                        else Qt.CheckState.Unchecked,
+                    )
 
         has_parents = False
         iterator = QTreeWidgetItemIterator(
@@ -422,9 +431,7 @@ class HandlerDialog(QDialog):
             item = self.treeWidget.topLevelItem(i)
             self._update_item_checkbox_state(item)
 
-    def _build_tree_from_nav(
-        self, nav_nodes, parent_item, seen_content_hashes=None
-    ):
+    def _build_tree_from_nav(self, nav_nodes, parent_item, seen_content_hashes=None):
         if seen_content_hashes is None:
             seen_content_hashes = set()
         for node in nav_nodes:
@@ -466,7 +473,6 @@ class HandlerDialog(QDialog):
 
             if children:
                 self._build_tree_from_nav(children, item, seen_content_hashes)
-
 
     def _are_provided_checks_relevant(self):
         if not self.checked_chapters:
@@ -514,7 +520,9 @@ class HandlerDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
 
-        item_type = "chapters" if self.parser.file_type in ["epub", "markdown"] else "pages"
+        item_type = (
+            "chapters" if self.parser.file_type in ["epub", "markdown"] else "pages"
+        )
 
         self.auto_select_btn = QPushButton(f"Auto-select {item_type}", self)
         self.auto_select_btn.clicked.connect(self.auto_select_chapters)
@@ -531,8 +539,10 @@ class HandlerDialog(QDialog):
         select_layout = QHBoxLayout()
         self.select_all_btn = QPushButton("Select all", self)
         self.select_all_btn.clicked.connect(self.select_all_chapters)
+        self.select_all_btn.setToolTip(f"Select all available {item_type}.")
         self.deselect_all_btn = QPushButton("Clear all", self)
         self.deselect_all_btn.clicked.connect(self.deselect_all_chapters)
+        self.deselect_all_btn.setToolTip(f"Clear selection for all {item_type}.")
         select_layout.addWidget(self.select_all_btn)
         select_layout.addWidget(self.deselect_all_btn)
         buttons_layout.addLayout(select_layout)
@@ -540,8 +550,14 @@ class HandlerDialog(QDialog):
         parent_layout = QHBoxLayout()
         self.select_parents_btn = QPushButton("Select parents", self)
         self.select_parents_btn.clicked.connect(self.select_parent_chapters)
+        self.select_parents_btn.setToolTip(
+            "Select only top-level parent entries in the chapter tree."
+        )
         self.deselect_parents_btn = QPushButton("Unselect parents", self)
         self.deselect_parents_btn.clicked.connect(self.deselect_parent_chapters)
+        self.deselect_parents_btn.setToolTip(
+            "Clear selection from top-level parent entries."
+        )
         parent_layout.addWidget(self.select_parents_btn)
         parent_layout.addWidget(self.deselect_parents_btn)
         buttons_layout.addLayout(parent_layout)
@@ -549,8 +565,10 @@ class HandlerDialog(QDialog):
         expand_layout = QHBoxLayout()
         self.expand_all_btn = QPushButton("Expand All", self)
         self.expand_all_btn.clicked.connect(self.treeWidget.expandAll)
+        self.expand_all_btn.setToolTip("Expand all items in the chapter tree.")
         self.collapse_all_btn = QPushButton("Collapse All", self)
         self.collapse_all_btn.clicked.connect(self.treeWidget.collapseAll)
+        self.collapse_all_btn.setToolTip("Collapse all items in the chapter tree.")
         expand_layout.addWidget(self.expand_all_btn)
         expand_layout.addWidget(self.collapse_all_btn)
         buttons_layout.addLayout(expand_layout)
@@ -567,12 +585,18 @@ class HandlerDialog(QDialog):
         )
         self.save_chapters_checkbox = QCheckBox(checkbox_text, self)
         self.save_chapters_checkbox.setChecked(self.save_chapters_separately)
+        self.save_chapters_checkbox.setToolTip(
+            "Save each selected chapter/page as a separate output file."
+        )
         self.save_chapters_checkbox.stateChanged.connect(self.on_save_chapters_changed)
         leftLayout.addWidget(self.save_chapters_checkbox)
         self.merge_chapters_checkbox = QCheckBox(
             "Create a merged version at the end", self
         )
         self.merge_chapters_checkbox.setChecked(self.merge_chapters_at_end)
+        self.merge_chapters_checkbox.setToolTip(
+            "Create one additional merged output containing all selected chapters/pages."
+        )
         self.merge_chapters_checkbox.stateChanged.connect(
             self.on_merge_chapters_changed
         )
@@ -583,6 +607,8 @@ class HandlerDialog(QDialog):
         )
         self.save_as_project_checkbox.setToolTip(
             "Save the converted item in a project folder with metadata files. "
+            "Project folder location follows the Save location setting in the main window. "
+            "Changes apply to newly prepared books/projects only. "
             "(Useful if you want to work with converted items in the future.)"
         )
         self.save_as_project_checkbox.setChecked(self.save_as_project)
@@ -801,9 +827,9 @@ class HandlerDialog(QDialog):
 
             identifier = item.data(0, Qt.ItemDataRole.UserRole)
             if not identifier:
-                 iterator += 1
-                 continue
-                 
+                iterator += 1
+                continue
+
             # Logic: Check item if it has content (already handled by ItemIsUserCheckable flag really)
             # But duplicate logic from previous implementation:
             item.setCheckState(0, Qt.CheckState.Checked)
@@ -910,9 +936,7 @@ class HandlerDialog(QDialog):
 
         title = self.book_metadata.get("title")
         if title:
-            html_content += (
-                f"<h2 style='text-align: center;'>{title}</h2>"
-            )
+            html_content += f"<h2 style='text-align: center;'>{title}</h2>"
 
         authors = self.book_metadata.get("authors")
         if authors:
@@ -1137,6 +1161,7 @@ class HandlerDialog(QDialog):
     def _format_metadata_tags(self):
         """Format metadata tags for insertion at the beginning of the text"""
         import datetime
+
         from abogen.utils import get_user_cache_path
 
         metadata = self.book_metadata
@@ -1154,9 +1179,7 @@ class HandlerDialog(QDialog):
 
         # Count chapters/pages
         total_chapters = len(self.checked_chapters)
-        chapter_text = (
-            f"{total_chapters} {'Chapters' if self.parser.file_type == 'epub' else 'Pages'}"
-        )
+        chapter_text = f"{total_chapters} {'Chapters' if self.parser.file_type == 'epub' else 'Pages'}"
 
         # Handle cover image
         cover_tag = ""
@@ -1441,5 +1464,3 @@ class HandlerDialog(QDialog):
 
         action.triggered.connect(do_toggle)
         menu.exec(self.treeWidget.mapToGlobal(pos))
-
-

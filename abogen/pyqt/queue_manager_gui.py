@@ -2,26 +2,35 @@
 # button to remove an item from the queue
 # button to clear the queue
 
+import logging
+from copy import deepcopy
+
+from PyQt6.QtCore import QFileInfo, Qt
+from PyQt6.QtGui import QFontMetrics
 from PyQt6.QtWidgets import (
-    QDialog,
-    QVBoxLayout,
-    QHBoxLayout,
-    QDialogButtonBox,
-    QPushButton,
-    QListWidget,
-    QListWidgetItem,
-    QFileIconProvider,
-    QLabel,
-    QWidget,
-    QSizePolicy,
     QAbstractItemView,
     QCheckBox,
+    QDialog,
+    QDialogButtonBox,
+    QFileIconProvider,
+    QHBoxLayout,
+    QLabel,
+    QListWidget,
+    QListWidgetItem,
+    QMessageBox,
+    QPushButton,
+    QSizePolicy,
+    QVBoxLayout,
+    QWidget,
 )
-from PyQt6.QtCore import QFileInfo, Qt
+
 from abogen.constants import COLORS
-from copy import deepcopy
-from PyQt6.QtGui import QFontMetrics
 from abogen.utils import load_config, save_config
+
+logger = logging.getLogger(__name__)
+
+# Show a summary pop-up only when there are many character-count read failures.
+CHAR_COUNT_FAILURE_WARNING_THRESHOLD = 3
 
 # Define attributes that are safe to override with global settings
 OVERRIDE_FIELDS = [
@@ -185,17 +194,63 @@ class QueueManager(QDialog):
         self.listwidget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.listwidget.customContextMenuRequested.connect(self.show_context_menu)
         # Add informative instructions at the top
-        instructions = QLabel(
-            "<h2>How Queue Works?</h2>"
-            "You can add text and subtitle files (.txt, .srt, .ass, .vtt) directly using the '<b>Add files</b>' button below. "
-            "To add PDF, EPUB or markdown files, use the input box in the main window and click the <b>'Add to Queue'</b> button. "
-            "By default, each file in the queue keeps the configuration settings active when they were added. "
-            "Enabling the <b>'Override item settings with current selection'</b> option below will force all items to use the configuration currently selected in the main window. "
-            "You can view each file's configuration by hovering over them."
-        )
+        instructions_text = """
+        <h2 style="margin-top: 0; margin-bottom: 10px;">How Queue Works?</h2>
+        <ul style="margin: 0; padding-left: 20px; line-height: 1.6;">
+            <li><b>Text/Subtitle files</b>: Use the '<u>Add Files</u>' button below to add .txt, .srt, .ass, or .vtt files directly.</li>
+            <li><b>Documents</b>: For PDF, EPUB, or markdown files, use the input box in the main window and click '<b>Add to Queue</b>'.</li>
+            <li><b>Settings preservation</b>: Each file keeps its original settings by default.</li>
+            <li><b>Override settings</b>: Enable '<b>Override item settings with current selection</b>' to apply current settings to all items.</li>
+            <li><b>View configuration</b>: Hover over items to view their configuration details.</li>
+            <li><b>Reorder</b>: Use the re-ordering buttons to change conversion order.</li>
+        </ul>
+        """
+        instructions = QLabel(instructions_text)
         instructions.setAlignment(Qt.AlignmentFlag.AlignLeft)
         instructions.setWordWrap(True)
         layout.addWidget(instructions)
+
+        # Overlay label for empty queue
+        self.empty_overlay = QLabel(
+            "Drag and drop your text or subtitle files here or use the 'Add Files' button.",
+            self.listwidget,
+        )
+        self.empty_overlay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.empty_overlay.setStyleSheet(
+            f"color: {COLORS['LIGHT_DISABLED']}; background: transparent; padding: 20px;"
+        )
+        self.empty_overlay.setWordWrap(True)
+        self.empty_overlay.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents, True
+        )
+        self.empty_overlay.hide()
+
+        button_row = QHBoxLayout()
+        button_row.setContentsMargins(0, 0, 0, 0)  # optional: no margins for button row
+        button_row.setSpacing(7)  # set spacing between buttons
+
+        # Add files button
+        add_files_button = QPushButton("Add Files")
+        add_files_button.setFixedHeight(40)
+        add_files_button.setToolTip("Add more text or subtitle files to the queue.")
+        add_files_button.clicked.connect(self.add_more_files)
+        button_row.addWidget(add_files_button)
+
+        # Remove button
+        self.remove_button = QPushButton("Remove Selected")
+        self.remove_button.setFixedHeight(40)
+        self.remove_button.setToolTip("Remove the selected item(s) from the queue.")
+        self.remove_button.clicked.connect(self.remove_item)
+        button_row.addWidget(self.remove_button)
+
+        # Clear button
+        self.clear_button = QPushButton("Clear Queue")
+        self.clear_button.setFixedHeight(40)
+        self.clear_button.setToolTip("Remove all items from the queue.")
+        self.clear_button.clicked.connect(self.clear_queue)
+        button_row.addWidget(self.clear_button)
+
+        layout.addLayout(button_row)
 
         # Override Checkbox
         self.override_chk = QCheckBox("Override item settings with current selection")
@@ -210,45 +265,39 @@ class QueueManager(QDialog):
         self.override_chk.setStyleSheet("margin-bottom: 8px;")
         layout.addWidget(self.override_chk)
 
-        # Overlay label for empty queue
-        self.empty_overlay = QLabel(
-            "Drag and drop your text or subtitle files here or use the 'Add files' button.",
-            self.listwidget,
+        # Re-ordering buttons
+        reorder_row = QHBoxLayout()
+        reorder_row.setContentsMargins(0, 0, 0, 0)
+        reorder_row.setSpacing(7)
+
+        reorder_row.addStretch(1)
+
+        # 1. Move to Top button
+        self.move_top_button = QPushButton("Move to Top")
+        self.move_top_button.setFixedHeight(36)
+        self.move_top_button.setToolTip(
+            "Move selected item(s) to the beginning of the queue."
         )
-        self.empty_overlay.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.empty_overlay.setStyleSheet(
-            f"color: {COLORS['LIGHT_DISABLED']}; background: transparent; padding: 20px;"
-        )
-        self.empty_overlay.setWordWrap(True)
-        self.empty_overlay.setAttribute(
-            Qt.WidgetAttribute.WA_TransparentForMouseEvents, True
-        )
-        self.empty_overlay.hide()
-        # add queue items to the list
-        self.process_queue()
+        self.move_top_button.clicked.connect(self.move_selected_to_top)
+        reorder_row.addWidget(self.move_top_button)
 
-        button_row = QHBoxLayout()
-        button_row.setContentsMargins(0, 0, 0, 0)  # optional: no margins for button row
-        button_row.setSpacing(7)  # set spacing between buttons
-        # Add files button
-        add_files_button = QPushButton("Add files")
-        add_files_button.setFixedHeight(40)
-        add_files_button.clicked.connect(self.add_more_files)
-        button_row.addWidget(add_files_button)
+        # 2. Move Up button
+        self.move_up_button = QPushButton("Move Up")
+        self.move_up_button.setFixedHeight(36)
+        self.move_up_button.setToolTip("Move selected item(s) up by one position.")
+        self.move_up_button.clicked.connect(self.move_selected_up)
+        reorder_row.addWidget(self.move_up_button)
 
-        # Remove button
-        self.remove_button = QPushButton("Remove selected")
-        self.remove_button.setFixedHeight(40)
-        self.remove_button.clicked.connect(self.remove_item)
-        button_row.addWidget(self.remove_button)
+        # 3. Move Down button
+        self.move_down_button = QPushButton("Move Down")
+        self.move_down_button.setFixedHeight(36)
+        self.move_down_button.setToolTip("Move selected item(s) down by one position.")
+        self.move_down_button.clicked.connect(self.move_selected_down)
+        reorder_row.addWidget(self.move_down_button)
 
-        # Clear button
-        self.clear_button = QPushButton("Clear Queue")
-        self.clear_button.setFixedHeight(40)
-        self.clear_button.clicked.connect(self.clear_queue)
-        button_row.addWidget(self.clear_button)
+        reorder_row.addStretch(1)
+        layout.addLayout(reorder_row)
 
-        layout.addLayout(button_row)
         layout.addWidget(self.listwidget)
 
         # Connect selection change to update button state
@@ -269,124 +318,143 @@ class QueueManager(QDialog):
         self.setWindowTitle(title)
         self.resize(*size)
 
+        # Populate list only after all UI controls are created.
+        self.process_queue()
         self.update_button_states()
+
+    def _show_unexpected_error(self, action, error):
+        QMessageBox.critical(
+            self,
+            "Queue Error",
+            f"Could not {action}.\n\n{type(error).__name__}: {error}",
+        )
 
     def process_queue(self):
         """Process the queue items."""
         import os
 
-        self.listwidget.clear()
-        if not self.queue:
+        try:
+            self.listwidget.clear()
+            if not self.queue:
+                self.empty_overlay.show()
+                self.update_button_states()
+                return
+            else:
+                self.empty_overlay.hide()
+
+            # Get current global settings and checkbox state for overrides.
+            current_global_settings = self.get_current_attributes()
+            override_chk = getattr(self, "override_chk", None)
+            is_override_active = bool(
+                override_chk is not None and override_chk.isChecked()
+            )
+
+            icon_provider = QFileIconProvider()
+            for item in self.queue:
+                # Dynamic Attribute Retrieval Helper
+                def get_val(attr, default=""):
+                    # If override is ON and attr is overridable, use global setting
+                    if is_override_active and attr in OVERRIDE_FIELDS:
+                        return current_global_settings.get(attr, default)
+                    # Otherwise return the item's saved attribute
+                    return getattr(item, attr, default)
+
+                # Determine display file path (prefer save_base_path for original file)
+                display_file_path = (
+                    getattr(item, "save_base_path", None) or item.file_name
+                )
+                processing_file_path = item.file_name
+
+                # Normalize paths for consistent display (fixes Windows path separator issues)
+                display_file_path = (
+                    os.path.normpath(display_file_path)
+                    if display_file_path
+                    else display_file_path
+                )
+                processing_file_path = (
+                    os.path.normpath(processing_file_path)
+                    if processing_file_path
+                    else processing_file_path
+                )
+
+                # Get icon for the display file
+                icon = icon_provider.icon(QFileInfo(display_file_path))
+                list_item = QListWidgetItem()
+
+                # Tooltip Generation
+                tooltip = ""
+                # If override is active, add the warning header on its own line
+                if is_override_active:
+                    tooltip += (
+                        "<b style='color: #ff9900;'>(Global Override Active)</b><br>"
+                    )
+
+                output_folder = get_val("output_folder")
+                # For plain .txt inputs we don't need to show a separate processing file
+                show_processing = True
+                try:
+                    if isinstance(
+                        display_file_path, str
+                    ) and display_file_path.lower().endswith(".txt"):
+                        show_processing = False
+                except Exception:
+                    show_processing = True
+
+                tooltip += f"<b>Input File:</b> {display_file_path}<br>"
+                if (
+                    show_processing
+                    and processing_file_path
+                    and processing_file_path != display_file_path
+                ):
+                    tooltip += f"<b>Processing File:</b> {processing_file_path}<br>"
+
+                tooltip += (
+                    f"<b>Language:</b> {get_val('lang_code')}<br>"
+                    f"<b>Speed:</b> {get_val('speed')}<br>"
+                    f"<b>Voice:</b> {get_val('voice')}<br>"
+                    f"<b>Save Option:</b> {get_val('save_option')}<br>"
+                )
+                if output_folder not in (None, "", "None"):
+                    tooltip += f"<b>Output Folder:</b> {output_folder}<br>"
+                tooltip += (
+                    f"<b>Subtitle Mode:</b> {get_val('subtitle_mode')}<br>"
+                    f"<b>Output Format:</b> {get_val('output_format')}<br>"
+                    f"<b>Characters:</b> {getattr(item, 'total_char_count', '')}<br>"
+                    f"<b>Replace Single Newlines:</b> {get_val('replace_single_newlines', True)}<br>"
+                    f"<b>Use Silent Gaps:</b> {get_val('use_silent_gaps', False)}<br>"
+                    f"<b>Speed Method:</b> {get_val('subtitle_speed_method', 'tts')}"
+                )
+                # Add book handler options if present (Preserve logic: specific to file structure)
+                save_chapters_separately = getattr(
+                    item, "save_chapters_separately", None
+                )
+                merge_chapters_at_end = getattr(item, "merge_chapters_at_end", None)
+                if save_chapters_separately is not None:
+                    tooltip += f"<br><b>Save chapters separately:</b> {'Yes' if save_chapters_separately else 'No'}"
+                    # Only show merge option if saving chapters separately
+                    if save_chapters_separately and merge_chapters_at_end is not None:
+                        tooltip += f"<br><b>Merge chapters at the end:</b> {'Yes' if merge_chapters_at_end else 'No'}"
+                list_item.setToolTip(tooltip)
+                list_item.setIcon(icon)
+                # Store both paths for context menu
+                list_item.setData(
+                    Qt.ItemDataRole.UserRole,
+                    {
+                        "display_path": display_file_path,
+                        "processing_path": processing_file_path,
+                    },
+                )
+                # Use custom widget for display
+                char_count = getattr(item, "total_char_count", 0)
+                widget = QueueListItemWidget(display_file_path, char_count)
+                self.listwidget.addItem(list_item)
+                self.listwidget.setItemWidget(list_item, widget)
+            self.update_button_states()
+        except Exception as e:
+            self.listwidget.clear()
             self.empty_overlay.show()
             self.update_button_states()
-            return
-        else:
-            self.empty_overlay.hide()
-
-        # Get current global settings and checkbox state for overrides
-        current_global_settings = self.get_current_attributes()
-        is_override_active = self.override_chk.isChecked()
-
-        icon_provider = QFileIconProvider()
-        for item in self.queue:
-            # Dynamic Attribute Retrieval Helper
-            def get_val(attr, default=""):
-                # If override is ON and attr is overrideable, use global setting
-                if is_override_active and attr in OVERRIDE_FIELDS:
-                    return current_global_settings.get(attr, default)
-                # Otherwise return the item's saved attribute
-                return getattr(item, attr, default)
-
-            # Determine display file path (prefer save_base_path for original file)
-            display_file_path = getattr(item, "save_base_path", None) or item.file_name
-            processing_file_path = item.file_name
-
-            # Normalize paths for consistent display (fixes Windows path separator issues)
-            display_file_path = (
-                os.path.normpath(display_file_path)
-                if display_file_path
-                else display_file_path
-            )
-            processing_file_path = (
-                os.path.normpath(processing_file_path)
-                if processing_file_path
-                else processing_file_path
-            )
-
-            # Only show the file name, not the full path
-            display_name = display_file_path
-
-            if os.path.sep in display_file_path:
-                display_name = os.path.basename(display_file_path)
-            # Get icon for the display file
-            icon = icon_provider.icon(QFileInfo(display_file_path))
-            list_item = QListWidgetItem()
-
-            # Tooltip Generation
-            tooltip = ""
-            # If override is active, add the warning header on its own line
-            if is_override_active:
-                tooltip += "<b style='color: #ff9900;'>(Global Override Active)</b><br>"
-
-            output_folder = get_val("output_folder")
-            # For plain .txt inputs we don't need to show a separate processing file
-            show_processing = True
-            try:
-                if isinstance(
-                    display_file_path, str
-                ) and display_file_path.lower().endswith(".txt"):
-                    show_processing = False
-            except Exception:
-                show_processing = True
-
-            tooltip += f"<b>Input File:</b> {display_file_path}<br>"
-            if (
-                show_processing
-                and processing_file_path
-                and processing_file_path != display_file_path
-            ):
-                tooltip += f"<b>Processing File:</b> {processing_file_path}<br>"
-
-            tooltip += (
-                f"<b>Language:</b> {get_val('lang_code')}<br>"
-                f"<b>Speed:</b> {get_val('speed')}<br>"
-                f"<b>Voice:</b> {get_val('voice')}<br>"
-                f"<b>Save Option:</b> {get_val('save_option')}<br>"
-            )
-            if output_folder not in (None, "", "None"):
-                tooltip += f"<b>Output Folder:</b> {output_folder}<br>"
-            tooltip += (
-                f"<b>Subtitle Mode:</b> {get_val('subtitle_mode')}<br>"
-                f"<b>Output Format:</b> {get_val('output_format')}<br>"
-                f"<b>Characters:</b> {getattr(item, 'total_char_count', '')}<br>"
-                f"<b>Replace Single Newlines:</b> {get_val('replace_single_newlines', True)}<br>"
-                f"<b>Use Silent Gaps:</b> {get_val('use_silent_gaps', False)}<br>"
-                f"<b>Speed Method:</b> {get_val('subtitle_speed_method', 'tts')}"
-            )
-            # Add book handler options if present (Preserve logic: specific to file structure)
-            save_chapters_separately = getattr(item, "save_chapters_separately", None)
-            merge_chapters_at_end = getattr(item, "merge_chapters_at_end", None)
-            if save_chapters_separately is not None:
-                tooltip += f"<br><b>Save chapters separately:</b> {'Yes' if save_chapters_separately else 'No'}"
-                # Only show merge option if saving chapters separately
-                if save_chapters_separately and merge_chapters_at_end is not None:
-                    tooltip += f"<br><b>Merge chapters at the end:</b> {'Yes' if merge_chapters_at_end else 'No'}"
-            list_item.setToolTip(tooltip)
-            list_item.setIcon(icon)
-            # Store both paths for context menu
-            list_item.setData(
-                Qt.ItemDataRole.UserRole,
-                {
-                    "display_path": display_file_path,
-                    "processing_path": processing_file_path,
-                },
-            )
-            # Use custom widget for display
-            char_count = getattr(item, "total_char_count", 0)
-            widget = QueueListItemWidget(display_file_path, char_count)
-            self.listwidget.addItem(list_item)
-            self.listwidget.setItemWidget(list_item, widget)
-        self.update_button_states()
+            self._show_unexpected_error("refresh the queue view", e)
 
     def remove_item(self):
         items = self.listwidget.selectedItems()
@@ -412,6 +480,61 @@ class QueueManager(QDialog):
                 del self.queue[row]
         self.process_queue()
         self.update_button_states()
+
+    def _get_selected_rows(self):
+        return sorted(
+            {self.listwidget.row(item) for item in self.listwidget.selectedItems()}
+        )
+
+    def _restore_selection(self, selected_rows):
+        self.listwidget.clearSelection()
+        valid_rows = [r for r in selected_rows if 0 <= r < self.listwidget.count()]
+        for row in valid_rows:
+            item = self.listwidget.item(row)
+            if item is not None:
+                item.setSelected(True)
+        if valid_rows:
+            self.listwidget.setCurrentRow(valid_rows[0])
+
+    def move_selected_up(self):
+        rows = self._get_selected_rows()
+        if not rows or rows[0] == 0:
+            return
+
+        for row in rows:
+            self.queue[row - 1], self.queue[row] = self.queue[row], self.queue[row - 1]
+
+        new_rows = [row - 1 for row in rows]
+        self.process_queue()
+        self._restore_selection(new_rows)
+
+    def move_selected_down(self):
+        rows = self._get_selected_rows()
+        if not rows or rows[-1] == len(self.queue) - 1:
+            return
+
+        for row in reversed(rows):
+            self.queue[row + 1], self.queue[row] = self.queue[row], self.queue[row + 1]
+
+        new_rows = [row + 1 for row in rows]
+        self.process_queue()
+        self._restore_selection(new_rows)
+
+    def move_selected_to_top(self):
+        rows = self._get_selected_rows()
+        if not rows or rows[0] == 0:
+            return
+
+        selected_set = set(rows)
+        selected_items = [self.queue[row] for row in rows]
+        remaining_items = [
+            item for idx, item in enumerate(self.queue) if idx not in selected_set
+        ]
+        self.queue[:] = selected_items + remaining_items
+
+        new_rows = list(range(len(rows)))
+        self.process_queue()
+        self._restore_selection(new_rows)
 
     def clear_queue(self):
         from PyQt6.QtWidgets import QMessageBox
@@ -523,12 +646,15 @@ class QueueManager(QDialog):
         return attrs
 
     def add_files_from_paths(self, file_paths):
-        from abogen.subtitle_utils import calculate_text_length
-        from PyQt6.QtWidgets import QMessageBox
         import os
+
+        from PyQt6.QtWidgets import QMessageBox
+
+        from abogen.subtitle_utils import calculate_text_length
 
         current_attrs = self.get_current_attributes()
         duplicates = []
+        char_count_failures = []
         for file_path in file_paths:
 
             class QueueItem:
@@ -549,8 +675,14 @@ class QueueManager(QDialog):
                 with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
                     file_content = f.read()
                 item.total_char_count = calculate_text_length(file_content)
-            except Exception:
+            except Exception as e:
                 item.total_char_count = 0
+                char_count_failures.append(os.path.basename(file_path) or file_path)
+                logger.warning(
+                    "Could not read file for character count; defaulting to 0: %s (%s)",
+                    file_path,
+                    e,
+                )
             # Prevent adding duplicate items to the queue (check all attributes)
             is_duplicate = False
             for queued_item in self.queue:
@@ -598,6 +730,19 @@ class QueueManager(QDialog):
                 "Duplicate Item(s)",
                 f"Skipping {len(duplicates)} file(s) with the same attributes, already in the queue.",
             )
+        if len(char_count_failures) >= CHAR_COUNT_FAILURE_WARNING_THRESHOLD:
+            max_names_to_show = 5
+            listed_names = "\n".join(char_count_failures[:max_names_to_show])
+            remaining = len(char_count_failures) - max_names_to_show
+            if remaining > 0:
+                listed_names += f"\n... and {remaining} more"
+            QMessageBox.warning(
+                self,
+                "Character Count Warning",
+                f"Could not read {len(char_count_failures)} file(s) to estimate character count.\n"
+                "Those items were added with character count set to 0.\n\n"
+                f"Examples:\n{listed_names}",
+            )
         self.process_queue()
         self.update_button_states()
 
@@ -622,27 +767,57 @@ class QueueManager(QDialog):
 
     def update_button_states(self):
         # Enable Remove if at least one item is selected, else disable
+        selected_rows = self._get_selected_rows()
+        selected_count = len(selected_rows)
+        queue_count = len(self.queue)
+
         if hasattr(self, "remove_button"):
-            selected_count = len(self.listwidget.selectedItems())
             self.remove_button.setEnabled(selected_count > 0)
             if selected_count > 1:
                 self.remove_button.setText(f"Remove selected ({selected_count})")
             else:
                 self.remove_button.setText("Remove selected")
+
+        if hasattr(self, "move_top_button"):
+            self.move_top_button.setEnabled(selected_count > 0 and selected_rows[0] > 0)
+
+        if hasattr(self, "move_up_button"):
+            self.move_up_button.setEnabled(selected_count > 0 and selected_rows[0] > 0)
+
+        if hasattr(self, "move_down_button"):
+            self.move_down_button.setEnabled(
+                selected_count > 0 and selected_rows[-1] < queue_count - 1
+            )
+
         # Disable Clear if queue is empty
         if hasattr(self, "clear_button"):
             self.clear_button.setEnabled(bool(self.queue))
 
     def show_context_menu(self, pos):
-        from PyQt6.QtWidgets import QMenu
-        from PyQt6.QtGui import QAction, QDesktopServices
-        from PyQt6.QtCore import QUrl
         import os
+
+        from PyQt6.QtCore import QUrl
+        from PyQt6.QtGui import QAction, QDesktopServices
+        from PyQt6.QtWidgets import QMenu
 
         global_pos = self.listwidget.viewport().mapToGlobal(pos)
         selected_items = self.listwidget.selectedItems()
         menu = QMenu(self)
         if len(selected_items) == 1:
+            move_top_action = QAction("Move to top", self)
+            move_top_action.triggered.connect(self.move_selected_to_top)
+            menu.addAction(move_top_action)
+
+            move_up_action = QAction("Move up", self)
+            move_up_action.triggered.connect(self.move_selected_up)
+            menu.addAction(move_up_action)
+
+            move_down_action = QAction("Move down", self)
+            move_down_action.triggered.connect(self.move_selected_down)
+            menu.addAction(move_down_action)
+
+            menu.addSeparator()
+
             # Add Remove action
             remove_action = QAction("Remove this item", self)
             remove_action.triggered.connect(self.remove_item)
@@ -835,6 +1010,20 @@ class QueueManager(QDialog):
                 menu.addAction(go_to_folder_action)
 
         elif len(selected_items) > 1:
+            move_top_action = QAction("Move selected to top", self)
+            move_top_action.triggered.connect(self.move_selected_to_top)
+            menu.addAction(move_top_action)
+
+            move_up_action = QAction("Move selected up", self)
+            move_up_action.triggered.connect(self.move_selected_up)
+            menu.addAction(move_up_action)
+
+            move_down_action = QAction("Move selected down", self)
+            move_down_action.triggered.connect(self.move_selected_down)
+            menu.addAction(move_down_action)
+
+            menu.addSeparator()
+
             remove_action = QAction(f"Remove selected ({len(selected_items)})", self)
             remove_action.triggered.connect(self.remove_item)
             menu.addAction(remove_action)
@@ -848,7 +1037,7 @@ class QueueManager(QDialog):
         # Save the override state to config so it persists globally
         self.config["queue_override_settings"] = self.override_chk.isChecked()
         save_config(self.config)
-        
+
         super().accept()
 
     def reject(self):
@@ -877,5 +1066,15 @@ class QueueManager(QDialog):
 
         if event.key() == Qt.Key.Key_Delete:
             self.remove_item()
+        elif event.modifiers() == Qt.KeyboardModifier.AltModifier:
+            if event.key() == Qt.Key.Key_Up:
+                self.move_selected_up()
+                return
+            if event.key() == Qt.Key.Key_Down:
+                self.move_selected_down()
+                return
+            if event.key() == Qt.Key.Key_Home:
+                self.move_selected_to_top()
+                return
         else:
             super().keyPressEvent(event)

@@ -1,52 +1,74 @@
-import os
-import re
-import time
 import hashlib  # For generating unique cache filenames
-from platformdirs import user_desktop_dir
-from PyQt6.QtCore import QThread, pyqtSignal, Qt, QTimer
-from PyQt6.QtWidgets import QCheckBox, QVBoxLayout, QDialog, QLabel, QDialogButtonBox
+import logging
+import os
+import platform
+import re
+import subprocess
+import threading  # for efficient waiting
+import time
+
 import soundfile as sf
-from abogen.utils import (
-    create_process,
-    get_user_cache_path,
-    detect_encoding,
-)
+import static_ffmpeg
+from platformdirs import user_desktop_dir
+from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
+from PyQt6.QtWidgets import QCheckBox, QDialog, QDialogButtonBox, QLabel, QVBoxLayout
+
+import abogen.hf_tracker as hf_tracker
 from abogen.constants import (
-    LANGUAGE_DESCRIPTIONS,
-    SAMPLE_VOICE_TEXTS,
-    COLORS,
     CHAPTER_OPTIONS_COUNTDOWN,
-    SUBTITLE_FORMATS,
+    COLORS,
+    LANGUAGE_DESCRIPTIONS,
     SUPPORTED_SOUND_FORMATS,
     SUPPORTED_SUBTITLE_FORMATS,
 )
+from abogen.subtitle_utils import (
+    _CHAPTER_MARKER_SEARCH_PATTERN,
+    clean_text,
+    get_sample_voice_text,
+    parse_ass_file,
+    parse_srt_file,
+    parse_timestamp_text_file,
+    parse_vtt_file,
+    sanitize_name_for_os,
+    split_text_by_voice_markers,
+)
+from abogen.utils import (
+    create_process,
+    detect_encoding,
+    get_user_cache_path,
+)
 from abogen.voice_formulas import get_new_voice
-import abogen.hf_tracker as hf_tracker
-import static_ffmpeg
-import threading  # for efficient waiting
-import subprocess
-import platform
+
+
+class _SuppressPhonemizerWordsMismatchFilter(logging.Filter):
+    """Hide noisy phonemizer word-count mismatch summary warnings."""
+
+    _PREFIX = "words count mismatch on "
+
+    def filter(self, record):
+        message = record.getMessage()
+        return not message.startswith(self._PREFIX)
+
+
+_PHONEMIZER_WARNING_FILTER_INSTALLED = False
+
+
+def _install_phonemizer_warning_filter():
+    """Install a one-time filter on the phonemizer logger."""
+    global _PHONEMIZER_WARNING_FILTER_INSTALLED
+    if _PHONEMIZER_WARNING_FILTER_INSTALLED:
+        return
+
+    logger = logging.getLogger("phonemizer")
+    logger.addFilter(_SuppressPhonemizerWordsMismatchFilter())
+    _PHONEMIZER_WARNING_FILTER_INSTALLED = True
+
 
 # Configuration constants
 _USER_RESPONSE_TIMEOUT = (
     0.1  # Timeout in seconds for checking user response/cancellation
 )
 
-from abogen.subtitle_utils import (
-    clean_text,
-    parse_srt_file,
-    parse_vtt_file,
-    detect_timestamps_in_text,
-    parse_timestamp_text_file,
-    parse_ass_file,
-    get_sample_voice_text,
-    sanitize_name_for_os,
-    _CHAPTER_MARKER_SEARCH_PATTERN,
-    _VOICE_MARKER_PATTERN,
-    _VOICE_MARKER_SEARCH_PATTERN,
-    split_text_by_voice_markers,
-    validate_voice_name,
-)
 
 class CountdownDialog(QDialog):
     """Base dialog with auto-accept countdown functionality"""
@@ -206,6 +228,9 @@ class TimestampDetectionDialog(QDialog):
 
 class ConversionThread(QThread):
     progress_updated = pyqtSignal(int, str)  # Add str for ETR
+    chapter_progress_updated = pyqtSignal(
+        int, int, str
+    )  # completed, total, current chapter
     conversion_finished = pyqtSignal(object, object)  # Pass output path as second arg
     log_updated = pyqtSignal(object)  # Updated signal for log updates
     chapters_detected = pyqtSignal(int)  # Signal for chapter detection
@@ -360,7 +385,7 @@ class ConversionThread(QThread):
                 if (i % 20 == 0 or is_last) and len(segments) > 1:
                     progress_percent = int((samples_processed / total_samples) * 100)
                     self.log_updated.emit(
-                        f"{progress_prefix} segment {i+1}/{len(segments)} ({progress_percent}% complete)"
+                        f"{progress_prefix} segment {i + 1}/{len(segments)} ({progress_percent}% complete)"
                     )
 
                 # Process this segment
@@ -380,6 +405,7 @@ class ConversionThread(QThread):
         return samples_processed
 
     def run(self):
+        _install_phonemizer_warning_filter()
         print(
             f"\nVoice: {self.voice}\nLanguage: {self.lang_code}\nSpeed: {self.speed}\nGPU: {self.use_gpu}\nFile: {self.file_name}\nSubtitle mode: {self.subtitle_mode}\nOutput format: {self.output_format}\nSave option: {self.save_option}\n"
         )
@@ -608,7 +634,9 @@ class ConversionThread(QThread):
 
             for chapter_name, chapter_text in chapters:
                 # Use current_voice as the starting voice for this chapter
-                voice_segments, last_voice, valid_count, invalid_count = split_text_by_voice_markers(chapter_text, current_voice)
+                voice_segments, last_voice, valid_count, invalid_count = (
+                    split_text_by_voice_markers(chapter_text, current_voice)
+                )
                 chapters_with_voices.append((chapter_name, voice_segments))
 
                 # Update current_voice so next chapter continues with this voice
@@ -624,12 +652,18 @@ class ConversionThread(QThread):
                 if total_invalid_markers == 0:
                     # All markers were valid
                     self.log_updated.emit(
-                        (f"\nDetected {total_markers} voice marker(s) - all valid", "grey")
+                        (
+                            f"\nDetected {total_markers} voice marker(s) - all valid",
+                            "grey",
+                        )
                     )
                 else:
                     # Some markers were invalid
                     self.log_updated.emit(
-                        (f"\nDetected {total_markers} voice marker(s) - {total_valid_markers} valid, {total_invalid_markers} invalid (using previous voice)", "orange")
+                        (
+                            f"\nDetected {total_markers} voice marker(s) - {total_valid_markers} valid, {total_invalid_markers} invalid (using previous voice)",
+                            "orange",
+                        )
                     )
 
             # Replace chapters with the new structure
@@ -650,7 +684,6 @@ class ConversionThread(QThread):
                 )
                 and not self.chapter_options_set
             ):
-
                 # Emit signal to main thread and wait
                 self.chapters_detected.emit(total_chapters)
                 self._chapter_options_event.wait()
@@ -662,13 +695,16 @@ class ConversionThread(QThread):
             # Log all detected chapters at the beginning
             if total_chapters > 1:
                 chapter_list = "\n".join(
-                    [f"{i+1}) {c[0]}" for i, c in enumerate(chapters)]
+                    [f"{i + 1}) {c[0]}" for i, c in enumerate(chapters)]
                 )
                 self.log_updated.emit(
                     (f"\nDetected chapters ({total_chapters}):\n" + chapter_list)
                 )
             else:
                 self.log_updated.emit((f"\nProcessing {chapters[0][0]}...", "grey"))
+
+            if total_chapters > 1:
+                self.chapter_progress_updated.emit(0, total_chapters, chapters[0][0])
 
             # If save_chapters_separately is enabled, find a unique suffix ONCE and use for both folder and merged file
             save_chapters_separately = getattr(self, "save_chapters_separately", False)
@@ -934,6 +970,9 @@ class ConversionThread(QThread):
                 chapter_subtitle_file = None
                 chapter_subtitle_path = None
                 if total_chapters > 1:
+                    self.chapter_progress_updated.emit(
+                        chapter_idx - 1, total_chapters, chapter_name
+                    )
                     self.log_updated.emit(
                         (
                             f"\nChapter {chapter_idx}/{total_chapters}: {chapter_name}",
@@ -1058,7 +1097,7 @@ class ConversionThread(QThread):
                             )
                             chapter_subtitle_margin = "90" if is_narrow else ""
                             chapter_subtitle_alignment_tag = (
-                                f"{{\\an5}}" if is_centered else ""
+                                "{{\\an5}}" if is_centered else ""
                             )
                     else:
                         chapter_subtitle_file = None
@@ -1066,18 +1105,28 @@ class ConversionThread(QThread):
                     chapter_subtitle_path = None
                     chapter_subtitle_file = None
 
-
                 # Process each voice segment within the chapter
-                for segment_idx, (voice_name, segment_text) in enumerate(voice_segments):
+                for segment_idx, (voice_name, segment_text) in enumerate(
+                    voice_segments
+                ):
                     # Load voice for this segment (with caching)
                     try:
                         loaded_voice = self.load_voice_cached(voice_name, tts)
                         if segment_idx > 0:
-                            voice_display = voice_name if len(voice_name) < 50 else voice_name[:47] + "..."
-                            self.log_updated.emit((f"  → Voice: {voice_display}", "grey"))
+                            voice_display = (
+                                voice_name
+                                if len(voice_name) < 50
+                                else voice_name[:47] + "..."
+                            )
+                            self.log_updated.emit(
+                                (f"  → Voice: {voice_display}", "grey")
+                            )
                     except Exception:
                         self.log_updated.emit(
-                            (f"⚠ Voice loading error for '{voice_name}', continuing with previous", "orange")
+                            (
+                                f"⚠ Voice loading error for '{voice_name}', continuing with previous",
+                                "orange",
+                            )
                         )
                         if segment_idx == 0:
                             loaded_voice = self.load_voice_cached(self.voice, tts)
@@ -1125,7 +1174,10 @@ class ConversionThread(QThread):
                     if use_spacy and self.lang_code not in ["a", "b"]:
                         # Non-English: use spaCy for pre-TTS segmentation
                         self.log_updated.emit(
-                            ("\nUsing spaCy for sentence segmentation (pre-TTS)...", "grey")
+                            (
+                                "\nUsing spaCy for sentence segmentation (pre-TTS)...",
+                                "grey",
+                            )
                         )
                         from abogen.spacy_utils import segment_sentences
 
@@ -1156,7 +1208,9 @@ class ConversionThread(QThread):
                             )
 
                     # Process text - either as spaCy sentences or as single text
-                    text_segments = spacy_sentences if spacy_sentences else [segment_text]
+                    text_segments = (
+                        spacy_sentences if spacy_sentences else [segment_text]
+                    )
 
                     # Print active split pattern used by the TTS engine once for this batch
                     try:
@@ -1200,7 +1254,9 @@ class ConversionThread(QThread):
                                         result.audio.numpy().astype("float32").tobytes()
                                     )
                                 else:
-                                    audio_bytes = result.audio.astype("float32").tobytes()
+                                    audio_bytes = result.audio.astype(
+                                        "float32"
+                                    ).tobytes()
                                 ffmpeg_proc.stdin.write(audio_bytes)
                             if chapter_out_file:
                                 chapter_out_file.write(result.audio)
@@ -1210,7 +1266,9 @@ class ConversionThread(QThread):
                                         result.audio.numpy().astype("float32").tobytes()
                                     )
                                 else:
-                                    audio_bytes = result.audio.astype("float32").tobytes()
+                                    audio_bytes = result.audio.astype(
+                                        "float32"
+                                    ).tobytes()
                                 chapter_ffmpeg_proc.stdin.write(audio_bytes)
                             # Subtitle logic
                             if self.subtitle_mode != "Disabled":
@@ -1298,7 +1356,8 @@ class ConversionThread(QThread):
                                         chapter_tokens_with_timestamps,
                                         new_chapter_entries,
                                         self.max_subtitle_words,
-                                        fallback_end_time=chapter_current_time + chunk_dur,
+                                        fallback_end_time=chapter_current_time
+                                        + chunk_dur,
                                     )
                                     if chapter_subtitle_file:
                                         subtitle_format = getattr(
@@ -1335,7 +1394,9 @@ class ConversionThread(QThread):
                             # Calculate percentage based on characters processed
                             percent = min(
                                 int(
-                                    self.processed_char_count / self.total_char_count * 100
+                                    self.processed_char_count
+                                    / self.total_char_count
+                                    * 100
                                 ),
                                 99,
                             )
@@ -1414,6 +1475,10 @@ class ConversionThread(QThread):
                             "green",
                         )
                     )
+                if total_chapters > 1:
+                    self.chapter_progress_updated.emit(
+                        chapter_idx, total_chapters, chapter_name
+                    )
             # Finalize merged output file ONLY if merging
             if merge_chapters_at_end:
                 self.log_updated.emit(("\nFinalizing audio. Please wait...", "grey"))
@@ -1431,8 +1496,8 @@ class ConversionThread(QThread):
                                 chapter_title = chapter["chapter"].replace("=", "\\=")
                                 f.write(f"[CHAPTER]\n")
                                 f.write(f"TIMEBASE=1/1000\n")
-                                f.write(f"START={int(chapter['start']*1000)}\n")
-                                f.write(f"END={int(chapter['end']*1000)}\n")
+                                f.write(f"START={int(chapter['start'] * 1000)}\n")
+                                f.write(f"END={int(chapter['end'] * 1000)}\n")
                                 f.write(f"title={chapter_title}\n\n")
                         # Fast mux chapters into m4b (write to temp file, then replace original)
                         static_ffmpeg.add_paths()
@@ -1966,7 +2031,7 @@ class ConversionThread(QThread):
                 etr_str = (
                     "Processing..."
                     if elapsed <= 0.5
-                    else f"{int(elapsed*(len(subtitles)-idx)/idx)//3600:02d}:{(int(elapsed*(len(subtitles)-idx)/idx)%3600)//60:02d}:{int(elapsed*(len(subtitles)-idx)/idx)%60:02d}"
+                    else f"{int(elapsed * (len(subtitles) - idx) / idx) // 3600:02d}:{(int(elapsed * (len(subtitles) - idx) / idx) % 3600) // 60:02d}:{int(elapsed * (len(subtitles) - idx) / idx) % 60:02d}"
                 )
                 self.progress_updated.emit(percent, etr_str)
 
@@ -2477,13 +2542,13 @@ class VoicePreviewThread(QThread):
         return os.path.join(self.cache_dir, filename)
 
     def run(self):
+        _install_phonemizer_warning_filter()
         print(
             f"\nVoice: {self.voice}\nLanguage: {self.lang_code}\nSpeed: {self.speed}\nGPU: {self.use_gpu}\n"
         )
 
         # Generate the preview and save to cache
         try:
-
             # Set device based on use_gpu setting and platform
             if self.use_gpu:
                 if platform.system() == "Darwin" and platform.processor() == "arm":
@@ -2528,8 +2593,9 @@ class PlayAudioThread(QThread):
 
     def run(self):
         try:
-            import pygame
             import time as _time
+
+            import pygame
 
             pygame.mixer.init()
             pygame.mixer.music.load(self.wav_path)

@@ -1,94 +1,104 @@
+import base64
+import hashlib  # Added for cache path generation
+import html
 import os
-import time
+import platform
+import re
 import sys
 import tempfile
-import platform
-import base64
-import re
-from abogen.pyqt.queue_manager_gui import QueueManager
-from abogen.pyqt.queued_item import QueuedItem
-import abogen.hf_tracker as hf_tracker
-import hashlib  # Added for cache path generation
-from PyQt6.QtWidgets import (
-    QApplication,
-    QWidget,
-    QVBoxLayout,
-    QHBoxLayout,
-    QPushButton,
-    QComboBox,
-    QTextEdit,
-    QLabel,
-    QSlider,
-    QMessageBox,
-    QFileDialog,
-    QProgressBar,
-    QFrame,
-    QStyleFactory,
-    QInputDialog,
-    QFileIconProvider,
-    QSizePolicy,
-    QDialog,
-    QCheckBox,
-    QMenu,
-)
-from PyQt6.QtGui import QAction, QActionGroup
+import threading
+import time
+
 from PyQt6.QtCore import (
-    Qt,
-    QUrl,
-    QPoint,
-    QFileInfo,
-    QThread,
-    pyqtSignal,
-    QObject,
     QBuffer,
-    QIODevice,
-    QSize,
-    QTimer,
     QEvent,
+    QFileInfo,
+    QIODevice,
+    QObject,
+    QPoint,
     QProcess,
+    QSize,
+    Qt,
+    QThread,
+    QTimer,
+    QUrl,
+    pyqtSignal,
 )
 from PyQt6.QtGui import (
-    QTextCursor,
+    QAction,
+    QActionGroup,
+    QColor,
     QDesktopServices,
     QIcon,
-    QPixmap,
-    QPainter,
-    QPolygon,
-    QColor,
     QMovie,
+    QPainter,
     QPalette,
+    QPixmap,
+    QPolygon,
+    QTextCursor,
+)
+from PyQt6.QtWidgets import (
+    QApplication,
+    QButtonGroup,
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QFileDialog,
+    QFileIconProvider,
+    QFrame,
+    QHBoxLayout,
+    QInputDialog,
+    QLabel,
+    QMenu,
+    QMessageBox,
+    QProgressBar,
+    QPushButton,
+    QRadioButton,
+    QSizePolicy,
+    QSlider,
+    QStyleFactory,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
+
+import abogen.hf_tracker as hf_tracker
+from abogen.constants import (
+    COLORS,
+    GITHUB_URL,
+    LANGUAGE_DESCRIPTIONS,
+    PROGRAM_DESCRIPTION,
+    PROGRAM_NAME,
+    SUBTITLE_FORMATS,
+    SUPPORTED_LANGUAGES_FOR_SUBTITLE_GENERATION,
+    VERSION,
+    VOICES_INTERNAL,
+)
+from abogen.pyqt.book_handler import HandlerDialog
+from abogen.pyqt.conversion import (
+    ChapterOptionsDialog,
+    ConversionThread,
+    PlayAudioThread,
+    TimestampDetectionDialog,
+    VoicePreviewThread,
+)
+from abogen.pyqt.queue_manager_gui import QueueManager
+from abogen.pyqt.queued_item import QueuedItem
+from abogen.pyqt.voice_formula_gui import VoiceFormulaDialog
+from abogen.subtitle_utils import (
+    calculate_text_length,
+    clean_text,
 )
 from abogen.utils import (
-    load_config,
-    save_config,
+    LoadPipelineThread,
     get_gpu_acceleration,
-    prevent_sleep_start,
-    prevent_sleep_end,
     get_resource_path,
     get_user_cache_path,
-    LoadPipelineThread,
+    load_config,
+    prevent_sleep_end,
+    prevent_sleep_start,
+    save_config,
 )
-
-from abogen.subtitle_utils import (
-    clean_text,
-    calculate_text_length,
-)
-
-from abogen.pyqt.conversion import ConversionThread, VoicePreviewThread, PlayAudioThread, ChapterOptionsDialog, TimestampDetectionDialog
-from abogen.pyqt.book_handler import HandlerDialog
-from abogen.constants import (
-    PROGRAM_NAME,
-    VERSION,
-    GITHUB_URL,
-    PROGRAM_DESCRIPTION,
-    LANGUAGE_DESCRIPTIONS,
-    VOICES_INTERNAL,
-    SUPPORTED_LANGUAGES_FOR_SUBTITLE_GENERATION,
-    COLORS,
-    SUBTITLE_FORMATS,
-)
-import threading
-from abogen.pyqt.voice_formula_gui import VoiceFormulaDialog
 from abogen.voice_profiles import load_profiles
 
 # Import ctypes for Windows-specific taskbar icon
@@ -145,6 +155,17 @@ LOG_COLOR_MAP = {
     None: COLORS["LIGHT_DISABLED"],
 }
 
+# Strictly match known conversion story line formats emitted by ConversionThread.
+STORY_CHAR_PROGRESS_RE = re.compile(
+    r"^\s*\d{1,3}(?:,\d{3})*/\d{1,3}(?:,\d{3})*:\s+"
+)
+STORY_SUBTITLE_PROGRESS_RE = re.compile(
+    r"^\s*\[\d+/\d+\]\s+\d{2}:\d{2}:\d{2}(?:,\d{3})?\s+-\s+(?:AUTO|\d{2}:\d{2}:\d{2}(?:,\d{3})?):\s+"
+)
+STORY_PREFIX_RE = re.compile(
+    r"^(\s*)(\d{1,3}(?:,\d{3})*/\d{1,3}(?:,\d{3})*:|\[\d+/\d+\])\s+"
+)
+
 
 class InputBox(QLabel):
     # Define CSS styles as class constants
@@ -189,13 +210,13 @@ class InputBox(QLabel):
         # Add Textbox button with no padding
         self.textbox_btn = QPushButton("Textbox", self)
         self.textbox_btn.setStyleSheet("QPushButton { padding: 6px 10px; }")
-        self.textbox_btn.setToolTip("Input text directly instead of using a file")
+        self.textbox_btn.setToolTip("Enter text directly instead of selecting a file.")
         self.textbox_btn.clicked.connect(self.on_textbox_clicked)
 
         # Add Edit button matching the textbox button
         self.edit_btn = QPushButton("Edit", self)
         self.edit_btn.setStyleSheet("QPushButton { padding: 6px 10px; }")
-        self.edit_btn.setToolTip("Edit the current text file")
+        self.edit_btn.setToolTip("Edit the currently selected text file.")
         self.edit_btn.clicked.connect(self.on_edit_clicked)
         self.edit_btn.hide()
 
@@ -203,7 +224,7 @@ class InputBox(QLabel):
         self.go_to_folder_btn = QPushButton("Go to folder", self)
         self.go_to_folder_btn.setStyleSheet("QPushButton { padding: 6px 10px; }")
         self.go_to_folder_btn.setToolTip(
-            "Open the folder that contains the converted file"
+            "Open the folder containing the current output file."
         )
         self.go_to_folder_btn.clicked.connect(self.on_go_to_folder_clicked)
         self.go_to_folder_btn.hide()
@@ -658,15 +679,19 @@ class TextboxDialog(QDialog):
 
         self.save_as_button = QPushButton("Save as text", self)
         self.save_as_button.clicked.connect(self.save_as_text)
-        self.save_as_button.setToolTip("Save the current text to a file")
+        self.save_as_button.setToolTip("Save the current text as a .txt file.")
 
         self.insert_chapter_btn = QPushButton("Insert Chapter Marker", self)
-        self.insert_chapter_btn.setToolTip("Insert a chapter marker at the cursor")
+        self.insert_chapter_btn.setToolTip(
+            "Insert a chapter marker at the cursor position."
+        )
         self.insert_chapter_btn.clicked.connect(self.insert_chapter_marker)
         button_layout.addWidget(self.insert_chapter_btn)
 
         self.insert_voice_btn = QPushButton("Insert Voice Marker", self)
-        self.insert_voice_btn.setToolTip("Insert a voice change marker at the cursor position")
+        self.insert_voice_btn.setToolTip(
+            "Insert a voice-change marker at the cursor position."
+        )
         self.insert_voice_btn.clicked.connect(self.insert_voice_marker)
         button_layout.addWidget(self.insert_voice_btn)
 
@@ -778,7 +803,7 @@ class TextboxDialog(QDialog):
         # Use the currently selected voice as the default
         try:
             parent_window = self.parent()
-            if parent_window and hasattr(parent_window, 'selected_voice'):
+            if parent_window and hasattr(parent_window, "selected_voice"):
                 default_voice = parent_window.selected_voice or "af_heart"
             else:
                 default_voice = "af_heart"
@@ -830,14 +855,28 @@ class WordSubstitutionsDialog(QDialog):
 
         # Instructions
         instructions = QLabel(
-            "Enter word substitutions (one per line) in format: Word|NewWord\n"
-            "  - If nothing after |, the word will be erased completely\n"
-            "  - Substitutions match whole words only (e.g., \"tree\" won't match \"trees\" but will match \"tree's\")\n"
-            "  - By default, matching is case-insensitive (e.g., \"gonna\" matches \"Gonna\", \"GONNA\", etc.)",
+            """
+            <div>
+              <p><b>Word substitutions format</b></p>
+              <p>Enter one substitution per line.</p>
+              <p>Example format to follow: <code>Old_Word|Replacement_Word</code></p>
+              <ul style=\"margin-top: 4px; margin-bottom: 0;\">
+                <li>If nothing comes after <code>|</code>, the word will be completely removed.</li>
+                <li>Substitutions match whole words only (for example, <code>tree</code> will not match <code>trees</code> but will match <code>tree's</code>).</li>
+                <li>By default, matching is case-insensitive (for example, <code>gonna</code> matches <code>Gonna</code>, <code>GONNA</code>, etc.).</li>
+              </ul>
+            </div>
+            """,
             self,
         )
+        instructions.setTextFormat(Qt.TextFormat.RichText)
+        is_dark_theme = (
+            self.palette().color(QPalette.ColorRole.Window).lightness() < 128
+        )
+        instructions_bg = COLORS["DARK_BASE"] if is_dark_theme else "#f0f0f0"
+        instructions_fg = "#f5f5f5" if is_dark_theme else "#111111"
         instructions.setStyleSheet(
-            "padding: 10px; background-color: #f0f0f0; border-radius: 5px;"
+            f"padding: 10px; background-color: {instructions_bg}; color: {instructions_fg}; border-radius: 5px;"
         )
         instructions.setWordWrap(True)
         layout.addWidget(instructions)
@@ -850,9 +889,7 @@ class WordSubstitutionsDialog(QDialog):
         layout.addWidget(self.text_edit)
 
         # Checkboxes
-        self.case_sensitive_checkbox = QCheckBox(
-            "Case-sensitive word matching", self
-        )
+        self.case_sensitive_checkbox = QCheckBox("Case-sensitive word matching", self)
         self.case_sensitive_checkbox.setChecked(initial_case_sensitive)
         layout.addWidget(self.case_sensitive_checkbox)
 
@@ -861,7 +898,8 @@ class WordSubstitutionsDialog(QDialog):
         layout.addWidget(self.caps_checkbox)
 
         self.numerals_checkbox = QCheckBox(
-            "Replace Numerals with Words (e.g., 309 \u2192 three hundred and nine)", self
+            "Replace Numerals with Words (e.g., 309 \u2192 three hundred and nine)",
+            self,
         )
         self.numerals_checkbox.setChecked(initial_numerals)
         layout.addWidget(self.numerals_checkbox)
@@ -916,6 +954,7 @@ class abogen(QWidget):
         self.check_updates = self.config.get("check_updates", True)
         self.save_option = self.config.get("save_option", "Save next to input file")
         self.selected_output_folder = self.config.get("selected_output_folder", None)
+        self.last_input_folder = self.config.get("last_input_folder", "")
         self.selected_file = self.selected_file_type = self.selected_book_path = None
         self.displayed_file_path = (
             None  # Add new variable to track the displayed file path
@@ -951,7 +990,8 @@ class abogen(QWidget):
             "separate_chapters_format", "wav"
         )  # Format for individual chapter files
         self.use_gpu = self.config.get(
-            "use_gpu", True  # Load GPU setting with default True
+            "use_gpu",
+            True,  # Load GPU setting with default True
         )
         self.replace_single_newlines = self.config.get("replace_single_newlines", True)
         self.use_silent_gaps = self.config.get("use_silent_gaps", True)
@@ -997,7 +1037,7 @@ class abogen(QWidget):
         self.current_queue_index = 0
 
         self.initUI()
-        self.speed_slider.setValue(int(self.config.get("speed", 1.00) * 100))
+        self.set_speed_slider_from_config(self.config.get("speed", 1.00))
         self.update_speed_label()
         # Set initial selection: prefer profile, else voice
         idx = -1
@@ -1025,7 +1065,7 @@ class abogen(QWidget):
         # Enable/disable subtitle options based on selected language (profile or voice)
         enable = self.selected_lang in SUPPORTED_LANGUAGES_FOR_SUBTITLE_GENERATION
         self.subtitle_combo.setEnabled(enable)
-        self.subtitle_format_combo.setEnabled(enable)
+        self._sync_subtitle_format_enabled_state()
         # loading gif for preview button
         loading_gif_path = get_resource_path("abogen.assets", "loading.gif")
         if loading_gif_path:
@@ -1086,7 +1126,28 @@ class abogen(QWidget):
         self.log_text.setUndoRedoEnabled(False)
         self.log_text.setFrameStyle(QFrame.Shape.NoFrame)
         self.log_text.setStyleSheet("QTextEdit { border: none; }")
+        self.log_header_widget = QWidget(self)
+        log_header_layout = QHBoxLayout(self.log_header_widget)
+        log_header_layout.setContentsMargins(0, 0, 0, 0)
+        log_header_layout.setSpacing(8)
+        self.log_header_label = QLabel("TTS Conversion", self)
+        self.log_header_label.setStyleSheet("font-size: 18px;")
+        log_header_layout.addWidget(self.log_header_label)
+        log_header_layout.addStretch(1)
+        self.btn_toggle_story = QPushButton("Hide story text", self)
+        self.btn_toggle_story.setFixedHeight(28)
+        self.btn_toggle_story.clicked.connect(self.toggle_story_visibility)
+        log_header_layout.addWidget(self.btn_toggle_story)
+        self.btn_toggle_log = QPushButton("Collapse", self)
+        self.btn_toggle_log.setFixedHeight(28)
+        self.btn_toggle_log.clicked.connect(self.toggle_log_text_visibility)
+        log_header_layout.addWidget(self.btn_toggle_log)
+        self.log_text_collapsed = False
+        self.story_text_visible = True
+        self.log_message_buffer = []
+        self.log_header_widget.hide()
         self.log_text.hide()
+        container_layout.addWidget(self.log_header_widget)
         container_layout.addWidget(self.log_text, 1)
         controls_layout = QVBoxLayout()
         controls_layout.setContentsMargins(0, 10, 0, 0)
@@ -1097,16 +1158,41 @@ class abogen(QWidget):
         speed_layout.addWidget(QLabel("Speed:", self))
         self.speed_slider = QSlider(Qt.Orientation.Horizontal, self)
         self.speed_slider.setMinimum(10)
-        self.speed_slider.setMaximum(200)
+        self.speed_slider.setMaximum(300)
         self.speed_slider.setValue(100)
         self.speed_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
-        self.speed_slider.setTickInterval(5)
-        self.speed_slider.setSingleStep(5)
+        self.speed_slider.setToolTip(
+            "Set speaking speed from 0.10x to 3.00x. 1.00x is normal speed."
+        )
         speed_layout.addWidget(self.speed_slider)
         self.speed_label = QLabel("1.0", self)
         speed_layout.addWidget(self.speed_label)
+        speed_step_size_layout = QHBoxLayout()
+        speed_step_size_layout.setSpacing(7)
+        speed_step_size_layout.addWidget(QLabel("Step Size:", self))
+        self.speed_step_size_group = QButtonGroup(self)
+        self.speed_step_size_group.setExclusive(True)
+        self.speed_step_size_radio_025 = QRadioButton("0.25x", self)
+        self.speed_step_size_radio_010 = QRadioButton("0.10x", self)
+        self.speed_step_size_radio_025.setToolTip("Use 0.25x speed slider steps.")
+        self.speed_step_size_radio_010.setToolTip("Use 0.10x speed slider steps.")
+        self.speed_step_size_group.addButton(self.speed_step_size_radio_025)
+        self.speed_step_size_group.addButton(self.speed_step_size_radio_010)
+        speed_step_size_layout.addWidget(self.speed_step_size_radio_025)
+        speed_step_size_layout.addWidget(self.speed_step_size_radio_010)
+        speed_step_size_layout.addStretch(1)
+        speed_layout.addLayout(speed_step_size_layout)
         controls_layout.addLayout(speed_layout)
+        saved_step = float(self.config.get("speed_slider_step", 0.25))
+        if abs(saved_step - 0.10) < 0.001:
+            self.speed_step_size_radio_010.setChecked(True)
+        else:
+            self.speed_step_size_radio_025.setChecked(True)
+        self.apply_speed_slider_step(save_to_config=False)
         self.speed_slider.valueChanged.connect(self.update_speed_label)
+        self.speed_step_size_radio_025.toggled.connect(self.on_speed_step_changed)
+        self.speed_step_size_radio_010.toggled.connect(self.on_speed_step_changed)
+
         # Voice selection
         voice_layout = QHBoxLayout()
         voice_layout.setSpacing(7)
@@ -1118,13 +1204,27 @@ class abogen(QWidget):
             "QComboBox { min-height: 20px; padding: 6px 12px; }"
         )
         self.voice_combo.setToolTip(
-            "The first character represents the language:\n"
-            '"a" => American English\n"b" => British English\n"e" => Spanish\n"f" => French\n"h" => Hindi\n"i" => Italian\n"j" => Japanese\n"p" => Brazilian Portuguese\n"z" => Mandarin Chinese\nThe second character represents the gender:\n"m" => Male\n"f" => Female'
+            "Voice code format: [language][gender]\n"
+            "Example: af = American English, female\n\n"
+            "Language codes:\n"
+            "  - a = American English\n"
+            "  - b = British English\n"
+            "  - e = Spanish\n"
+            "  - f = French\n"
+            "  - h = Hindi\n"
+            "  - i = Italian\n"
+            "  - j = Japanese\n"
+            "  - p = Brazilian Portuguese\n"
+            "  - z = Mandarin Chinese\n\n"
+            "Gender codes:\n"
+            "  - m = Male\n"
+            "  - f = Female"
         )
         self.voice_combo.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )
         voice_layout.addWidget(self.voice_combo)
+
         # Voice formula button
         self.btn_voice_formula_mixer = QPushButton(self)
         mixer_icon_path = get_resource_path("abogen.assets", "voice_mixer.png")
@@ -1175,19 +1275,22 @@ class abogen(QWidget):
         subtitle_label = QLabel("Generate subtitles:", self)
         subtitle_layout.addWidget(subtitle_label)
         self.subtitle_combo = QComboBox(self)
+        supported_languages_html = "".join(
+            f"<li><b>{html.escape(lang)}</b>: {html.escape(LANGUAGE_DESCRIPTIONS.get(lang, lang))}</li>"
+            for lang in SUPPORTED_LANGUAGES_FOR_SUBTITLE_GENERATION
+        )
         self.subtitle_combo.setToolTip(
-            "Choose how subtitles will be generated:\n"
-            "Disabled: No subtitles will be generated.\n"
-            "Line: Subtitles will be generated for each line.\n"
-            "Sentence: Subtitles will be generated for each sentence.\n"
-            "Sentence + Comma: Subtitles will be generated for each sentence and comma.\n"
-            "Sentence + Highlighting: Subtitles with word-by-word karaoke highlighting.\n"
-            "1+ word: Subtitles will be generated for each word(s).\n\n"
-            "Supported languages for subtitle generation:\n"
-            + "\n".join(
-                f'"{lang}" => {LANGUAGE_DESCRIPTIONS.get(lang, lang)}'
-                for lang in SUPPORTED_LANGUAGES_FOR_SUBTITLE_GENERATION
-            )
+            "<b>Choose how subtitles are split:</b>"
+            "<ul>"
+            "<li><b>Disabled</b>: no subtitle file is generated.</li>"
+            "<li><b>Line</b>: split by input line breaks.</li>"
+            "<li><b>Sentence</b>: split by sentence boundaries.</li>"
+            "<li><b>Sentence + Comma</b>: split by sentences and commas.</li>"
+            "<li><b>Sentence + Highlighting</b>: karaoke word-by-word highlighting.</li>"
+            "<li><b>1-10 words</b>: split every N words.</li>"
+            "</ul>"
+            "<b>Supported subtitle languages:</b>"
+            f"<ul>{supported_languages_html}</ul>"
         )
         subtitle_options = [
             "Disabled",
@@ -1216,6 +1319,9 @@ class abogen(QWidget):
 
         self.word_sub_combo = QComboBox(self)
         self.word_sub_combo.addItems(["Disabled", "Enabled"])
+        self.word_sub_combo.setToolTip(
+            "Apply custom word substitutions before TTS processing."
+        )
         self.word_sub_combo.setStyleSheet(
             "QComboBox { min-height: 20px; padding: 6px 12px; }"
         )
@@ -1230,6 +1336,9 @@ class abogen(QWidget):
 
         self.btn_word_sub_settings = QPushButton("Settings", self)
         self.btn_word_sub_settings.setFixedSize(80, 36)
+        self.btn_word_sub_settings.setToolTip(
+            "Edit substitution rules and text normalization options."
+        )
         self.btn_word_sub_settings.setStyleSheet("QPushButton { padding: 6px 12px; }")
         self.btn_word_sub_settings.clicked.connect(self.show_word_sub_dialog)
         self.btn_word_sub_settings.setEnabled(self.word_substitutions_enabled)
@@ -1243,6 +1352,9 @@ class abogen(QWidget):
         format_label = QLabel("Output voice format:", self)
         format_layout.addWidget(format_label)
         self.format_combo = QComboBox(self)
+        self.format_combo.setToolTip(
+            "Select the output audio format for generated speech files."
+        )
         self.format_combo.setStyleSheet(
             "QComboBox { min-height: 20px; padding: 6px 12px; }"
         )
@@ -1275,6 +1387,9 @@ class abogen(QWidget):
         subtitle_format_label = QLabel("Output subtitle format:", self)
         subtitle_format_layout.addWidget(subtitle_format_label)
         self.subtitle_format_combo = QComboBox(self)
+        self.subtitle_format_combo.setToolTip(
+            "Select the output subtitle file format. Highlighting modes require the ASS format."
+        )
         self.subtitle_format_combo.setStyleSheet(
             "QComboBox { min-height: 20px; padding: 6px 12px; }"
         )
@@ -1329,7 +1444,7 @@ class abogen(QWidget):
         self.replace_newlines_combo = QComboBox(self)
         self.replace_newlines_combo.addItems(["Disabled", "Enabled"])
         self.replace_newlines_combo.setToolTip(
-            "Replace single newlines in the input text with spaces before processing."
+            "Replace single newlines with spaces before processing."
         )
         self.replace_newlines_combo.setStyleSheet(
             "QComboBox { min-height: 20px; padding: 6px 12px; }"
@@ -1362,11 +1477,16 @@ class abogen(QWidget):
         self.save_combo.setStyleSheet(
             "QComboBox { min-height: 20px; padding: 6px 12px; }"
         )
+        self.save_combo.setToolTip(
+            "Choose where output files are saved.\n"
+            "If 'Save as project' is enabled, this becomes the project base folder.\n"
+            "Changes apply only to newly prepared books/projects."
+        )
         self.save_combo.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )
         self.save_combo.setCurrentText(self.save_option)
-        self.save_combo.currentTextChanged.connect(self.on_save_option_changed)
+        self.save_combo.textActivated.connect(self.on_save_option_changed)
         save_layout.addWidget(self.save_combo)
         controls_layout.addLayout(save_layout)
 
@@ -1392,17 +1512,14 @@ class abogen(QWidget):
         self.gpu_checkbox = QCheckBox("Use GPU Acceleration (if available)", self)
         self.gpu_checkbox.setChecked(self.use_gpu)
         self.gpu_checkbox.setToolTip(
-            "Uncheck to force using CPU even if a compatible GPU is detected."
+            "Disable to force CPU mode, even when a compatible GPU is available."
         )
         self.gpu_checkbox.stateChanged.connect(self.on_gpu_setting_changed)
         gpu_checkbox_layout.addWidget(self.gpu_checkbox)
         gpu_layout.addLayout(gpu_checkbox_layout)
 
         # Set initial enabled state for subtitle format combo
-        if self.subtitle_mode == "Disabled":
-            self.subtitle_format_combo.setEnabled(False)
-        else:
-            self.subtitle_format_combo.setEnabled(True)
+        self._sync_subtitle_format_enabled_state()
 
         # Settings button with icon
         settings_icon_path = get_resource_path("abogen.assets", "settings.svg")
@@ -1412,7 +1529,7 @@ class abogen(QWidget):
         else:
             # Fallback text if icon not found
             self.settings_btn.setText("⚙")
-        self.settings_btn.setToolTip("Settings")
+        self.settings_btn.setToolTip("Open advanced app and processing settings.")
         self.settings_btn.setFixedSize(36, 36)
         self.settings_btn.clicked.connect(self.show_settings_menu)
         gpu_layout.addWidget(self.settings_btn)
@@ -1431,16 +1548,43 @@ class abogen(QWidget):
             QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed
         )
         container_layout.addWidget(self.controls_widget)
-        # Progress bar
+        # Overall progress section (current item and queue position)
+        self.overall_progress_label = QLabel("Overall progress", self)
+        self.overall_progress_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.overall_progress_label.hide()
+        container_layout.addWidget(self.overall_progress_label)
+
+        # Main progress bar (still used for single conversion and queue item progress)
         self.progress_bar = QProgressBar(self)
         self.progress_bar.setValue(0)
         self.progress_bar.hide()
         container_layout.addWidget(self.progress_bar)
+
+        # Chapter progress section
+        self.chapter_progress_label = QLabel("Chapter progress", self)
+        self.chapter_progress_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.chapter_progress_label.hide()
+        container_layout.addWidget(self.chapter_progress_label)
+        self.chapter_progress_bar = QProgressBar(self)
+        self.chapter_progress_bar.setMinimum(0)
+        self.chapter_progress_bar.setMaximum(1)
+        self.chapter_progress_bar.setValue(0)
+        self.chapter_progress_bar.hide()
+        container_layout.addWidget(self.chapter_progress_bar)
+        self.current_chapter_label = QLabel("", self)
+        self.current_chapter_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.current_chapter_label.hide()
+        container_layout.addWidget(self.current_chapter_label)
         # ETR Label
         self.etr_label = QLabel("Estimated time remaining: Calculating...", self)
         self.etr_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.etr_label.hide()
         container_layout.addWidget(self.etr_label)
+        # Elapsed time label
+        self.elapsed_label = QLabel("Elapsed time: 00:00:00", self)
+        self.elapsed_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.elapsed_label.hide()
+        container_layout.addWidget(self.elapsed_label)
         # Cancel button
         self.btn_cancel = QPushButton("Cancel", self)
         self.btn_cancel.setFixedHeight(60)
@@ -1490,14 +1634,34 @@ class abogen(QWidget):
         if self.is_converting:
             return
         try:
+            start_dir = os.path.expanduser(self.last_input_folder or "")
+            if start_dir and os.path.isfile(start_dir):
+                start_dir = os.path.dirname(start_dir)
+            while start_dir and not os.path.isdir(start_dir):
+                parent_dir = os.path.dirname(start_dir)
+                if parent_dir == start_dir:
+                    start_dir = ""
+                    break
+                start_dir = parent_dir
+            if not start_dir:
+                start_dir = os.path.expanduser("~")
+            if start_dir != self.last_input_folder:
+                self.last_input_folder = start_dir
+                self.config["last_input_folder"] = start_dir
+                save_config(self.config)
             file_path, _ = QFileDialog.getOpenFileName(
                 self,
-                "Select File",
-                "",
+                "Select File to Convert",
+                start_dir,
                 "Supported Files (*.txt *.epub *.pdf *.md *.srt *.ass *.vtt)",
             )
             if not file_path:
                 return
+            selected_dir = os.path.dirname(file_path)
+            if selected_dir and selected_dir != self.last_input_folder:
+                self.last_input_folder = selected_dir
+                self.config["last_input_folder"] = selected_dir
+                save_config(self.config)
             if (
                 file_path.lower().endswith(".epub")
                 or file_path.lower().endswith(".pdf")
@@ -1554,126 +1718,171 @@ class abogen(QWidget):
         def on_dialog_finished(result):
             if result != QDialog.DialogCode.Accepted:
                 return False
-            chapters_text, all_checked_hrefs = dialog.get_selected_text()
-            if not all_checked_hrefs:
-                # Determine file type for error message
+            try:
+                chapters_text, all_checked_hrefs = dialog.get_selected_text()
+                if not all_checked_hrefs:
+                    # Determine file type for error message
+                    if book_path.lower().endswith(".pdf"):
+                        file_type = "pdf"
+                        item_type = "pages"
+                    elif book_path.lower().endswith((".md", ".markdown")):
+                        file_type = "markdown"
+                        item_type = "chapters"
+                    else:
+                        file_type = "epub"
+                        item_type = "chapters"
+
+                    error_msg = f"No {item_type} selected."
+                    self._show_error_message_box(
+                        f"{file_type.upper()} Error", error_msg
+                    )
+                    return False
+                self.selected_chapters = all_checked_hrefs
+                self.save_chapters_separately = dialog.get_save_chapters_separately()
+                self.merge_chapters_at_end = dialog.get_merge_chapters_at_end()
+                self.save_as_project = dialog.get_save_as_project()
+
+                # Store if the PDF has bookmarks for button text display
                 if book_path.lower().endswith(".pdf"):
-                    file_type = "pdf"
-                    item_type = "pages"
-                elif book_path.lower().endswith((".md", ".markdown")):
-                    file_type = "markdown"
-                    item_type = "chapters"
-                else:
-                    file_type = "epub"
-                    item_type = "chapters"
+                    self.pdf_has_bookmarks = getattr(dialog, "has_pdf_bookmarks", False)
 
-                error_msg = f"No {item_type} selected."
-                self._show_error_message_box(f"{file_type.upper()} Error", error_msg)
-                return False
-            self.selected_chapters = all_checked_hrefs
-            self.save_chapters_separately = dialog.get_save_chapters_separately()
-            self.merge_chapters_at_end = dialog.get_merge_chapters_at_end()
-            self.save_as_project = dialog.get_save_as_project()
+                cleaned_text = clean_text(chapters_text)
+                computed_char_count = calculate_text_length(cleaned_text)
+                self.char_count = computed_char_count
+                if isinstance(getattr(self, "_char_count_cache", None), dict):
+                    self._char_count_cache[book_path] = computed_char_count
 
-            # Store if the PDF has bookmarks for button text display
-            if book_path.lower().endswith(".pdf"):
-                self.pdf_has_bookmarks = getattr(dialog, "has_pdf_bookmarks", False)
+                # Use "abogen" prefix for cache files
+                # Extract base name without extension
+                base_name = os.path.splitext(os.path.basename(book_path))[0]
 
-            cleaned_text = clean_text(chapters_text)
-            computed_char_count = calculate_text_length(cleaned_text)
-            self.char_count = computed_char_count
-            if isinstance(getattr(self, "_char_count_cache", None), dict):
-                self._char_count_cache[book_path] = computed_char_count
-
-            # Use "abogen" prefix for cache files
-            # Extract base name without extension
-            base_name = os.path.splitext(os.path.basename(book_path))[0]
-
-            if self.save_as_project:
-                # Get project directory from user
-                project_dir = QFileDialog.getExistingDirectory(
-                    self, "Select Project Folder", "", QFileDialog.Option.ShowDirsOnly
-                )
-                if not project_dir:
-                    # User cancelled, fallback to cache
-                    self.save_as_project = False
-                    cache_dir = get_user_cache_path()
-                else:
-                    # Create project folder structure
-                    project_name = f"{base_name}_project"
-                    project_dir = os.path.join(project_dir, project_name)
-                    cache_dir = os.path.join(project_dir, "text")
-                    os.makedirs(cache_dir, exist_ok=True)
-
-                    # Save metadata if available
-                    meta_dir = os.path.join(project_dir, "metadata")
-                    os.makedirs(
-                        meta_dir, exist_ok=True
-                    )  # Save book metadata if available
-                    if hasattr(dialog, "book_metadata"):
-                        meta_path = os.path.join(meta_dir, "book_info.txt")
-                        with open(meta_path, "w", encoding="utf-8") as f:
-                            # Clean HTML tags from metadata
-                            title = re.sub(
-                                r"<[^>]+>",
-                                "",
-                                str(dialog.book_metadata.get("title", "Unknown")),
+                if self.save_as_project:
+                    # Map project base folder to the configured save location.
+                    project_dir = None
+                    if self.save_option == "Choose output folder":
+                        if self.selected_output_folder and os.path.isdir(
+                            self.selected_output_folder
+                        ):
+                            project_dir = self.selected_output_folder
+                        else:
+                            self._show_error_message_box(
+                                "Project Folder Error",
+                                "Save as project is enabled, but no valid output folder is configured.",
                             )
-                            publisher = re.sub(
-                                r"<[^>]+>",
-                                "",
-                                str(dialog.book_metadata.get("publisher", "Unknown")),
+                    elif self.save_option == "Save to Desktop":
+                        desktop_dir = os.path.join(os.path.expanduser("~"), "Desktop")
+                        if os.path.isdir(desktop_dir):
+                            project_dir = desktop_dir
+                        else:
+                            self._show_error_message_box(
+                                "Project Folder Error",
+                                f"Desktop folder was not found:\n{desktop_dir}",
                             )
-                            authors = [
-                                re.sub(r"<[^>]+>", "", str(author))
-                                for author in dialog.book_metadata.get(
-                                    "authors", ["Unknown"]
-                                )
-                            ]
-                            publication_year = re.sub(
-                                r"<[^>]+>",
-                                "",
-                                str(
-                                    dialog.book_metadata.get(
-                                        "publication_year", "Unknown"
-                                    )
-                                ),
+                    else:
+                        input_dir = os.path.dirname(book_path)
+                        if input_dir and os.path.isdir(input_dir):
+                            project_dir = input_dir
+                        else:
+                            self._show_error_message_box(
+                                "Project Folder Error",
+                                "Could not determine a valid folder next to the input file.",
                             )
+                    if not project_dir:
+                        # Invalid or unavailable mapped location; fallback to cache.
+                        self.save_as_project = False
+                        cache_dir = get_user_cache_path()
+                    else:
+                        # Create project folder structure
+                        project_name = f"{base_name}_project"
+                        project_dir = os.path.join(project_dir, project_name)
+                        cache_dir = os.path.join(project_dir, "text")
+                        os.makedirs(cache_dir, exist_ok=True)
 
-                            f.write(f"Title: {title}\n")
-                            f.write(f"Authors: {', '.join(authors)}\n")
-                            f.write(f"Publisher: {publisher}\n")
-                            f.write(f"Publication Year: {publication_year}\n")
-                            if dialog.book_metadata.get("description"):
-                                description = re.sub(
+                        # Save metadata if available
+                        meta_dir = os.path.join(project_dir, "metadata")
+                        os.makedirs(meta_dir, exist_ok=True)
+
+                        book_metadata = getattr(dialog, "book_metadata", {}) or {}
+                        if book_metadata:
+                            meta_path = os.path.join(meta_dir, "book_info.txt")
+                            with open(meta_path, "w", encoding="utf-8") as f:
+                                # Clean HTML tags from metadata
+                                title = re.sub(
                                     r"<[^>]+>",
                                     "",
-                                    str(dialog.book_metadata.get("description")),
+                                    str(book_metadata.get("title", "Unknown")),
                                 )
-                                f.write(f"\nDescription:\n{description}\n")
+                                publisher = re.sub(
+                                    r"<[^>]+>",
+                                    "",
+                                    str(book_metadata.get("publisher", "Unknown")),
+                                )
+                                authors = [
+                                    re.sub(r"<[^>]+>", "", str(author))
+                                    for author in book_metadata.get(
+                                        "authors", ["Unknown"]
+                                    )
+                                ]
+                                publication_year = re.sub(
+                                    r"<[^>]+>",
+                                    "",
+                                    str(
+                                        book_metadata.get("publication_year", "Unknown")
+                                    ),
+                                )
 
-                        # Save cover image if available
-                    if dialog.book_metadata.get("cover_image"):
-                        cover_path = os.path.join(meta_dir, "cover.png")
-                        with open(cover_path, "wb") as f:
-                            f.write(dialog.book_metadata["cover_image"])
-            else:
-                cache_dir = get_user_cache_path()
+                                f.write(f"Title: {title}\n")
+                                f.write(f"Authors: {', '.join(authors)}\n")
+                                f.write(f"Publisher: {publisher}\n")
+                                f.write(f"Publication Year: {publication_year}\n")
+                                if book_metadata.get("description"):
+                                    description = re.sub(
+                                        r"<[^>]+>",
+                                        "",
+                                        str(book_metadata.get("description")),
+                                    )
+                                    f.write(f"\nDescription:\n{description}\n")
 
-            fd, tmp = tempfile.mkstemp(
-                prefix=f"{base_name}_", suffix=".txt", dir=cache_dir
-            )
-            os.close(fd)
-            with open(tmp, "w", encoding="utf-8") as f:
-                f.write(chapters_text)
-            self.selected_file = tmp
-            self.selected_book_path = book_path
-            self.displayed_file_path = book_path
-            if isinstance(getattr(self, "_char_count_cache", None), dict):
-                self._char_count_cache[tmp] = computed_char_count
-            # Only set file info if dialog was accepted
-            self.input_box.set_file_info(book_path)
-            return True
+                            # Save cover image if available
+                            if book_metadata.get("cover_image"):
+                                cover_path = os.path.join(meta_dir, "cover.png")
+                                with open(cover_path, "wb") as f:
+                                    f.write(book_metadata["cover_image"])
+                else:
+                    cache_dir = get_user_cache_path()
+
+                fd, tmp = tempfile.mkstemp(
+                    prefix=f"{base_name}_", suffix=".txt", dir=cache_dir
+                )
+                os.close(fd)
+                with open(tmp, "w", encoding="utf-8") as f:
+                    f.write(chapters_text)
+                self.selected_file = tmp
+                self.selected_book_path = book_path
+                self.displayed_file_path = book_path
+                if isinstance(getattr(self, "_char_count_cache", None), dict):
+                    self._char_count_cache[tmp] = computed_char_count
+                # Only set file info if dialog was accepted
+                self.input_box.set_file_info(book_path)
+                return True
+            except PermissionError as e:
+                self._show_filesystem_error_message(
+                    "File Permission Error",
+                    e,
+                    "prepare selected chapters for conversion",
+                )
+            except OSError as e:
+                self._show_filesystem_error_message(
+                    "File System Error",
+                    e,
+                    "prepare selected chapters for conversion",
+                )
+            except Exception as e:
+                self._show_error_message_box(
+                    "Book Processing Error",
+                    f"Could not prepare selected chapters:\n{e}",
+                )
+            return False
 
         dialog.finished.connect(on_dialog_finished)
         return True
@@ -1754,10 +1963,59 @@ class abogen(QWidget):
                 )
 
     def update_speed_label(self):
+        self.normalize_speed_slider_value()
         s = self.speed_slider.value() / 100.0
         self.speed_label.setText(f"{s}")
         self.config["speed"] = s
         save_config(self.config)
+
+    def normalize_speed_slider_value(self):
+        step_units = self.get_speed_step_units()
+        current_value = self.speed_slider.value()
+        snapped_value = round(current_value / step_units) * step_units
+        min_speed = self.speed_slider.minimum()
+        max_speed = self.speed_slider.maximum()
+        snapped_value = max(min_speed, min(max_speed, snapped_value))
+        if snapped_value != current_value:
+            self.speed_slider.blockSignals(True)
+            self.speed_slider.setValue(snapped_value)
+            self.speed_slider.blockSignals(False)
+
+    def get_selected_speed_step_value(self):
+        if self.speed_step_size_radio_010.isChecked():
+            return 0.10
+        return 0.25
+
+    def get_speed_step_units(self):
+        step_value = self.get_selected_speed_step_value()
+        return max(1, int(round(float(step_value) * 100)))
+
+    def set_speed_slider_from_config(self, speed_value):
+        try:
+            speed_units = int(round(float(speed_value) * 100))
+        except (TypeError, ValueError):
+            speed_units = 100
+        min_speed = self.speed_slider.minimum()
+        max_speed = self.speed_slider.maximum()
+        speed_units = max(min_speed, min(max_speed, speed_units))
+        step_units = self.get_speed_step_units()
+        snapped_speed = round(speed_units / step_units) * step_units
+        snapped_speed = max(min_speed, min(max_speed, snapped_speed))
+        self.speed_slider.setValue(snapped_speed)
+
+    def on_speed_step_changed(self, checked):
+        if checked:
+            self.apply_speed_slider_step()
+
+    def apply_speed_slider_step(self, _index=None, save_to_config=True):
+        step_units = self.get_speed_step_units()
+        self.speed_slider.setSingleStep(step_units)
+        self.speed_slider.setPageStep(step_units)
+        self.speed_slider.setTickInterval(step_units)
+        self.set_speed_slider_from_config(self.speed_slider.value() / 100.0)
+        if save_to_config:
+            self.config["speed_slider_step"] = self.get_selected_speed_step_value()
+            save_config(self.config)
 
     def update_subtitle_options_availability(self):
         """
@@ -1773,12 +2031,12 @@ class abogen(QWidget):
 
         if self.selected_lang not in SUPPORTED_LANGUAGES_FOR_SUBTITLE_GENERATION:
             self.subtitle_combo.setEnabled(False)
-            self.subtitle_format_combo.setEnabled(False)
+            self._sync_subtitle_format_enabled_state()
             return
 
         # Only enable subtitle_combo if it's NOT a subtitle input
         self.subtitle_combo.setEnabled(not is_subtitle_input)
-        self.subtitle_format_combo.setEnabled(True)
+        self._sync_subtitle_format_enabled_state()
 
         is_english = self.selected_lang in ["a", "b"]
 
@@ -1814,6 +2072,14 @@ class abogen(QWidget):
                 self.subtitle_combo.setCurrentIndex(0)  # Disabled
 
         self.subtitle_mode = self.subtitle_combo.currentText()
+
+    def _sync_subtitle_format_enabled_state(self):
+        """Enable subtitle format selection only when supported and subtitle generation is enabled."""
+        subtitles_supported = (
+            self.selected_lang in SUPPORTED_LANGUAGES_FOR_SUBTITLE_GENERATION
+        )
+        subtitles_enabled = self.subtitle_mode != "Disabled"
+        self.subtitle_format_combo.setEnabled(subtitles_supported and subtitles_enabled)
 
     def on_voice_changed(self, index):
         voice = self.voice_combo.itemData(index)
@@ -1861,7 +2127,8 @@ class abogen(QWidget):
         lang = entry.get("language") if isinstance(entry, dict) else None
         enable = lang in SUPPORTED_LANGUAGES_FOR_SUBTITLE_GENERATION
         self.subtitle_combo.setEnabled(enable)
-        self.subtitle_format_combo.setEnabled(enable)
+        self.selected_lang = lang
+        self._sync_subtitle_format_enabled_state()
 
     def populate_profiles_in_voice_combo(self):
         # preserve current voice or profile
@@ -1901,13 +2168,76 @@ class abogen(QWidget):
 
     def convert_input_box_to_log(self):
         self.input_box.hide()
+        self.log_header_widget.show()
+        self.story_text_visible = True
+        self.btn_toggle_story.setText("Hide story text")
+        self.set_log_text_collapsed(False)
         self.log_text.show()
-        self.log_text.clear()
+        self._clear_log_display_and_buffer()
         QApplication.processEvents()
 
     def restore_input_box(self):
+        self.log_header_widget.hide()
         self.log_text.hide()
         self.input_box.show()
+
+    def toggle_log_text_visibility(self):
+        self.set_log_text_collapsed(not self.log_text_collapsed)
+
+    def set_log_text_collapsed(self, collapsed):
+        self.log_text_collapsed = bool(collapsed)
+        self.log_text.setVisible(not self.log_text_collapsed)
+        self.btn_toggle_log.setText("Expand" if self.log_text_collapsed else "Collapse")
+        self._refresh_window_size_for_log_toggle()
+
+    def toggle_story_visibility(self):
+        self.story_text_visible = not self.story_text_visible
+        self.btn_toggle_story.setText(
+            "Show story text" if not self.story_text_visible else "Hide story text"
+        )
+        # Rebuild the log display with new filtering
+        self._rebuild_log_display()
+
+    def _is_story_line(self, text):
+        """Check if a line is story/document text (not chapter/status information)."""
+        if not isinstance(text, str):
+            return False
+        return bool(STORY_CHAR_PROGRESS_RE.match(text)) or bool(
+            STORY_SUBTITLE_PROGRESS_RE.match(text)
+        )
+
+    def _refresh_window_size_for_log_toggle(self):
+        def _resize_after_layout():
+            self.layout().activate()
+            self.adjustSize()
+            target_height = self.minimumSizeHint().height()
+            if self.log_text_collapsed:
+                self.resize(self.width(), target_height)
+            else:
+                expanded_height = self.sizeHint().height()
+                if self.height() < expanded_height:
+                    self.resize(self.width(), expanded_height)
+
+        QTimer.singleShot(0, _resize_after_layout)
+
+    def _clear_log_display_and_buffer(self):
+        self.log_text.clear()
+        self.log_message_buffer.clear()
+
+    def _rebuild_log_display(self):
+        """Rebuild the log display by re-filtering stored log lines."""
+        sb = self.log_text.verticalScrollBar()
+        previous_value = sb.value()
+        was_at_bottom = previous_value == sb.maximum()
+        self._suspend_log_autoscroll = True
+        self.log_text.clear()
+        for message in self.log_message_buffer:
+            self._update_log_main_thread(message, store=False)
+        self._suspend_log_autoscroll = False
+        if was_at_bottom:
+            sb.setValue(sb.maximum())
+        else:
+            sb.setValue(min(previous_value, sb.maximum()))
 
     def update_log(self, message):
         # Use signal-based approach for thread-safe logging
@@ -1919,23 +2249,84 @@ class abogen(QWidget):
         # Direct update if already on main thread
         self._update_log_main_thread(message)
 
-    def _update_log_main_thread(self, message):
+    def _update_log_main_thread(self, message, store=True):
+        if store:
+            self.log_message_buffer.append(message)
+            if len(self.log_message_buffer) > self.log_window_max_lines:
+                self.log_message_buffer = self.log_message_buffer[
+                    -self.log_window_max_lines :
+                ]
+
         txt = self.log_text
         sb = txt.verticalScrollBar()
-        at_bottom = sb.value() == sb.maximum()
+        at_bottom = (not getattr(self, "_suspend_log_autoscroll", False)) and (
+            sb.value() == sb.maximum()
+        )
 
         cursor = txt.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
 
-        fmt = cursor.charFormat()
+        # Handle both tuple and string messages
         if isinstance(message, tuple):
             text, spec = message
-            fmt.setForeground(QColor(LOG_COLOR_MAP.get(spec, COLORS["LIGHT_DISABLED"])))
+            text_str = str(text)
         else:
             text = str(message)
-            fmt.clearForeground()
-        cursor.setCharFormat(fmt)
-        cursor.insertText(text + "\n")
+            text_str = text
+            spec = None
+
+        # Check if this is a story line
+        is_story = self._is_story_line(text_str)
+
+        # Skip rendering if story text is hidden and this is a story line
+        if is_story and not self.story_text_visible:
+            return
+
+        # Get the base color for the message
+        tuple_color = QColor(LOG_COLOR_MAP.get(spec, COLORS["LIGHT_DISABLED"]))
+        prefix_color = QColor(COLORS["ORANGE"])  # Distinguish document index prefix
+
+        # Try to split and color the prefix differently from the content
+        match = STORY_PREFIX_RE.match(text_str)
+        if match:
+            leading_ws = match.group(1)
+            prefix = match.group(2)
+            rest = text_str[match.end():]
+
+            if leading_ws:
+                fmt = cursor.charFormat()
+                if isinstance(message, tuple):
+                    fmt.setForeground(tuple_color)
+                else:
+                    fmt.clearForeground()
+                cursor.setCharFormat(fmt)
+                cursor.insertText(leading_ws)
+
+            # Insert prefix with orange color
+            fmt = cursor.charFormat()
+            fmt.setForeground(prefix_color)
+            cursor.setCharFormat(fmt)
+            cursor.insertText(prefix + " ")
+
+            # Insert rest of text with original color
+            fmt = cursor.charFormat()
+            if isinstance(message, tuple):
+                fmt.setForeground(tuple_color)
+            else:
+                fmt.clearForeground()
+            cursor.setCharFormat(fmt)
+            cursor.insertText(rest)
+        else:
+            # No prefix match, render entire text with the spec color
+            fmt = cursor.charFormat()
+            if isinstance(message, tuple):
+                fmt.setForeground(tuple_color)
+            else:
+                fmt.clearForeground()
+            cursor.setCharFormat(fmt)
+            cursor.insertText(text_str)
+
+        cursor.insertText("\n")
 
         doc = txt.document()
         excess = doc.blockCount() - self.log_window_max_lines
@@ -1985,6 +2376,10 @@ class abogen(QWidget):
             f"Estimated time remaining: {etr_str}"
         )  # Update ETR label
         self.etr_label.show()  # Show only when estimate is ready
+        elapsed = int(time.time() - self.start_time)
+        h, m, s = elapsed // 3600, (elapsed % 3600) // 60, elapsed % 60
+        self.elapsed_label.setText(f"Elapsed time: {h:02d}:{m:02d}:{s:02d}")
+        self.elapsed_label.show()
 
         # Disable cancel button if progress is >= 98%
         if value >= 98:
@@ -1992,6 +2387,28 @@ class abogen(QWidget):
 
         self.progress_bar.repaint()
         QApplication.processEvents()
+
+    def update_chapter_progress(self, completed, total, chapter_name):
+        if total <= 1:
+            self.chapter_progress_label.hide()
+            self.chapter_progress_bar.hide()
+            self.current_chapter_label.hide()
+            return
+
+        completed = max(0, min(int(completed), int(total)))
+        total = int(total)
+        self.chapter_progress_bar.setMinimum(0)
+        self.chapter_progress_bar.setMaximum(total)
+        self.chapter_progress_bar.setValue(completed)
+        self.chapter_progress_bar.setFormat(f"{completed}/{total} chapters")
+        if completed >= total:
+            self.current_chapter_label.setText("All selected chapters processed")
+        else:
+            safe_chapter_name = html.escape(str(chapter_name))
+            self.current_chapter_label.setText(f"Current chapter: {safe_chapter_name}")
+        self.chapter_progress_label.show()
+        self.chapter_progress_bar.show()
+        self.current_chapter_label.show()
 
     def enable_disable_queue_buttons(self):
         enabled = bool(self.queued_items)
@@ -2119,16 +2536,23 @@ class abogen(QWidget):
 
     def manage_queue(self):
         # show a dialog to manage the queue
-        dialog = QueueManager(self, self.queued_items)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            self.queued_items = dialog.get_queue()
+        try:
+            dialog = QueueManager(self, self.queued_items)
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                self.queued_items = dialog.get_queue()
 
-            # Reload config to capture the new "Override" setting
-            # The QueueManager writes to disk, so we must refresh our local copy
-            self.config = load_config()
-            
-            # re-enable/disable buttons based on queue state
-            self.enable_disable_queue_buttons()
+                # Reload config to capture the new "Override" setting
+                # The QueueManager writes to disk, so we must refresh our local copy
+                self.config = load_config()
+
+                # re-enable/disable buttons based on queue state
+                self.enable_disable_queue_buttons()
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Queue Manager Error",
+                f"Could not open Queue Manager.\n\n{type(e).__name__}: {e}",
+            )
 
     def start_queue(self):
         self.current_queue_index = 0  # Start from the first item
@@ -2142,15 +2566,15 @@ class abogen(QWidget):
     def start_next_queued_item(self):
         if self.current_queue_index < len(self.queued_items):
             queued_item = self.queued_items[self.current_queue_index]
-            
+
             self.selected_file = queued_item.file_name
             self.char_count = queued_item.total_char_count
-            
+
             # Restore the original file path for save location (Important for EPUB/PDF)
             self.displayed_file_path = (
                 queued_item.save_base_path or queued_item.file_name
             )
-            
+
             # Restore chapter options (Structure specific, must be preserved)
             self.save_chapters_separately = getattr(
                 queued_item, "save_chapters_separately", None
@@ -2163,7 +2587,7 @@ class abogen(QWidget):
             if not self.config.get("queue_override_settings", False):
                 self.selected_lang = queued_item.lang_code
                 self.speed_slider.setValue(int(queued_item.speed * 100))
-                
+
                 # Load the specific voice string
                 self.selected_voice = queued_item.voice
                 # Clear complex GUI states so the specific voice string is used
@@ -2205,18 +2629,24 @@ class abogen(QWidget):
                 self.config["use_silent_gaps"] = self.use_silent_gaps
                 self.config["subtitle_speed_method"] = self.subtitle_speed_method
                 # Word substitution settings
-                self.config["word_substitutions_enabled"] = self.word_substitutions_enabled
+                self.config["word_substitutions_enabled"] = (
+                    self.word_substitutions_enabled
+                )
                 self.config["word_substitutions_list"] = self.word_substitutions_list
-                self.config["case_sensitive_substitutions"] = self.case_sensitive_substitutions
+                self.config["case_sensitive_substitutions"] = (
+                    self.case_sensitive_substitutions
+                )
                 self.config["replace_all_caps"] = self.replace_all_caps
                 self.config["replace_numerals"] = self.replace_numerals
-                self.config["fix_nonstandard_punctuation"] = self.fix_nonstandard_punctuation
+                self.config["fix_nonstandard_punctuation"] = (
+                    self.fix_nonstandard_punctuation
+                )
 
                 # Sync Voice/Profile in config
                 self.config["selected_voice"] = self.selected_voice
                 if "selected_profile_name" in self.config:
                     del self.config["selected_profile_name"]
-                
+
                 # Note: Speed is already synced via self.speed_slider.setValue() -> update_speed_label()
                 save_config(self.config)
 
@@ -2278,7 +2708,13 @@ class abogen(QWidget):
         prevent_sleep_start()
         self.is_converting = True
         self.convert_input_box_to_log()
+        self.overall_progress_label.show()
         self.progress_bar.setValue(0)
+        self.chapter_progress_label.hide()
+        self.chapter_progress_bar.setValue(0)
+        self.chapter_progress_bar.hide()
+        self.current_chapter_label.clear()
+        self.current_chapter_label.hide()
         # Show queue progress if in queue mode
         if (
             from_queue
@@ -2292,6 +2728,7 @@ class abogen(QWidget):
         else:
             self.progress_bar.setFormat("%p%")  # Reset format initially
         self.etr_label.hide()  # Hide ETR label initially
+        self.elapsed_label.hide()  # Hide elapsed label initially
         self.controls_widget.hide()
         self.queue_row_widget.hide()  # Hide queue row when process starts
         self.progress_bar.show()
@@ -2404,6 +2841,9 @@ class abogen(QWidget):
                     self, "merge_chapters_at_end", True
                 )
             self.conversion_thread.progress_updated.connect(self.update_progress)
+            self.conversion_thread.chapter_progress_updated.connect(
+                self.update_chapter_progress
+            )
             self.conversion_thread.log_updated.connect(self.update_log)
             self.conversion_thread.conversion_finished.connect(
                 self.on_conversion_finished
@@ -2449,17 +2889,16 @@ class abogen(QWidget):
             g_newlines = self.replace_single_newlines
             g_silent_gaps = self.use_silent_gaps
             g_speed_method = self.subtitle_speed_method
-        
+
         # Build HTML summary (Default Styling)
         summary_html = "<html><body>"
-        
+
         header_text = "Queue finished"
         if override_active:
             header_text += " (Global Settings Applied)"
-            
+
         summary_html += (
-            f"<h2>{header_text}</h2>"
-            f"Processed {len(self.queued_items)} items:<br><br>"
+            f"<h2>{header_text}</h2>Processed {len(self.queued_items)} items:<br><br>"
         )
 
         for idx, item in enumerate(self.queued_items, 1):
@@ -2486,7 +2925,7 @@ class abogen(QWidget):
             # Retrieve File-Specific Data (Never Overridden)
             eff_chars = item.total_char_count
             eff_input = item.file_name
-            eff_output = getattr(item, "output_path", "Unknown") 
+            eff_output = getattr(item, "output_path", "Unknown")
             eff_save_sep = getattr(item, "save_chapters_separately", None)
             eff_merge = getattr(item, "merge_chapters_at_end", None)
 
@@ -2542,7 +2981,12 @@ class abogen(QWidget):
         prevent_sleep_end()
         if message == "Cancelled":
             self.etr_label.hide()  # Hide ETR label
+            self.elapsed_label.hide()  # Hide elapsed label
+            self.overall_progress_label.hide()
             self.progress_bar.hide()
+            self.chapter_progress_label.hide()
+            self.chapter_progress_bar.hide()
+            self.current_chapter_label.hide()
             self.btn_cancel.hide()
             self.is_converting = False
             self.controls_widget.show()
@@ -2571,8 +3015,13 @@ class abogen(QWidget):
                 self.queued_items[self.current_queue_index].output_path = output_path
 
         self.etr_label.hide()  # Hide ETR label
+        self.elapsed_label.hide()  # Hide elapsed label
         self.progress_bar.setValue(100)
+        self.overall_progress_label.hide()
         self.progress_bar.hide()
+        self.chapter_progress_bar.hide()
+        self.chapter_progress_label.hide()
+        self.current_chapter_label.hide()
         self.btn_cancel.hide()
         self.is_converting = False
         elapsed = int(time.time() - self.start_time)
@@ -2608,7 +3057,7 @@ class abogen(QWidget):
                 self.show_queue_summary()
         else:
             # More items in queue: clear log and reload for next item
-            self.log_text.clear()
+            self._clear_log_display_and_buffer()
             QApplication.processEvents()
 
         # Start new queued item, if we're using a queued conversion
@@ -2617,8 +3066,14 @@ class abogen(QWidget):
     def reset_ui(self):
         try:
             self.etr_label.hide()  # Hide ETR label
+            self.elapsed_label.hide()  # Hide elapsed label
+            self.overall_progress_label.hide()
             self.progress_bar.setValue(0)
             self.progress_bar.hide()
+            self.chapter_progress_label.hide()
+            self.chapter_progress_bar.setValue(0)
+            self.chapter_progress_bar.hide()
+            self.current_chapter_label.hide()
             self.selected_file = self.selected_file_type = self.selected_book_path = (
                 None
             )
@@ -2649,9 +3104,15 @@ class abogen(QWidget):
         self.finish_widget.hide()
         self.controls_widget.show()
         self.queue_row_widget.show()  # Show queue row on go back
+        self.etr_label.hide()
+        self.elapsed_label.hide()
+        self.overall_progress_label.hide()
         self.progress_bar.hide()
+        self.chapter_progress_label.hide()
+        self.chapter_progress_bar.hide()
+        self.current_chapter_label.hide()
         self.restore_input_box()
-        self.log_text.clear()
+        self._clear_log_display_and_buffer()
 
         # Use displayed_file_path instead of selected_file for EPUBs or PDFs
         display_path = (
@@ -2672,12 +3133,17 @@ class abogen(QWidget):
             self.open_file_btn.show()
 
     def on_save_option_changed(self, option):
+        previous_save_option = self.save_option
+        previous_output_folder = self.selected_output_folder
+
         self.save_option = option
         self.config["save_option"] = option
         if option == "Choose output folder":
             try:
                 folder = QFileDialog.getExistingDirectory(
-                    self, "Select Output Folder", ""
+                    self,
+                    "Select Output Folder",
+                    previous_output_folder or "",
                 )
                 if folder:
                     self.selected_output_folder = folder
@@ -2685,16 +3151,38 @@ class abogen(QWidget):
                     self.save_path_row_widget.show()
                     self.config["selected_output_folder"] = folder
                 else:
-                    self.save_option = "Save next to input file"
-                    self.save_combo.setCurrentText(self.save_option)
-                    self.config["save_option"] = self.save_option
+                    if previous_output_folder:
+                        self.save_option = "Choose output folder"
+                        self.selected_output_folder = previous_output_folder
+                        self.save_combo.setCurrentText(self.save_option)
+                        self.save_path_label.setText(previous_output_folder)
+                        self.save_path_row_widget.show()
+                        self.config["save_option"] = self.save_option
+                        self.config["selected_output_folder"] = previous_output_folder
+                    else:
+                        self.save_option = "Save next to input file"
+                        self.selected_output_folder = None
+                        self.save_combo.setCurrentText(self.save_option)
+                        self.save_path_row_widget.hide()
+                        self.config["save_option"] = self.save_option
+                        self.config["selected_output_folder"] = None
             except Exception as e:
                 self._show_error_message_box(
                     "Folder Dialog Error", f"Could not open folder dialog:\n{e}"
                 )
-                self.save_option = "Save next to input file"
+                self.save_option = previous_save_option
+                self.selected_output_folder = previous_output_folder
                 self.save_combo.setCurrentText(self.save_option)
                 self.config["save_option"] = self.save_option
+                self.config["selected_output_folder"] = previous_output_folder
+                if (
+                    previous_save_option == "Choose output folder"
+                    and previous_output_folder
+                ):
+                    self.save_path_label.setText(previous_output_folder)
+                    self.save_path_row_widget.show()
+                else:
+                    self.save_path_row_widget.hide()
         else:
             self.save_path_row_widget.hide()
             self.selected_output_folder = None
@@ -3004,6 +3492,17 @@ class abogen(QWidget):
         copy_btn.clicked.connect(lambda: QApplication.clipboard().setText(message))
         box.exec()
 
+    def _show_filesystem_error_message(self, title, error, action):
+        message = f"Could not {action}."
+        if isinstance(error, PermissionError):
+            message = f"Permission denied while trying to {action}."
+
+        path = getattr(error, "filename", None)
+        if path:
+            message += f"\nPath: {path}"
+        message += f"\n\nDetails:\n{error}"
+        self._show_error_message_box(title, message)
+
     def _show_preview_error_box(self, msg):
         self._show_error_message_box("Preview Error", f"Preview error: {msg}")
 
@@ -3028,7 +3527,10 @@ class abogen(QWidget):
         self._preview_cleanup()
 
     def cancel_conversion(self):
-        if self.is_converting:
+        is_thread_running = (
+            hasattr(self, "conversion_thread") and self.conversion_thread.isRunning()
+        )
+        if self.is_converting or is_thread_running:
             box = QMessageBox(self)
             box.setIcon(QMessageBox.Icon.Warning)
             box.setWindowTitle("Cancel Conversion")
@@ -3058,13 +3560,16 @@ class abogen(QWidget):
 
             self.is_converting = False
             self.etr_label.hide()  # Hide ETR label
+            self.elapsed_label.hide()  # Hide elapsed label
             self.progress_bar.hide()
+            self.chapter_progress_label.hide()
+            self.chapter_progress_bar.hide()
             self.btn_cancel.hide()
             self.controls_widget.show()
             self.queue_row_widget.show()  # Show queue row on cancel
             self.finish_widget.hide()
             self.restore_input_box()
-            self.log_text.clear()
+            self._clear_log_display_and_buffer()
             display_path = (
                 self.displayed_file_path
                 if self.displayed_file_path
@@ -3088,11 +3593,7 @@ class abogen(QWidget):
         self.subtitle_mode = mode
         self.config["subtitle_mode"] = mode
         save_config(self.config)
-        # Disable subtitle format combo if subtitles are disabled
-        if mode == "Disabled":
-            self.subtitle_format_combo.setEnabled(False)
-        else:
-            self.subtitle_format_combo.setEnabled(True)
+        self._sync_subtitle_format_enabled_state()
         # If highlighting mode selected, SRT is not supported. Disable SRT option and
         # switch away from it if currently selected.
         try:
@@ -3159,10 +3660,14 @@ class abogen(QWidget):
 
             # Save all settings to config
             self.config["word_substitutions_list"] = self.word_substitutions_list
-            self.config["case_sensitive_substitutions"] = self.case_sensitive_substitutions
+            self.config["case_sensitive_substitutions"] = (
+                self.case_sensitive_substitutions
+            )
             self.config["replace_all_caps"] = self.replace_all_caps
             self.config["replace_numerals"] = self.replace_numerals
-            self.config["fix_nonstandard_punctuation"] = self.fix_nonstandard_punctuation
+            self.config["fix_nonstandard_punctuation"] = (
+                self.fix_nonstandard_punctuation
+            )
             save_config(self.config)
 
     def cleanup_conversion_thread(self):
@@ -3418,7 +3923,7 @@ class abogen(QWidget):
         menu = QMenu(self)
 
         theme_menu = QMenu("Theme", self)
-        theme_menu.setToolTip("Choose the application theme")
+        theme_menu.setToolTip("Select the application theme.")
 
         theme_group = QActionGroup(self)
         theme_group.setExclusive(True)
@@ -3436,6 +3941,7 @@ class abogen(QWidget):
             theme_action = QAction(text, self)
             theme_action.setCheckable(True)
             theme_action.setChecked(current_theme == value)
+            theme_action.setToolTip(f"Switch to the {text.lower()} application theme.")
             theme_action.triggered.connect(lambda checked, v=value: self.apply_theme(v))
             theme_group.addAction(theme_action)
             theme_menu.addAction(theme_action)
@@ -3445,7 +3951,7 @@ class abogen(QWidget):
         # Add separate chapters format option
         separate_chapters_format_menu = QMenu("Separate chapters audio format", self)
         separate_chapters_format_menu.setToolTip(
-            "Choose the format for individual chapter files"
+            "Select the audio format for separately saved chapter files."
         )
 
         format_group = QActionGroup(self)
@@ -3455,6 +3961,9 @@ class abogen(QWidget):
             format_action = QAction(format_option, self)
             format_action.setCheckable(True)
             format_action.setChecked(self.separate_chapters_format == format_option)
+            format_action.setToolTip(
+                f"Use {format_option} for individually saved chapter audio files."
+            )
             format_action.triggered.connect(
                 lambda checked, fmt=format_option: self.set_separate_chapters_format(
                     fmt
@@ -3467,15 +3976,24 @@ class abogen(QWidget):
 
         # Add max words per subtitle option
         max_words_action = QAction("Configure max words per subtitle", self)
+        max_words_action.setToolTip(
+            "Set the maximum words allowed per subtitle segment."
+        )
         max_words_action.triggered.connect(self.set_max_subtitle_words)
         menu.addAction(max_words_action)
 
         # Add silence between chapters option
         silence_action = QAction("Configure silence between chapters", self)
+        silence_action.setToolTip(
+            "Set the silence duration inserted between chapter boundaries."
+        )
         silence_action.triggered.connect(self.set_silence_between_chapters)
         menu.addAction(silence_action)
 
         max_lines_action = QAction("Configure max lines in log window", self)
+        max_lines_action.setToolTip(
+            "Set the maximum retained log lines to keep the UI responsive."
+        )
         max_lines_action.triggered.connect(self.set_max_log_lines)
         menu.addAction(max_lines_action)
 
@@ -3491,21 +4009,33 @@ class abogen(QWidget):
                 else "Create desktop shortcut"
             )
             add_shortcut_action = QAction(label, self)
+            add_shortcut_action.setToolTip(
+                "Create a desktop shortcut for quick app access."
+            )
             add_shortcut_action.triggered.connect(self.add_shortcut_to_desktop)
             menu.addAction(add_shortcut_action)
 
         # Add reveal config option
         reveal_config_action = QAction("Open configuration directory", self)
+        reveal_config_action.setToolTip(
+            "Open the folder containing config and user settings."
+        )
         reveal_config_action.triggered.connect(self.reveal_config_in_explorer)
         menu.addAction(reveal_config_action)
 
         # Add open cache directory option
         open_cache_action = QAction("Open cache directory", self)
+        open_cache_action.setToolTip(
+            "Open the cache folder for downloaded and temporary files."
+        )
         open_cache_action.triggered.connect(self.open_cache_directory)
         menu.addAction(open_cache_action)
 
         # Add clear cache files option
         clear_cache_action = QAction("Clear cache files", self)
+        clear_cache_action.setToolTip(
+            "Remove cached files to free disk space or refresh stale data."
+        )
         clear_cache_action.triggered.connect(self.clear_cache_files)
         menu.addAction(clear_cache_action)
 
@@ -3516,6 +4046,9 @@ class abogen(QWidget):
         self.silent_gaps_action = QAction("Use silent gaps between subtitles", self)
         self.silent_gaps_action.setCheckable(True)
         self.silent_gaps_action.setChecked(self.use_silent_gaps)
+        self.silent_gaps_action.setToolTip(
+            "Allow speech to continue across silent subtitle gaps instead of forcing strict cutoff timing."
+        )
         self.silent_gaps_action.triggered.connect(
             lambda checked: self.toggle_use_silent_gaps(checked)
         )
@@ -3524,9 +4057,9 @@ class abogen(QWidget):
         # Subtitle speed adjustment method
         speed_method_menu = menu.addMenu("Subtitle speed adjustment method")
         speed_method_menu.setToolTip(
-            "Choose speed adjustment method:\n"
-            "TTS Regeneration: Better quality\n"
-            "FFmpeg Time-stretch: Faster processing"
+            "Choose how subtitle audio speed is adjusted:\n"
+            "  - TTS Regeneration: better quality, slower\n"
+            "  - FFmpeg Time-stretch: faster, may sound less natural"
         )
 
         speed_method_group = QActionGroup(self)
@@ -3539,6 +4072,11 @@ class abogen(QWidget):
             action = QAction(label, speed_method_menu)
             action.setCheckable(True)
             action.setChecked(self.subtitle_speed_method == method)
+            action.setToolTip(
+                "Regenerate subtitle audio with:"
+                "\n  - TTS for quality, or"
+                "\n  - FFmpeg time-stretch for speed."
+            )
             action.triggered.connect(
                 lambda checked, m=method: self.toggle_subtitle_speed_method(m)
             )
@@ -3554,6 +4092,9 @@ class abogen(QWidget):
         spacy_action = QAction("Use spaCy for sentence segmentation", self)
         spacy_action.setCheckable(True)
         spacy_action.setChecked(self.use_spacy_segmentation)
+        spacy_action.setToolTip(
+            "Use spaCy sentence detection for more accurate sentence splitting."
+        )
         spacy_action.triggered.connect(
             lambda checked: self.toggle_spacy_segmentation(checked)
         )
@@ -3566,6 +4107,9 @@ class abogen(QWidget):
         predownload_action = QAction(
             "Pre-download models and voices for offline use", self
         )
+        predownload_action.setToolTip(
+            "Download required models and voices now for offline processing."
+        )
         predownload_action.triggered.connect(self.show_predownload_dialog)
         menu.addAction(predownload_action)
 
@@ -3574,6 +4118,9 @@ class abogen(QWidget):
         disable_kokoro_action.setCheckable(True)
         disable_kokoro_action.setChecked(
             self.config.get("disable_kokoro_internet", False)
+        )
+        disable_kokoro_action.setToolTip(
+            "Block Kokoro internet access and use local assets only."
         )
         disable_kokoro_action.triggered.connect(
             lambda checked: self.toggle_kokoro_internet_access(checked)
@@ -3584,16 +4131,23 @@ class abogen(QWidget):
         check_updates_action = QAction("Check for updates at startup", self)
         check_updates_action.setCheckable(True)
         check_updates_action.setChecked(self.config.get("check_updates", True))
+        check_updates_action.setToolTip(
+            "Check for new app versions automatically at startup."
+        )
         check_updates_action.triggered.connect(self.toggle_check_updates)
         menu.addAction(check_updates_action)
 
         # Add "Reset to default settings" option
         reset_defaults_action = QAction("Reset to default settings", self)
+        reset_defaults_action.setToolTip(
+            "Restore default settings. Source files are not removed."
+        )
         reset_defaults_action.triggered.connect(self.reset_to_default_settings)
         menu.addAction(reset_defaults_action)
 
         # Add about action
         about_action = QAction("About", self)
+        about_action.setToolTip("Show app version, credits, and useful links.")
         about_action.triggered.connect(self.show_about_dialog)
         menu.addAction(about_action)
 
@@ -3739,7 +4293,9 @@ class abogen(QWidget):
     def add_shortcut_to_desktop(self):
         """Create a desktop shortcut to this program using PowerShell."""
         import sys
+
         from platformdirs import user_desktop_dir
+
         from abogen.utils import create_process
 
         try:
