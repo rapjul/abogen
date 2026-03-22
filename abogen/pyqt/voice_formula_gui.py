@@ -1,49 +1,50 @@
 import json
 import os
+import platform
+import re
+
+from PyQt6.QtCore import QPoint, QRect, QSize, Qt, QTimer
+from PyQt6.QtGui import QAction, QIcon, QPixmap
 from PyQt6.QtWidgets import (
-    QDialog,
-    QVBoxLayout,
+    QApplication,
     QCheckBox,
-    QLabel,
-    QHBoxLayout,
+    QComboBox,
+    QDialog,
     QDoubleSpinBox,
-    QSlider,
-    QScrollArea,
-    QWidget,
-    QPushButton,
-    QSizePolicy,
-    QMessageBox,
+    QFileDialog,
     QFrame,
+    QHBoxLayout,
+    QInputDialog,
+    QLabel,
     QLayout,
-    QStyle,
     QListWidget,
     QListWidgetItem,
-    QInputDialog,
-    QFileDialog,
-    QSplitter,
     QMenu,
-    QApplication,
-    QComboBox,
+    QMessageBox,
+    QPushButton,
+    QScrollArea,
+    QSizePolicy,
+    QSlider,
+    QSplitter,
+    QStyle,
+    QVBoxLayout,
+    QWidget,
 )
-from PyQt6.QtCore import Qt, QTimer, QPoint, QRect, QSize
-from PyQt6.QtGui import QPixmap, QIcon, QAction
+
 from abogen.constants import (
-    VOICES_INTERNAL,
-    SUPPORTED_LANGUAGES_FOR_SUBTITLE_GENERATION,
-    LANGUAGE_DESCRIPTIONS,
     COLORS,
+    LANGUAGE_DESCRIPTIONS,
+    SUPPORTED_LANGUAGES_FOR_SUBTITLE_GENERATION,
+    VOICES_INTERNAL,
 )
-import re
-import platform
 from abogen.utils import get_resource_path
 from abogen.voice_profiles import (
-    load_profiles,
-    save_profiles,
     delete_profile,
     duplicate_profile,
     export_profiles,
+    load_profiles,
+    save_profiles,
 )
-
 
 # Constants
 VOICE_MIXER_WIDTH = 100
@@ -64,6 +65,7 @@ class SaveButtonWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         self.save_btn = QPushButton("Save", self)
         self.save_btn.setFixedWidth(48)
+        self.save_btn.setToolTip("Save changes for this profile.")
         self.save_btn.clicked.connect(lambda: save_callback(profile_name))
         layout.addStretch()
         layout.addWidget(self.save_btn)
@@ -224,6 +226,7 @@ class VoiceMixer(QWidget):
         # Checkbox (now below icons)
         self.checkbox = QCheckBox()
         self.checkbox.setChecked(initial_status)
+        self.checkbox.setToolTip("Enable or disable this voice in the current mix.")
         self.checkbox.stateChanged.connect(self.toggle_inputs)
         layout.addWidget(self.checkbox, alignment=Qt.AlignmentFlag.AlignCenter)
 
@@ -233,10 +236,14 @@ class VoiceMixer(QWidget):
         self.spin_box.setSingleStep(0.01)
         self.spin_box.setDecimals(2)
         self.spin_box.setValue(initial_weight)
+        self.spin_box.setToolTip("Set this voice weight precisely from 0.00 to 1.00.")
 
         self.slider = QSlider(Qt.Orientation.Vertical)
         self.slider.setRange(0, 100)
         self.slider.setValue(int(initial_weight * 100))
+        self.slider.setToolTip(
+            "Adjust this voice weight quickly (0 to 100 maps to 0.00 to 1.00)."
+        )
         self.slider.setSizePolicy(
             QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding
         )
@@ -248,7 +255,7 @@ class VoiceMixer(QWidget):
         # Connect controls with internal sync only (no external updates)
         self.slider.valueChanged.connect(self._on_slider_changed)
         self.spin_box.valueChanged.connect(self._on_spinbox_changed)
-        
+
         # Flag to prevent recursive updates
         self._syncing = False
 
@@ -328,7 +335,7 @@ class VoiceMixer(QWidget):
         self._syncing = True
         self.spin_box.setValue(val / 100)
         self._syncing = False
-    
+
     def _on_spinbox_changed(self, val):
         """Handle spinbox value change - sync to slider without triggering external updates."""
         if self._syncing:
@@ -355,6 +362,9 @@ class HoverLabel(QLabel):
         # Create delete button
         self.delete_button = QPushButton("×", self)
         self.delete_button.setFixedSize(16, 16)
+        self.delete_button.setToolTip(
+            "Remove this voice from the weighted summary list."
+        )
         self.delete_button.setStyleSheet(
             f"""
             QPushButton {{
@@ -422,7 +432,7 @@ class VoiceFormulaDialog(QDialog):
         self._profile_states = {}
         # Cache for loaded profiles to avoid repeated disk reads
         self._cached_profiles = profiles.copy()
-        
+
         # Debounce timer for slider updates (prevents lag during rapid slider movement)
         self._update_timer = QTimer(self)
         self._update_timer.setSingleShot(True)
@@ -430,10 +440,10 @@ class VoiceFormulaDialog(QDialog):
         self._update_timer.timeout.connect(self._do_debounced_update)
         self._pending_weighted_update = False
         self._pending_profile_modified = False
-        
+
         # Cache for voice weight labels to enable in-place updates
         self._voice_labels = {}  # voice_name -> HoverLabel widget
-        
+
         # Add subtitle_combo reference if parent has it
         self.subtitle_combo = None
         if parent is not None and hasattr(parent, "subtitle_combo"):
@@ -449,6 +459,7 @@ class VoiceFormulaDialog(QDialog):
         header_layout.addWidget(QLabel("Profiles:"))
         header_layout.addStretch()
         self.btn_new_profile = QPushButton("New profile")
+        self.btn_new_profile.setToolTip("Create a new voice mix profile.")
         header_layout.addWidget(self.btn_new_profile)
         profile_layout.addLayout(header_layout)
         # Profile list
@@ -480,8 +491,14 @@ class VoiceFormulaDialog(QDialog):
         # Save and management buttons
         mgmt_layout = QVBoxLayout()
         self.btn_import_profiles = QPushButton("Import profile(s)")
+        self.btn_import_profiles.setToolTip(
+            "Import one or more voice profiles from a file."
+        )
         mgmt_layout.addWidget(self.btn_import_profiles)
         self.btn_export_profiles = QPushButton("Export profiles")
+        self.btn_export_profiles.setToolTip(
+            "Export selected or all voice profiles to a file."
+        )
         mgmt_layout.addWidget(self.btn_export_profiles)
         profile_layout.addLayout(mgmt_layout)
         # prepare mixer widget
@@ -511,6 +528,9 @@ class VoiceFormulaDialog(QDialog):
         header_row.addStretch()
         header_row.addWidget(QLabel("Language:"))
         self.language_combo = QComboBox()
+        self.language_combo.setToolTip(
+            "Choose which language's voices are shown and used for this profile."
+        )
         for code, desc in LANGUAGE_OPTIONS:
             flag = get_resource_path("abogen.assets.flags", f"{code}.png")
             if flag and os.path.exists(flag):
@@ -580,6 +600,11 @@ class VoiceFormulaDialog(QDialog):
         clear_all_button = QPushButton("Clear all")
         ok_button = QPushButton("OK")
         cancel_button = QPushButton("Cancel")
+        clear_all_button.setToolTip(
+            "Disable all voices and reset their effective selection."
+        )
+        ok_button.setToolTip("Apply this mix and close the dialog.")
+        cancel_button.setToolTip("Close without applying new changes.")
 
         # Set OK button as default
         ok_button.setDefault(True)
@@ -616,7 +641,7 @@ class VoiceFormulaDialog(QDialog):
         self.btn_import_profiles.clicked.connect(self.import_profiles_dialog)
         # Note: Signal connections for voice mixers are already set up in add_voice()
         # with debouncing for slider updates to prevent lag
-        
+
         # Update profile colors on initialization to show status
         self.update_profile_list_colors()
 
@@ -828,12 +853,12 @@ class VoiceFormulaDialog(QDialog):
         """Schedule a debounced weighted sums update."""
         self._pending_weighted_update = True
         self._update_timer.start()  # Restart the timer
-    
+
     def _schedule_profile_modified(self):
         """Schedule a debounced profile modified update."""
         self._pending_profile_modified = True
         self._update_timer.start()  # Restart the timer
-    
+
     def _do_debounced_update(self):
         """Execute pending debounced updates."""
         if self._pending_weighted_update:
@@ -872,18 +897,18 @@ class VoiceFormulaDialog(QDialog):
             # Get current voice names in display
             current_names = set(self._voice_labels.keys())
             new_names = set(name for name, _ in selected)
-            
+
             # Remove labels for voices no longer selected
             for name in current_names - new_names:
                 label = self._voice_labels.pop(name)
                 self.weighted_sums_layout.removeWidget(label)
                 label.deleteLater()
-            
+
             # Update or create labels
             for name, weight in selected:
                 percentage = weight / total * 100
                 label_text = f'<b><span style="color:{COLORS.get("BLUE")}">{name}: {percentage:.1f}%</span></b>'
-                
+
                 if name in self._voice_labels:
                     # Update existing label in-place (fast path)
                     self._voice_labels[name].setText(label_text)
