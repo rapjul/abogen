@@ -1,7 +1,3 @@
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
-
 [project]
 name = "abogen"
 description = "Generate audiobooks from EPUBs, PDFs and text with synchronized captions."
@@ -29,7 +25,7 @@ keywords = [
 dependencies = [
   "pip",
   "kokoro>=0.9.4",
-  "misaki[zh]>=0.9.4",
+  "misaki[en]>=0.9.4",
   "supertonic>=0.1.0",
   "ebooklib>=0.19",
   "beautifulsoup4>=4.13.4",
@@ -66,16 +62,6 @@ classifiers = [
 
 dynamic = ["version"]
 
-[project.urls]
-Homepage = "https://github.com/denizsafak/abogen"
-Documentation = "https://github.com/denizsafak/abogen"
-Repository = "https://github.com/denizsafak/abogen"
-Issues = "https://github.com/denizsafak/abogen/issues"
-
-[tool.hatch.metadata]
-allow-direct-references = true
-
-
 [project.gui-scripts]
 abogen = "abogen.pyqt.main:main"
 
@@ -83,6 +69,21 @@ abogen = "abogen.pyqt.main:main"
 abogen-cli = "abogen.webui.app:main"
 abogen-web = "abogen.webui.app:main"
 abogen-pyqt = "abogen.pyqt.main:main"
+
+[project.urls]
+Homepage = "https://github.com/denizsafak/abogen"
+Documentation = "https://github.com/denizsafak/abogen"
+Repository = "https://github.com/denizsafak/abogen"
+Issues = "https://github.com/denizsafak/abogen/issues"
+
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.hatch.build.targets.sdist]
 exclude = [
@@ -96,10 +97,10 @@ exclude = [
 [tool.hatch.build.targets.wheel]
 packages = ["abogen"]
 
-
 [tool.hatch.version]
 path = "abogen/VERSION"
 pattern = "^(?P<version>.+)$"
+
 
 [tool.pytest.ini_options]
 filterwarnings = [
@@ -111,13 +112,13 @@ filterwarnings = [
 
 [project.optional-dependencies]
 # NVIDIA GPU (Windows) (CUDA 12.6)       # uv tool install abogen[cuda126]
-cuda126 = ["torch"]
+cuda126 = ["torch; sys_platform == 'win32'"]
 # NVIDIA GPU (Windows) (CUDA 12.8)       # uv tool install abogen[cuda]
-cuda = ["torch"]
+cuda = ["torch; sys_platform == 'win32'"]
 # NVIDIA GPU (Windows) (CUDA 13.0)       # uv tool install abogen[cuda130]
-cuda130 = ["torch"]
+cuda130 = ["torch; sys_platform == 'win32'"]
 # AMD GPU (Linux) (ROCm 6.4)             # uv tool install abogen[rocm]
-rocm = ["torch", "pytorch-triton-rocm"]
+rocm = ["torch; sys_platform == 'linux'", "pytorch-triton-rocm; sys_platform == 'linux'"]
 # Development dependencies               # uv tool install abogen[dev]
 dev = ["build", "pytest"]
 
@@ -130,19 +131,13 @@ kokoro = [
 ]
 
 # --- TORCH CONFIGURATION ---
+# Keep source routing minimal here for lock stability.
+# Mixing CUDA/ROCm source markers in a single universal lock has produced
+# cross-environment resolution conflicts in uv; macOS arm64 stays explicit.
 
 torch = [
-  # ROCm 6.4 Nightly (AMD)
-  { index = "pytorch-rocm-64-nightly", marker = "extra == 'rocm'" },
-
-  # CUDA 13.0 (NVIDIA)
-  { index = "pytorch-cuda-130", marker = "extra == 'cuda130' and extra != 'rocm'" },
-
-  # CUDA 12.6 (NVIDIA)
-  { index = "pytorch-cuda-126", marker = "extra == 'cuda126' and extra != 'rocm' and extra != 'cuda130'" },
-
-  # CUDA 12.8 (NVIDIA)
-  { index = "pytorch-cuda-128", marker = "extra == 'cuda' and extra != 'rocm' and extra != 'cuda130' and extra != 'cuda126'" },
+  # macOS (Apple Silicon)
+  { index = "pytorch", marker = "sys_platform == 'darwin' and platform_machine == 'arm64'" }
 ]
 
 # --- TRITON CONFIGURATION ---
@@ -158,6 +153,12 @@ pytorch-triton-rocm = [
 name = "pypi"
 url = "https://pypi.org/simple"
 default = true
+
+# PyTorch Index (macOS Apple Silicon)
+[[tool.uv.index]]
+name = "pytorch"
+url = "https://download.pytorch.org/whl"
+explicit = true
 
 # CUDA 12.6 Index
 [[tool.uv.index]]
