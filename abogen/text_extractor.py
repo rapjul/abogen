@@ -218,11 +218,44 @@ def _build_metadata_payload(
     return normalized
 
 
+def _extract_pdf_cover(
+    document: fitz.Document,
+) -> Tuple[Optional[bytes], Optional[str]]:
+    """
+    Extract the first page of a PDF as a cover image.
+    Renders at 150 DPI and converts to PNG.
+
+    Returns (image_bytes, mime_type) or (None, None) if extraction fails.
+    """
+    try:
+        if len(document) == 0:
+            return None, None
+
+        first_page = cast(Any, document[0])
+        # Render at 150 DPI: matrix of (2, 2) = 72*2 = 144 DPI, use (2.08, 2.08) for 150 DPI
+        matrix = fitz.Matrix(2.08, 2.08)
+        pixmap = first_page.get_pixmap(matrix=matrix, alpha=False)
+
+        # Convert to PNG
+        image_bytes = cast(bytes, pixmap.tobytes("png"))
+        return image_bytes, "image/png"
+    except Exception as e:
+        logger.debug(f"Failed to extract PDF cover: {e}")
+        return None, None
+
+
 def _extract_pdf(path: Path) -> ExtractionResult:
     metadata_source = MetadataSource()
     chapters: List[ExtractedChapter] = []
+    cover_image: Optional[bytes] = None
+    cover_mime: Optional[str] = None
+
     with fitz.open(str(path)) as document:
         metadata_source = _collect_pdf_metadata(document)
+
+        # Extract cover from first page
+        cover_image, cover_mime = _extract_pdf_cover(document)
+
         pages = cast(Iterable[fitz.Page], document)
         for index, page in enumerate(pages):
             page_obj = cast(Any, page)
@@ -234,7 +267,12 @@ def _extract_pdf(path: Path) -> ExtractionResult:
     if not chapters:
         chapters.append(ExtractedChapter(title=path.stem, text=""))
     metadata = _build_metadata_payload(metadata_source, len(chapters), "pdf", path.stem)
-    return ExtractionResult(chapters=chapters, metadata=metadata)
+    return ExtractionResult(
+        chapters=chapters,
+        metadata=metadata,
+        cover_image=cover_image,
+        cover_mime=cover_mime,
+    )
 
 
 def _collect_pdf_metadata(document: fitz.Document) -> MetadataSource:

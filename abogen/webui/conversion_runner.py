@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 import json
 import math
 import os
@@ -8,11 +9,10 @@ import subprocess
 import sys
 import tempfile
 import traceback
-import gc
-from datetime import datetime
 from collections import defaultdict
 from contextlib import ExitStack
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Set, cast
 
@@ -21,17 +21,26 @@ import soundfile as sf
 import static_ffmpeg
 
 from abogen.constants import VOICES_INTERNAL
+from abogen.entity_analysis import normalize_manual_override_token
+from abogen.entity_analysis import normalize_token as normalize_entity_token
 from abogen.epub3.exporter import build_epub3_package
-from abogen.kokoro_text_normalization import ApostropheConfig, normalize_for_pipeline, HAS_NUM2WORDS
+from abogen.kokoro_text_normalization import (
+    HAS_NUM2WORDS,
+    ApostropheConfig,
+    normalize_for_pipeline,
+)
+from abogen.llm_client import LLMClientError
+from abogen.normalization_settings import (
+    apply_overrides as apply_normalization_overrides,
+)
 from abogen.normalization_settings import (
     build_apostrophe_config,
     build_llm_configuration,
     get_runtime_settings,
-    apply_overrides as apply_normalization_overrides,
 )
-from abogen.entity_analysis import normalize_token as normalize_entity_token
-from abogen.entity_analysis import normalize_manual_override_token
+from abogen.pronunciation_store import increment_usage
 from abogen.text_extractor import ExtractedChapter, extract_from_path
+from abogen.tts_supertonic import DEFAULT_SUPERTONIC_VOICES, SupertonicPipeline
 from abogen.utils import (
     calculate_text_length,
     create_process,
@@ -44,12 +53,8 @@ from abogen.utils import (
 from abogen.voice_cache import ensure_voice_assets
 from abogen.voice_formulas import extract_voice_ids, get_new_voice
 from abogen.voice_profiles import load_profiles, normalize_profile_entry
-from abogen.pronunciation_store import increment_usage
-from abogen.llm_client import LLMClientError
-from abogen.tts_supertonic import DEFAULT_SUPERTONIC_VOICES, SupertonicPipeline
 
 from .service import Job, JobStatus
-
 
 SPLIT_PATTERN = r"\n+"
 SAMPLE_RATE = 24000
@@ -154,7 +159,9 @@ def _coerce_truthy(value: Any, default: bool = True) -> bool:
 
 
 _HEADING_SANITIZE_RE = re.compile(r"[^a-z0-9]+")
-_HEADING_NUMBER_PREFIX_RE = re.compile(r"^\s*(?P<number>(?:\d+|[ivxlcdm]+))(?P<suffix>(?:[\s.:;-].*)?)$", re.IGNORECASE)
+_HEADING_NUMBER_PREFIX_RE = re.compile(
+    r"^\s*(?P<number>(?:\d+|[ivxlcdm]+))(?P<suffix>(?:[\s.:;-].*)?)$", re.IGNORECASE
+)
 _ACRONYM_ALLOWLIST = {
     "AI",
     "API",
@@ -204,27 +211,27 @@ def _headings_equivalent(left: str, right: str) -> bool:
     simple_right = _simplify_heading_text(right)
     if not simple_left or not simple_right:
         return False
-    
+
     # Exact match
     if simple_left == simple_right:
         return True
-        
+
     # Check if one is a prefix of the other (e.g. "Chapter 2" vs "Chapter 2: The Return")
     # But be careful not to match "Chapter 1" with "Chapter 10"
     # _simplify_heading_text removes "chapter" prefix, so we are comparing "2" vs "2thereturn"
-    
+
     # If left is "2" and right is "2thereturn", left is prefix of right.
     if simple_right.startswith(simple_left):
         return True
-        
+
     # If left is "2thereturn" and right is "2", right is prefix of left.
     if simple_left.startswith(simple_right):
         return True
-        
+
     # Also check if the line is contained in the heading if it's long enough
     if len(simple_left) > 5 and simple_left in simple_right:
         return True
-        
+
     return False
 
 
@@ -235,7 +242,9 @@ def _format_spoken_chapter_title(title: str, index: int, apply_prefix: bool) -> 
     if not apply_prefix:
         return base
     lowered = base.lower()
-    if lowered.startswith("chapter") and (len(lowered) == 7 or not lowered[7].isalpha()):
+    if lowered.startswith("chapter") and (
+        len(lowered) == 7 or not lowered[7].isalpha()
+    ):
         return base
     match = _HEADING_NUMBER_PREFIX_RE.match(base)
     if match:
@@ -355,6 +364,7 @@ def _normalize_chapter_opening_caps(text: str) -> tuple[str, bool]:
 
     return leading + "".join(builder), True
 
+
 def _normalize_metadata_map(values: Optional[Mapping[str, Any]]) -> Dict[str, str]:
     normalized: Dict[str, str] = {}
     if not values:
@@ -385,16 +395,28 @@ def _format_author_sentence(raw: Optional[str]) -> str:
 
     if segments:
         for segment in segments:
-            parts = [part.strip() for part in re.split(r"\band\b", segment, flags=re.IGNORECASE) if part.strip()]
+            parts = [
+                part.strip()
+                for part in re.split(r"\band\b", segment, flags=re.IGNORECASE)
+                if part.strip()
+            ]
             if parts:
                 tokens.extend(parts)
             else:
                 tokens.append(segment)
     else:
-        parts = [part.strip() for part in re.split(r"\band\b", working, flags=re.IGNORECASE) if part.strip()]
+        parts = [
+            part.strip()
+            for part in re.split(r"\band\b", working, flags=re.IGNORECASE)
+            if part.strip()
+        ]
         tokens.extend(parts or [normalized])
 
-    cleaned = [token for token in tokens if token and token.casefold() not in {"unknown", "various"}]
+    cleaned = [
+        token
+        for token in tokens
+        if token and token.casefold() not in {"unknown", "various"}
+    ]
     if not cleaned:
         return ""
     if len(cleaned) == 1:
@@ -454,7 +476,9 @@ def _normalize_series_number(value: Any) -> Optional[str]:
         return normalized
 
 
-def _extract_series_metadata(values: Mapping[str, str]) -> tuple[Optional[str], Optional[str]]:
+def _extract_series_metadata(
+    values: Mapping[str, str],
+) -> tuple[Optional[str], Optional[str]]:
     series_name: Optional[str] = None
     for key in _SERIES_NAME_KEYS:
         raw = values.get(key)
@@ -477,7 +501,9 @@ def _extract_series_metadata(values: Mapping[str, str]) -> tuple[Optional[str], 
     return series_name, series_number
 
 
-def _format_series_sentence(series_name: Optional[str], series_number: Optional[str]) -> str:
+def _format_series_sentence(
+    series_name: Optional[str], series_number: Optional[str]
+) -> str:
     if not series_name or not series_number:
         return ""
     name = series_name.strip()
@@ -495,14 +521,26 @@ def _build_title_intro_text(
 ) -> str:
     normalized = _normalize_metadata_map(metadata)
     fallback_title = Path(fallback_basename).stem if fallback_basename else ""
-    title = normalized.get("title") or normalized.get("book_title") or normalized.get("album") or fallback_title
+    title = (
+        normalized.get("title")
+        or normalized.get("book_title")
+        or normalized.get("album")
+        or fallback_title
+    )
     if not title:
         title = fallback_title
     subtitle = normalized.get("subtitle") or normalized.get("sub_title")
     if subtitle and title and subtitle.casefold() == title.casefold():
         subtitle = ""
     author_value = ""
-    for candidate in ("artist", "album_artist", "author", "authors", "writer", "composer"):
+    for candidate in (
+        "artist",
+        "album_artist",
+        "author",
+        "authors",
+        "writer",
+        "composer",
+    ):
         value = normalized.get(candidate)
         if value:
             author_value = value
@@ -537,13 +575,24 @@ def _build_outro_text(
         or fallback_title
     )
     author_value = ""
-    for candidate in ("authors", "author", "album_artist", "artist", "writer", "composer"):
+    for candidate in (
+        "authors",
+        "author",
+        "album_artist",
+        "artist",
+        "writer",
+        "composer",
+    ):
         value = normalized.get(candidate)
         if value:
             author_value = value
             break
     author_sentence = _format_author_sentence(author_value)
-    authors_fragment = author_sentence[3:].strip() if author_sentence.lower().startswith("by ") else author_sentence.strip()
+    authors_fragment = (
+        author_sentence[3:].strip()
+        if author_sentence.lower().startswith("by ")
+        else author_sentence.strip()
+    )
 
     if title and authors_fragment:
         closing_line = f"The end of {title} from {authors_fragment}"
@@ -770,7 +819,9 @@ def _chapter_label(file_type: str) -> str:
     return "chapters" if file_type.lower() in {"epub", "markdown"} else "pages"
 
 
-def _update_metadata_for_chapter_count(metadata: Dict[str, Any], count: int, file_type: str) -> None:
+def _update_metadata_for_chapter_count(
+    metadata: Dict[str, Any], count: int, file_type: str
+) -> None:
     if not metadata or count <= 0:
         return
 
@@ -833,12 +884,22 @@ def _apply_chapter_overrides(
         if base is None:
             source_title = payload.get("source_title")
             if isinstance(source_title, str):
-                base = next((chapter for chapter in extracted if chapter.title == source_title), None)
+                base = next(
+                    (chapter for chapter in extracted if chapter.title == source_title),
+                    None,
+                )
 
         if base is None:
             candidate_title = payload.get("title")
             if isinstance(candidate_title, str):
-                base = next((chapter for chapter in extracted if chapter.title == candidate_title), None)
+                base = next(
+                    (
+                        chapter
+                        for chapter in extracted
+                        if chapter.title == candidate_title
+                    ),
+                    None,
+                )
 
         text_override = payload.get("text")
         if text_override is not None:
@@ -903,9 +964,15 @@ def _normalize_for_pipeline(
 
     runtime_settings = get_runtime_settings()
     if normalization_overrides:
-        runtime_settings = apply_normalization_overrides(runtime_settings, normalization_overrides)
-    apostrophe_config = build_apostrophe_config(settings=runtime_settings, base=_APOSTROPHE_CONFIG)
-    return normalize_for_pipeline(text, config=apostrophe_config, settings=runtime_settings)
+        runtime_settings = apply_normalization_overrides(
+            runtime_settings, normalization_overrides
+        )
+    apostrophe_config = build_apostrophe_config(
+        settings=runtime_settings, base=_APOSTROPHE_CONFIG
+    )
+    return normalize_for_pipeline(
+        text, config=apostrophe_config, settings=runtime_settings
+    )
 
 
 def _merge_pronunciation_overrides(job: Any) -> List[Dict[str, Any]]:
@@ -929,7 +996,9 @@ def _merge_pronunciation_overrides(job: Any) -> List[Dict[str, Any]]:
             pronunciation_value = str(entry.get("pronunciation") or "").strip()
             if not token_value or not pronunciation_value:
                 continue
-            normalized = str(entry.get("normalized") or "").strip() or normalize_entity_token(token_value)
+            normalized = str(
+                entry.get("normalized") or ""
+            ).strip() or normalize_entity_token(token_value)
             if not normalized:
                 continue
             collected[normalized] = {
@@ -982,7 +1051,9 @@ def _merge_pronunciation_overrides(job: Any) -> List[Dict[str, Any]]:
             pronunciation_value = str(entry.get("pronunciation") or "").strip()
             if not token_value or not pronunciation_value:
                 continue
-            normalized = str(entry.get("normalized") or "").strip() or normalize_manual_override_token(token_value)
+            normalized = str(
+                entry.get("normalized") or ""
+            ).strip() or normalize_manual_override_token(token_value)
             if not normalized:
                 continue
             collected[normalized] = {
@@ -1036,7 +1107,9 @@ def _compile_pronunciation_rules(
 
         usage_normalized = str(entry.get("normalized") or "").strip()
         if not usage_normalized and token_values:
-            usage_normalized = normalize_entity_token(token_values[0]) or token_values[0]
+            usage_normalized = (
+                normalize_entity_token(token_values[0]) or token_values[0]
+            )
         usage_token = str(entry.get("token") or token_values[0])
 
         for token_value in token_values:
@@ -1061,7 +1134,9 @@ def _compile_pronunciation_rules(
         token_value = candidate["token"]
         pronunciation_value = candidate["replacement"]
         escaped = re.escape(token_value)
-        pattern = re.compile(rf"(?i)(?<!\w){escaped}(?P<possessive>'s|\u2019s|\u2019)?(?!\w)")
+        pattern = re.compile(
+            rf"(?i)(?<!\w){escaped}(?P<possessive>'s|\u2019s|\u2019)?(?!\w)"
+        )
         compiled.append(
             {
                 "pattern": pattern,
@@ -1110,7 +1185,9 @@ def _compile_heteronym_sentence_rules(
                 if not isinstance(opt, Mapping):
                     continue
                 if str(opt.get("key") or "").strip() == choice:
-                    replacement_sentence = str(opt.get("replacement_sentence") or "").strip()
+                    replacement_sentence = str(
+                        opt.get("replacement_sentence") or ""
+                    ).strip()
                     break
         if not replacement_sentence:
             continue
@@ -1221,7 +1298,9 @@ def _chunk_voice_spec(job: Any, chunk: Dict[str, Any], fallback: str) -> str:
     return _job_voice_fallback(job)
 
 
-def _group_chunks_by_chapter(chunks: Iterable[Dict[str, Any]]) -> Dict[int, List[Dict[str, Any]]]:
+def _group_chunks_by_chapter(
+    chunks: Iterable[Dict[str, Any]],
+) -> Dict[int, List[Dict[str, Any]]]:
     grouped: Dict[int, List[Dict[str, Any]]] = defaultdict(list)
     for entry in chunks or []:
         if not isinstance(entry, dict):
@@ -1254,7 +1333,9 @@ def _record_override_usage(
         try:
             increment_usage(language=language, token=token_value, amount=int(amount))
         except Exception:  # pragma: no cover - defensive logging
-            job.add_log(f"Failed to record usage for override {token_value}", level="warning")
+            job.add_log(
+                f"Failed to record usage for override {token_value}", level="warning"
+            )
 
 
 def _safe_int(value: Any, default: int = 0) -> int:
@@ -1287,6 +1368,46 @@ def _escape_ffmetadata_value(value: str) -> str:
     escaped = str(value).replace("\\", "\\\\").replace("\n", "\\n")
     escaped = escaped.replace("=", "\\=").replace(";", "\\;").replace("#", "\\#")
     return escaped
+
+
+def _validate_cover_image(cover_path: Optional[Path], job: Any) -> Optional[Path]:
+    """
+    Validate that a cover image exists, is readable, and has a supported format.
+
+    Returns the validated Path if valid, None otherwise.
+    Logs appropriate warnings if validation fails.
+    """
+    if not cover_path:
+        return None
+
+    try:
+        if not cover_path.exists():
+            job.add_log(f"Cover image not found: {cover_path}", level="warning")
+            return None
+
+        if not cover_path.is_file():
+            job.add_log(f"Cover path is not a file: {cover_path}", level="warning")
+            return None
+
+        # Check readability
+        if not os.access(cover_path, os.R_OK):
+            job.add_log(f"Cover image is not readable: {cover_path}", level="warning")
+            return None
+
+        # Check supported formats (JPEG, PNG, BMP that FFmpeg's mjpeg encoder supports)
+        suffix = cover_path.suffix.lower()
+        supported_formats = {".jpg", ".jpeg", ".png", ".bmp"}
+        if suffix not in supported_formats:
+            job.add_log(
+                f"Cover image format '{suffix}' not supported (supported: {supported_formats}). Skipping artwork.",
+                level="warning",
+            )
+            return None
+
+        return cover_path
+    except (OSError, ValueError) as e:
+        job.add_log(f"Error validating cover image: {e}", level="warning")
+        return None
 
 
 def _metadata_to_ffmpeg_args(metadata: Dict[str, Any]) -> List[str]:
@@ -1350,7 +1471,9 @@ def _write_ffmetadata_file(
     content = _render_ffmetadata(metadata, chapters)
     if content.strip() == ";FFMETADATA1":
         return None
-    directory = audio_path.parent if audio_path.parent.exists() else Path(tempfile.gettempdir())
+    directory = (
+        audio_path.parent if audio_path.parent.exists() else Path(tempfile.gettempdir())
+    )
     with tempfile.NamedTemporaryFile(
         mode="w",
         encoding="utf-8",
@@ -1372,6 +1495,7 @@ def _apply_m4b_chapters_with_mutagen(
 
     try:
         from fractions import Fraction
+
         from mutagen.mp4 import MP4, MP4Chapter  # type: ignore[import]
     except ImportError:
         job.add_log(
@@ -1387,7 +1511,9 @@ def _apply_m4b_chapters_with_mutagen(
         return False
 
     chapter_objects: List[MP4Chapter] = []
-    for index, entry in enumerate(sorted(chapters, key=lambda item: float(item.get("start") or 0.0))):
+    for index, entry in enumerate(
+        sorted(chapters, key=lambda item: float(item.get("start") or 0.0))
+    ):
         start_raw = entry.get("start")
         if start_raw is None:
             continue
@@ -1434,11 +1560,14 @@ def _embed_m4b_metadata(
     metadata_map = dict(metadata_payload.get("metadata") or {})
     chapter_entries = list(metadata_payload.get("chapters") or [])
     ffmetadata_path = _write_ffmetadata_file(audio_path, metadata_map, chapter_entries)
+
+    # Validate and use cover image if available and valid
     cover_path: Optional[Path] = None
     if job.cover_image_path:
         candidate = Path(job.cover_image_path)
-        if candidate.exists():
-            cover_path = candidate
+        cover_path = _validate_cover_image(candidate, job)
+        if cover_path:
+            job.add_log(f"Using cover image for audiobook artwork: {cover_path}")
 
     metadata_args = _metadata_to_ffmpeg_args(metadata_map)
 
@@ -1521,21 +1650,25 @@ def run_conversion_job(job: Job) -> None:
     normalization_settings = get_runtime_settings()
     job_overrides = getattr(job, "normalization_overrides", None)
     if job_overrides:
-        normalization_settings = apply_normalization_overrides(normalization_settings, job_overrides)
+        normalization_settings = apply_normalization_overrides(
+            normalization_settings, job_overrides
+        )
     apostrophe_config = build_apostrophe_config(
         settings=normalization_settings,
         base=_APOSTROPHE_CONFIG,
     )
-    
+
     if apostrophe_config.convert_numbers and not HAS_NUM2WORDS:
         job.add_log(
             "Number normalization is enabled but 'num2words' library is not available. "
             "Numbers (including years) will NOT be converted to words. "
             "Please install 'num2words' to enable this feature.",
-            level="warning"
+            level="warning",
         )
 
-    apostrophe_mode = str(normalization_settings.get("normalization_apostrophe_mode", "spacy")).lower()
+    apostrophe_mode = str(
+        normalization_settings.get("normalization_apostrophe_mode", "spacy")
+    ).lower()
     if apostrophe_mode == "llm":
         llm_config = build_llm_configuration(normalization_settings)
         if not llm_config.is_configured():
@@ -1597,11 +1730,20 @@ def run_conversion_job(job: Job) -> None:
             _np, KPipeline = load_numpy_kpipeline()
             # Try to initialize with the selected device; fall back to CPU if CUDA fails
             try:
-                pipelines[provider_norm] = KPipeline(lang_code=job.language, repo_id="hexgrad/Kokoro-82M", device=device)
+                pipelines[provider_norm] = KPipeline(
+                    lang_code=job.language, repo_id="hexgrad/Kokoro-82M", device=device
+                )
             except RuntimeError as e:
                 if "CUDA" in str(e) and device != "cpu":
-                    job.add_log(f"CUDA initialization failed, falling back to CPU: {e}", level="warning")
-                    pipelines[provider_norm] = KPipeline(lang_code=job.language, repo_id="hexgrad/Kokoro-82M", device="cpu")
+                    job.add_log(
+                        f"CUDA initialization failed, falling back to CPU: {e}",
+                        level="warning",
+                    )
+                    pipelines[provider_norm] = KPipeline(
+                        lang_code=job.language,
+                        repo_id="hexgrad/Kokoro-82M",
+                        device="cpu",
+                    )
                 else:
                     raise
             if not kokoro_cache_ready:
@@ -1609,28 +1751,58 @@ def run_conversion_job(job: Job) -> None:
                 kokoro_cache_ready = True
             return pipelines[provider_norm]
 
-        def resolve_voice_target(raw_spec: str) -> tuple[str, str, Optional[float], Optional[int]]:
+        def resolve_voice_target(
+            raw_spec: str,
+        ) -> tuple[str, str, Optional[float], Optional[int]]:
             """Return (provider, voice_spec, speed_override, steps_override)."""
             spec = str(raw_spec or "").strip()
             speaker_name, _ = _split_speaker_reference(spec)
             if speaker_name and speaker_name in normalized_profiles:
                 entry = normalized_profiles[speaker_name]
-                provider = str(entry.get("provider") or "kokoro").strip().lower() or "kokoro"
+                provider = (
+                    str(entry.get("provider") or "kokoro").strip().lower() or "kokoro"
+                )
                 if provider == "supertonic":
-                    voice = str(entry.get("voice") or getattr(job, "voice", "M1") or "M1").strip() or "M1"
-                    steps = int(entry.get("total_steps") or getattr(job, "supertonic_total_steps", 5) or 5)
-                    speed = float(entry.get("speed") or getattr(job, "speed", 1.0) or 1.0)
-                    return "supertonic", _supertonic_voice_from_spec(voice, getattr(job, "voice", "M1")), speed, steps
+                    voice = (
+                        str(
+                            entry.get("voice") or getattr(job, "voice", "M1") or "M1"
+                        ).strip()
+                        or "M1"
+                    )
+                    steps = int(
+                        entry.get("total_steps")
+                        or getattr(job, "supertonic_total_steps", 5)
+                        or 5
+                    )
+                    speed = float(
+                        entry.get("speed") or getattr(job, "speed", 1.0) or 1.0
+                    )
+                    return (
+                        "supertonic",
+                        _supertonic_voice_from_spec(voice, getattr(job, "voice", "M1")),
+                        speed,
+                        steps,
+                    )
                 formula = _formula_from_kokoro_entry(entry)
                 return "kokoro", formula or spec, None, None
 
-            fallback_provider = str(getattr(job, "tts_provider", "kokoro") or "kokoro").strip().lower() or "kokoro"
+            fallback_provider = (
+                str(getattr(job, "tts_provider", "kokoro") or "kokoro").strip().lower()
+                or "kokoro"
+            )
             inferred = _infer_provider_from_spec(spec, fallback=fallback_provider)
             if inferred == "supertonic":
-                return "supertonic", _supertonic_voice_from_spec(spec, getattr(job, "voice", "M1")), None, None
+                return (
+                    "supertonic",
+                    _supertonic_voice_from_spec(spec, getattr(job, "voice", "M1")),
+                    None,
+                    None,
+                )
             return "kokoro", spec, None, None
 
-        def resolve_voice_choice(raw_spec: str) -> tuple[str, str, Any, Optional[float], Optional[int]]:
+        def resolve_voice_choice(
+            raw_spec: str,
+        ) -> tuple[str, str, Any, Optional[float], Optional[int]]:
             """Resolve a raw voice spec into (provider, resolved_spec, choice, speed, steps).
 
             For Kokoro formulas, `choice` will be a resolved voice tensor (via `voice_formulas`).
@@ -1678,14 +1850,20 @@ def run_conversion_job(job: Job) -> None:
             if not normalized_value and raw_token:
                 normalized_value = normalize_entity_token(raw_token) or raw_token
             if normalized_value:
-                override_token_map.setdefault(normalized_value, raw_token or normalized_value)
+                override_token_map.setdefault(
+                    normalized_value, raw_token or normalized_value
+                )
 
         if not job.chapters:
-            filtered, skipped_info = _auto_select_relevant_chapters(extraction.chapters, file_type)
+            filtered, skipped_info = _auto_select_relevant_chapters(
+                extraction.chapters, file_type
+            )
             original_count = len(extraction.chapters)
             if filtered and len(filtered) < original_count:
                 extraction.chapters = filtered
-                _update_metadata_for_chapter_count(extraction.metadata, len(filtered), file_type)
+                _update_metadata_for_chapter_count(
+                    extraction.metadata, len(filtered), file_type
+                )
                 threshold = _SIGNIFICANT_LENGTH_THRESHOLDS.get(file_type.lower())
                 label = _chapter_label(file_type)
                 qualifier = f" (< {threshold} characters)" if threshold else ""
@@ -1696,7 +1874,8 @@ def run_conversion_job(job: Job) -> None:
                 if skipped_info:
                     preview_count = 5
                     preview = ", ".join(
-                        f"{title or 'Untitled'} ({length})" for title, length in skipped_info[:preview_count]
+                        f"{title or 'Untitled'} ({length})"
+                        for title, length in skipped_info[:preview_count]
                     )
                     if len(skipped_info) > preview_count:
                         preview += ", …"
@@ -1726,7 +1905,9 @@ def run_conversion_job(job: Job) -> None:
                     level="info",
                 )
                 active_chapter_configs = [
-                    entry for entry in job.chapters if _coerce_truthy(entry.get("enabled", True))
+                    entry
+                    for entry in job.chapters
+                    if _coerce_truthy(entry.get("enabled", True))
                 ][: len(selected_chapters)]
                 if job.chunks:
                     chunk_groups = _group_chunks_by_chapter(job.chunks)
@@ -1737,14 +1918,18 @@ def run_conversion_job(job: Job) -> None:
 
         job.metadata_tags = _merge_metadata(extraction.metadata, metadata_overrides)
 
-        total_characters = extraction.total_characters or calculate_text_length(extraction.combined_text)
+        total_characters = extraction.total_characters or calculate_text_length(
+            extraction.combined_text
+        )
         job.total_characters = total_characters
         job.add_log(f"Total characters: {job.total_characters:,}")
 
         _apply_newline_policy(extraction.chapters, job.replace_single_newlines)
 
         base_output_dir = _prepare_output_dir(job)
-        project_root, audio_dir, subtitle_dir, metadata_dir = _prepare_project_layout(job, base_output_dir)
+        project_root, audio_dir, subtitle_dir, metadata_dir = _prepare_project_layout(
+            job, base_output_dir
+        )
 
         if job.output_format.lower() == "m4b" and not job.merge_chapters_at_end:
             job.add_log(
@@ -1757,9 +1942,13 @@ def run_conversion_job(job: Job) -> None:
         audio_path: Optional[Path] = None
         audio_sink: Optional[AudioSink] = None
         if merged_required:
-            audio_path = _build_output_path(audio_dir, job.original_filename, job.output_format)
+            audio_path = _build_output_path(
+                audio_dir, job.original_filename, job.output_format
+            )
             meta_for_sink = job.metadata_tags if job.metadata_tags else None
-            audio_sink = _open_audio_sink(audio_path, job, sink_stack, metadata=meta_for_sink)
+            audio_sink = _open_audio_sink(
+                audio_path, job, sink_stack, metadata=meta_for_sink
+            )
             subtitle_writer = _create_subtitle_writer(job, audio_path)
             job.result.audio_path = audio_path
             if subtitle_writer:
@@ -1773,18 +1962,28 @@ def run_conversion_job(job: Job) -> None:
         base_voice_spec = _job_voice_fallback(job)
         voice_cache: Dict[str, Any] = {}
         base_provider, base_voice_resolved, _, _ = resolve_voice_target(base_voice_spec)
-        if base_provider == "kokoro" and base_voice_resolved and "*" not in base_voice_resolved:
+        if (
+            base_provider == "kokoro"
+            and base_voice_resolved
+            and "*" not in base_voice_resolved
+        ):
             kokoro_pipeline = get_pipeline("kokoro")
-            voice_cache[f"kokoro:{base_voice_resolved}"] = _resolve_voice(kokoro_pipeline, base_voice_resolved, job.use_gpu)
+            voice_cache[f"kokoro:{base_voice_resolved}"] = _resolve_voice(
+                kokoro_pipeline, base_voice_resolved, job.use_gpu
+            )
         processed_chars = 0
         subtitle_index = 1
         current_time = 0.0
         total_chapters = len(extraction.chapters)
         if chunk_groups:
             chunk_groups = {
-                idx: items for idx, items in chunk_groups.items() if 0 <= idx < total_chapters
+                idx: items
+                for idx, items in chunk_groups.items()
+                if 0 <= idx < total_chapters
             }
-        job.add_log(f"Detected {total_chapters} chapter{'s' if total_chapters != 1 else ''}")
+        job.add_log(
+            f"Detected {total_chapters} chapter{'s' if total_chapters != 1 else ''}"
+        )
         auto_prefix_titles = getattr(job, "auto_prefix_chapter_titles", True)
         read_title_intro = getattr(job, "read_title_intro", False)
         book_intro_text = ""
@@ -1793,9 +1992,15 @@ def run_conversion_job(job: Job) -> None:
         intro_speed: Optional[float] = None
         intro_steps: Optional[int] = None
         if read_title_intro:
-            book_intro_text = _build_title_intro_text(job.metadata_tags, job.original_filename)
+            book_intro_text = _build_title_intro_text(
+                job.metadata_tags, job.original_filename
+            )
             if book_intro_text:
-                preview = book_intro_text if len(book_intro_text) <= 120 else f"{book_intro_text[:117]}…"
+                preview = (
+                    book_intro_text
+                    if len(book_intro_text) <= 120
+                    else f"{book_intro_text[:117]}…"
+                )
                 job.add_log(f"Title intro enabled: {preview}", level="debug")
 
                 intro_voice_spec = base_voice_spec or job.voice
@@ -1809,11 +2014,14 @@ def run_conversion_job(job: Job) -> None:
                     intro_voice_spec = VOICES_INTERNAL[0]
 
                 if intro_voice_spec:
-                    intro_provider, _, intro_voice_choice, intro_speed, intro_steps = resolve_voice_choice(
-                        intro_voice_spec
+                    intro_provider, _, intro_voice_choice, intro_speed, intro_steps = (
+                        resolve_voice_choice(intro_voice_spec)
                     )
             else:
-                job.add_log("Title intro enabled but no usable metadata was found.", level="debug")
+                job.add_log(
+                    "Title intro enabled but no usable metadata was found.",
+                    level="debug",
+                )
         intro_emitted = False
 
         def emit_text(
@@ -1830,7 +2038,9 @@ def run_conversion_job(job: Job) -> None:
             nonlocal processed_chars, subtitle_index, current_time
             source_text = str(text or "")
             if heteronym_sentence_rules:
-                source_text = _apply_heteronym_sentence_rules(source_text, heteronym_sentence_rules)
+                source_text = _apply_heteronym_sentence_rules(
+                    source_text, heteronym_sentence_rules
+                )
             if pronunciation_rules:
                 source_text = _apply_pronunciation_rules(
                     source_text,
@@ -1848,23 +2058,38 @@ def run_conversion_job(job: Job) -> None:
                 raise
             local_segments = 0
 
-            provider = str(tts_provider or getattr(job, "tts_provider", "kokoro") or "kokoro").strip().lower() or "kokoro"
+            provider = (
+                str(tts_provider or getattr(job, "tts_provider", "kokoro") or "kokoro")
+                .strip()
+                .lower()
+                or "kokoro"
+            )
             if provider == "supertonic":
                 supertonic_pipeline = get_pipeline("supertonic")
-                voice_name = _supertonic_voice_from_spec(voice_choice, getattr(job, "voice", "M1"))
+                voice_name = _supertonic_voice_from_spec(
+                    voice_choice, getattr(job, "voice", "M1")
+                )
                 segment_iter = supertonic_pipeline(
                     normalized,
                     voice=voice_name,
-                    speed=float(speed_override if speed_override is not None else job.speed),
+                    speed=float(
+                        speed_override if speed_override is not None else job.speed
+                    ),
                     split_pattern=split_pattern,
-                    total_steps=int(supertonic_steps_override if supertonic_steps_override is not None else getattr(job, "supertonic_total_steps", 5)),
+                    total_steps=int(
+                        supertonic_steps_override
+                        if supertonic_steps_override is not None
+                        else getattr(job, "supertonic_total_steps", 5)
+                    ),
                 )
             else:
                 kokoro_pipeline = get_pipeline("kokoro")
                 segment_iter = kokoro_pipeline(
                     normalized,
                     voice=voice_choice,
-                    speed=float(speed_override if speed_override is not None else job.speed),
+                    speed=float(
+                        speed_override if speed_override is not None else job.speed
+                    ),
                     split_pattern=split_pattern,
                 )
 
@@ -1891,9 +2116,13 @@ def run_conversion_job(job: Job) -> None:
                 else:
                     job.progress = 0.0 if processed_chars == 0 else 0.999
 
-                preview_text = graphemes or (graphemes_raw[:80] if graphemes_raw else "[silence]")
+                preview_text = graphemes or (
+                    graphemes_raw[:80] if graphemes_raw else "[silence]"
+                )
                 prefix = f"{preview_prefix} · " if preview_prefix else ""
-                job.add_log(f"{prefix}{processed_chars:,}/{job.total_characters or '—'}: {preview_text[:80]}")
+                job.add_log(
+                    f"{prefix}{processed_chars:,}/{job.total_characters or '—'}: {preview_text[:80]}"
+                )
 
                 if subtitle_writer and audio_sink and graphemes:
                     subtitle_writer.write_segment(
@@ -1931,27 +2160,43 @@ def run_conversion_job(job: Job) -> None:
         for idx, chapter in enumerate(extraction.chapters, start=1):
             canceller()
             raw_title = str(getattr(chapter, "title", "") or "").strip()
-            spoken_title = _format_spoken_chapter_title(raw_title, idx, auto_prefix_titles)
+            spoken_title = _format_spoken_chapter_title(
+                raw_title, idx, auto_prefix_titles
+            )
             heading_text = spoken_title or raw_title
             chapter_display_title = heading_text or f"Chapter {idx}"
-            job.add_log(f"Processing chapter {idx}/{total_chapters}: {chapter_display_title}")
-            normalize_opening_caps = bool(getattr(job, "normalize_chapter_opening_caps", True))
+            job.add_log(
+                f"Processing chapter {idx}/{total_chapters}: {chapter_display_title}"
+            )
+            normalize_opening_caps = bool(
+                getattr(job, "normalize_chapter_opening_caps", True)
+            )
 
             chapter_start_time = current_time
             chapter_override = (
-                active_chapter_configs[idx - 1] if idx - 1 < len(active_chapter_configs) else None
+                active_chapter_configs[idx - 1]
+                if idx - 1 < len(active_chapter_configs)
+                else None
             )
             chapter_voice_spec = _chapter_voice_spec(job, chapter_override)
             if not chapter_voice_spec:
                 chapter_voice_spec = base_voice_spec
 
-            chapter_provider, chapter_voice_resolved, chapter_speed, chapter_steps = resolve_voice_target(chapter_voice_spec)
-            chapter_cache_key = f"{chapter_provider}:{chapter_voice_resolved}" if chapter_voice_resolved else chapter_provider
+            chapter_provider, chapter_voice_resolved, chapter_speed, chapter_steps = (
+                resolve_voice_target(chapter_voice_spec)
+            )
+            chapter_cache_key = (
+                f"{chapter_provider}:{chapter_voice_resolved}"
+                if chapter_voice_resolved
+                else chapter_provider
+            )
             if chapter_provider == "kokoro":
                 voice_choice = voice_cache.get(chapter_cache_key)
                 if voice_choice is None:
                     kokoro_pipeline = get_pipeline("kokoro")
-                    voice_choice = _resolve_voice(kokoro_pipeline, chapter_voice_resolved, job.use_gpu)
+                    voice_choice = _resolve_voice(
+                        kokoro_pipeline, chapter_voice_resolved, job.use_gpu
+                    )
                     voice_cache[chapter_cache_key] = voice_choice
             else:
                 voice_choice = chapter_voice_resolved
@@ -1978,17 +2223,34 @@ def run_conversion_job(job: Job) -> None:
                 speak_heading = bool(heading_text)
                 first_line = ""
                 if chapter.text:
-                    first_line = next((line.strip() for line in chapter.text.splitlines() if line.strip()), "")
+                    first_line = next(
+                        (
+                            line.strip()
+                            for line in chapter.text.splitlines()
+                            if line.strip()
+                        ),
+                        "",
+                    )
                 remove_heading_from_body = False
                 if speak_heading and first_line:
-                    if _headings_equivalent(first_line, heading_text) or (raw_title and _headings_equivalent(first_line, raw_title)):
+                    if _headings_equivalent(first_line, heading_text) or (
+                        raw_title and _headings_equivalent(first_line, raw_title)
+                    ):
                         remove_heading_from_body = True
 
                 if not intro_emitted and book_intro_text:
                     intro_use_provider = intro_provider or chapter_provider
-                    intro_use_voice_choice = intro_voice_choice if intro_voice_choice is not None else voice_choice
-                    intro_use_speed = intro_speed if intro_speed is not None else chapter_speed
-                    intro_use_steps = intro_steps if intro_steps is not None else chapter_steps
+                    intro_use_voice_choice = (
+                        intro_voice_choice
+                        if intro_voice_choice is not None
+                        else voice_choice
+                    )
+                    intro_use_speed = (
+                        intro_speed if intro_speed is not None else chapter_speed
+                    )
+                    intro_use_steps = (
+                        intro_steps if intro_steps is not None else chapter_steps
+                    )
                     intro_segments = emit_text(
                         book_intro_text,
                         voice_choice=intro_use_voice_choice,
@@ -2025,7 +2287,9 @@ def run_conversion_job(job: Job) -> None:
                             chapter_sink=chapter_sink,
                         )
 
-                chunks_for_chapter = chunk_groups.get(idx - 1, []) if chunk_groups else []
+                chunks_for_chapter = (
+                    chunk_groups.get(idx - 1, []) if chunk_groups else []
+                )
                 body_segments = 0
                 pending_heading_strip = remove_heading_from_body
                 opening_caps_pending = normalize_opening_caps
@@ -2042,13 +2306,19 @@ def run_conversion_job(job: Job) -> None:
 
                     mutated_entry = False
                     if pending_heading_strip and heading_text:
-                        chunk_text, removed_heading = _strip_duplicate_heading_line(chunk_text, heading_text)
+                        chunk_text, removed_heading = _strip_duplicate_heading_line(
+                            chunk_text, heading_text
+                        )
                         if not removed_heading and raw_title:
                             match = _HEADING_NUMBER_PREFIX_RE.match(raw_title)
                             if match:
                                 number = match.group("number")
                                 if number:
-                                    chunk_text, removed_heading = _strip_duplicate_heading_line(chunk_text, number)
+                                    chunk_text, removed_heading = (
+                                        _strip_duplicate_heading_line(
+                                            chunk_text, number
+                                        )
+                                    )
 
                         if removed_heading:
                             pending_heading_strip = False
@@ -2059,7 +2329,9 @@ def run_conversion_job(job: Job) -> None:
                                 continue
 
                     if opening_caps_pending and chunk_text:
-                        normalized_text, normalized_changed = _normalize_chapter_opening_caps(chunk_text)
+                        normalized_text, normalized_changed = (
+                            _normalize_chapter_opening_caps(chunk_text)
+                        )
                         if normalized_changed:
                             if not mutated_entry:
                                 chunk_entry = dict(chunk_entry)
@@ -2090,8 +2362,17 @@ def run_conversion_job(job: Job) -> None:
                         chunk_steps_use = chapter_steps
                         chunk_voice_choice = voice_choice
                     else:
-                        chunk_provider, chunk_voice_resolved, chunk_speed_use, chunk_steps_use = resolve_voice_target(chunk_voice_spec)
-                        chunk_cache_key = f"{chunk_provider}:{chunk_voice_resolved}" if chunk_voice_resolved else chunk_provider
+                        (
+                            chunk_provider,
+                            chunk_voice_resolved,
+                            chunk_speed_use,
+                            chunk_steps_use,
+                        ) = resolve_voice_target(chunk_voice_spec)
+                        chunk_cache_key = (
+                            f"{chunk_provider}:{chunk_voice_resolved}"
+                            if chunk_voice_resolved
+                            else chunk_provider
+                        )
                         if chunk_provider == "kokoro":
                             chunk_voice_choice = voice_cache.get(chunk_cache_key)
                             if chunk_voice_choice is None:
@@ -2140,18 +2421,26 @@ def run_conversion_job(job: Job) -> None:
                     chapter_body_start = current_time
                     chapter_text = str(chapter.text or "")
                     if pending_heading_strip and heading_text:
-                        chapter_text, removed_heading = _strip_duplicate_heading_line(chapter_text, heading_text)
+                        chapter_text, removed_heading = _strip_duplicate_heading_line(
+                            chapter_text, heading_text
+                        )
                         if not removed_heading and raw_title:
                             match = _HEADING_NUMBER_PREFIX_RE.match(raw_title)
                             if match:
                                 number = match.group("number")
                                 if number:
-                                    chapter_text, removed_heading = _strip_duplicate_heading_line(chapter_text, number)
+                                    chapter_text, removed_heading = (
+                                        _strip_duplicate_heading_line(
+                                            chapter_text, number
+                                        )
+                                    )
 
                         if removed_heading:
                             pending_heading_strip = False
                     if opening_caps_pending and chapter_text:
-                        normalized_body, normalized_changed = _normalize_chapter_opening_caps(chapter_text)
+                        normalized_body, normalized_changed = (
+                            _normalize_chapter_opening_caps(chapter_text)
+                        )
                         if normalized_changed:
                             chapter_text = normalized_body
                             if not opening_caps_logged:
@@ -2247,7 +2536,9 @@ def run_conversion_job(job: Job) -> None:
                 outro_audio_path: Optional[Path] = None
                 outro_segments = 0
                 outro_index = total_chapters + 1
-                outro_provider, _, outro_voice_choice, outro_speed, outro_steps = resolve_voice_choice(outro_voice_spec)
+                outro_provider, _, outro_voice_choice, outro_speed, outro_steps = (
+                    resolve_voice_choice(outro_voice_spec)
+                )
 
                 with ExitStack() as outro_sink_stack:
                     chapter_sink: Optional[AudioSink] = None
@@ -2278,7 +2569,9 @@ def run_conversion_job(job: Job) -> None:
                 if outro_segments > 0:
                     job.add_log(f"Appended outro sequence: {outro_text}")
                     if outro_audio_path is not None:
-                        job.result.artifacts[f"chapter_{outro_index:02d}"] = outro_audio_path
+                        job.result.artifacts[f"chapter_{outro_index:02d}"] = (
+                            outro_audio_path
+                        )
                         chapter_paths.append(outro_audio_path)
                     chapter_markers.append(
                         {
@@ -2290,7 +2583,9 @@ def run_conversion_job(job: Job) -> None:
                         }
                     )
                 else:
-                    job.add_log("No audio generated for outro sequence.", level="warning")
+                    job.add_log(
+                        "No audio generated for outro sequence.", level="warning"
+                    )
 
         if not audio_path and chapter_paths:
             job.result.audio_path = chapter_paths[0]
@@ -2311,7 +2606,9 @@ def run_conversion_job(job: Job) -> None:
         if metadata_dir:
             metadata_dir.mkdir(parents=True, exist_ok=True)
             metadata_file = metadata_dir / "metadata.json"
-            metadata_file.write_text(json.dumps(metadata_payload, indent=2), encoding="utf-8")
+            metadata_file.write_text(
+                json.dumps(metadata_payload, indent=2), encoding="utf-8"
+            )
             job.result.artifacts["metadata"] = metadata_file
 
         if job.generate_epub3:
@@ -2322,8 +2619,12 @@ def run_conversion_job(job: Job) -> None:
             if audio_asset:
                 try:
                     epub_root = project_root
-                    epub_output_path = _build_output_path(epub_root, job.original_filename, "epub")
-                    job.add_log("Generating EPUB 3 package with synchronized narration…")
+                    epub_output_path = _build_output_path(
+                        epub_root, job.original_filename, "epub"
+                    )
+                    job.add_log(
+                        "Generating EPUB 3 package with synchronized narration…"
+                    )
                     epub_path = build_epub3_package(
                         output_path=epub_output_path,
                         book_id=job.id,
@@ -2341,9 +2642,14 @@ def run_conversion_job(job: Job) -> None:
                     job.result.artifacts["epub3"] = epub_path
                     job.add_log(f"EPUB 3 package created at {epub_path}")
                 except Exception as exc:
-                    job.add_log(f"Failed to generate EPUB 3 package: {exc}", level="error")
+                    job.add_log(
+                        f"Failed to generate EPUB 3 package: {exc}", level="error"
+                    )
             else:
-                job.add_log("Skipped EPUB 3 generation: audio output unavailable.", level="warning")
+                job.add_log(
+                    "Skipped EPUB 3 generation: audio output unavailable.",
+                    level="warning",
+                )
 
         if job.save_as_project:
             job.result.artifacts["project_root"] = project_root
@@ -2384,7 +2690,9 @@ def run_conversion_job(job: Job) -> None:
             level="debug",
         )
 
-        first_nonempty_group = next((items for items in chunk_groups.values() if items), None)
+        first_nonempty_group = next(
+            (items for items in chunk_groups.values() if items), None
+        )
         if first_nonempty_group:
             first_chunk = dict(first_nonempty_group[0])
             sample_text = str(first_chunk.get("text") or "")[:160].replace("\n", " ")
@@ -2417,6 +2725,7 @@ def run_conversion_job(job: Job) -> None:
         gc.collect()
         try:
             import torch  # type: ignore[import-not-found]
+
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
         except ImportError:
@@ -2455,7 +2764,9 @@ def _load_pipeline(job: Job):
     if not disable_gpu:
         device = _select_device()
     _np, KPipeline = load_numpy_kpipeline()
-    return KPipeline(lang_code=job.language, repo_id="hexgrad/Kokoro-82M", device=device)
+    return KPipeline(
+        lang_code=job.language, repo_id="hexgrad/Kokoro-82M", device=device
+    )
 
 
 def _select_device() -> str:
@@ -2491,7 +2802,9 @@ def _build_output_path(directory: Path, original_name: str, extension: str) -> P
     return directory / f"{sanitized}.{extension}"
 
 
-def _prepare_project_layout(job: Job, base_dir: Path) -> tuple[Path, Path, Path, Optional[Path]]:
+def _prepare_project_layout(
+    job: Job, base_dir: Path
+) -> tuple[Path, Path, Path, Optional[Path]]:
     base_dir.mkdir(parents=True, exist_ok=True)
     sanitized = _sanitize_output_stem(job.original_filename)
     folder_name = f"{_output_timestamp_token()}_{sanitized}"
@@ -2509,7 +2822,9 @@ def _prepare_project_layout(job: Job, base_dir: Path) -> tuple[Path, Path, Path,
     return project_root, project_root, project_root, None
 
 
-def _apply_newline_policy(chapters: List[ExtractedChapter], replace_single_newlines: bool) -> None:
+def _apply_newline_policy(
+    chapters: List[ExtractedChapter], replace_single_newlines: bool
+) -> None:
     if not replace_single_newlines:
         return
     newline_regex = re.compile(r"(?<!\n)\n(?!\n)")
@@ -2557,7 +2872,13 @@ def _open_audio_sink(
 
     if fmt_value in {"wav", "flac"}:
         soundfile = stack.enter_context(
-            sf.SoundFile(path, mode="w", samplerate=SAMPLE_RATE, channels=1, format=fmt_value.upper())
+            sf.SoundFile(
+                path,
+                mode="w",
+                samplerate=SAMPLE_RATE,
+                channels=1,
+                format=fmt_value.upper(),
+            )
         )
         return AudioSink(write=lambda data: soundfile.write(data))
 
@@ -2579,7 +2900,9 @@ def _open_audio_sink(
     return AudioSink(write=_write)
 
 
-def _build_ffmpeg_command(path: Path, fmt: str, metadata: Optional[Dict[str, str]] = None) -> list[str]:
+def _build_ffmpeg_command(
+    path: Path, fmt: str, metadata: Optional[Dict[str, str]] = None
+) -> list[str]:
     base = [
         "ffmpeg",
         "-y",
@@ -2597,7 +2920,14 @@ def _build_ffmpeg_command(path: Path, fmt: str, metadata: Optional[Dict[str, str
     elif fmt == "opus":
         base += ["-c:a", "libopus", "-b:a", "24000"]
     elif fmt == "m4b":
-        base += ["-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart+use_metadata_tags"]
+        base += [
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-movflags",
+            "+faststart+use_metadata_tags",
+        ]
     else:
         base += ["-c:a", "copy"]
 
@@ -2686,7 +3016,9 @@ def _create_subtitle_writer(job: Job, audio_path: Path) -> Optional[SubtitleWrit
 
     fmt = (job.subtitle_format or "srt").lower()
     if job.subtitle_mode == "Sentence + Highlighting" and fmt == "srt":
-        job.add_log("Highlighting requires ASS subtitles. Switching format.", level="warning")
+        job.add_log(
+            "Highlighting requires ASS subtitles. Switching format.", level="warning"
+        )
         fmt = "ass"
 
     if fmt == "srt":
@@ -2694,7 +3026,10 @@ def _create_subtitle_writer(job: Job, audio_path: Path) -> Optional[SubtitleWrit
     if "ass" in fmt:
         return SubtitleWriter(audio_path.with_suffix(".ass"), "ass")
 
-    job.add_log(f"Unsupported subtitle format '{job.subtitle_format}'. Skipping.", level="warning")
+    job.add_log(
+        f"Unsupported subtitle format '{job.subtitle_format}'. Skipping.",
+        level="warning",
+    )
     return None
 
 

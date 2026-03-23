@@ -2087,6 +2087,48 @@ class ConversionThread(QThread):
         self._timestamp_response = treat_as_subtitle
         self._timestamp_response_event.set()
 
+    def _validate_cover_image(self, cover_path):
+        """
+        Validate that a cover image exists, is readable, and has a supported format.
+
+        Returns the validated path if valid, None otherwise.
+        Logs appropriate warnings if validation fails.
+        """
+        if not cover_path:
+            return None
+
+        try:
+            if not os.path.exists(cover_path):
+                self.log_updated.emit(f"Warning: Cover image not found: {cover_path}")
+                return None
+
+            if not os.path.isfile(cover_path):
+                self.log_updated.emit(
+                    f"Warning: Cover path is not a file: {cover_path}"
+                )
+                return None
+
+            # Check readability
+            if not os.access(cover_path, os.R_OK):
+                self.log_updated.emit(
+                    f"Warning: Cover image is not readable: {cover_path}"
+                )
+                return None
+
+            # Check supported formats (JPEG, PNG, BMP that FFmpeg's mjpeg encoder supports)
+            suffix = os.path.splitext(cover_path)[1].lower()
+            supported_formats = {".jpg", ".jpeg", ".png", ".bmp"}
+            if suffix not in supported_formats:
+                self.log_updated.emit(
+                    f"Warning: Cover image format '{suffix}' not supported (supported: {supported_formats}). Skipping artwork."
+                )
+                return None
+
+            return cover_path
+        except (OSError, ValueError) as e:
+            self.log_updated.emit(f"Warning: Error validating cover image: {e}")
+            return None
+
     def _extract_and_add_metadata_tags_to_ffmpeg_cmd(self):
         """Extract metadata tags from text content and add them to ffmpeg command"""
         metadata_options = []
@@ -2180,8 +2222,15 @@ class ConversionThread(QThread):
         else:
             metadata_options.extend(["-metadata", f"genre=Audiobook"])
 
+        # Validate cover image before returning
+        validated_cover = self._validate_cover_image(cover_path)
+        if validated_cover:
+            self.log_updated.emit(
+                f"Using cover image for audiobook artwork: {validated_cover}"
+            )
+
         # Add these to ffmpeg command
-        return metadata_options, cover_path
+        return metadata_options, validated_cover
 
     def _srt_time(self, t):
         """Helper function to format time for SRT files"""
