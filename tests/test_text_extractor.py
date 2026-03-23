@@ -39,6 +39,8 @@ def test_epub_series_metadata_extracted_from_opf_meta(tmp_path):
     book.set_title("Example Title")
     book.set_language("en")
     book.add_author("Example Author")
+    book.add_metadata("DC", "description", "Example description")
+    book.add_metadata("DC", "publisher", "Example Publisher")
 
     # Calibre-style series metadata
     # ebooklib stores this in memory correctly, but may not round-trip via disk in read_epub
@@ -72,6 +74,9 @@ def test_epub_series_metadata_extracted_from_opf_meta(tmp_path):
 
         assert result.metadata.get("series") == "Example Saga"
         assert result.metadata.get("series_index") == "2"
+        assert result.metadata.get("publisher") == "Example Publisher"
+        assert result.metadata.get("comment") == "Example description"
+        assert result.metadata.get("language") == "en"
 
 
 def test_pdf_cover_extraction_from_first_page():

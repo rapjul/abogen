@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from abogen.webui.conversion_runner import _render_ffmetadata, _write_ffmetadata_file
+from abogen.webui.conversion_runner import (
+    _augment_metadata_with_narration,
+    _build_narration_phrase,
+    _render_ffmetadata,
+    _write_ffmetadata_file,
+)
 
 
 def test_render_ffmetadata_includes_chapters(tmp_path):
@@ -38,3 +43,25 @@ def test_render_ffmetadata_includes_chapters(tmp_path):
     assert "END=12345" in content
 
     metadata_path.unlink()
+
+
+def test_build_narration_phrase_uses_voice_name_only_and_string() -> None:
+    phrase = _build_narration_phrase("af_heart")
+    assert phrase == "Narrated by Heart (af_heart) through Kokoro TTS"
+
+
+def test_augment_metadata_with_narration_appends_comment_and_sets_composer() -> None:
+    source = {
+        "title": "Book",
+        "comment": "Original description",
+        "composer": "Someone Else",
+    }
+    merged = _augment_metadata_with_narration(source, "af_heart")
+    assert merged["composer"] == "Narrated by Heart (af_heart) through Kokoro TTS"
+    assert merged["comment"].startswith("Original description")
+    assert "Narrated by Heart (af_heart) through Kokoro TTS" in merged["comment"]
+
+
+def test_augment_metadata_with_narration_sets_comment_when_missing() -> None:
+    merged = _augment_metadata_with_narration({}, "af_heart")
+    assert merged["comment"] == "Narrated by Heart (af_heart) through Kokoro TTS"
