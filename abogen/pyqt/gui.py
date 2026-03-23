@@ -1085,13 +1085,13 @@ class abogen(QWidget):
 
     def initUI(self):
         self.setWindowTitle(f"{PROGRAM_NAME} v{VERSION}")
-        screen = QApplication.primaryScreen().geometry()
+        screen = QApplication.primaryScreen().availableGeometry()
         width, height = 500, 800
-        x = (screen.width() - width) // 2
+        x = screen.x() + max((screen.width() - width) // 2, 0)
         # If desired height is larger than screen, fit to screen height
         if height > screen.height() - 65:
             height = screen.height() - 100  # Leave a margin for window borders
-        y = max((screen.height() - height) // 2, 0)
+        y = screen.y() + max((screen.height() - height) // 2, 0)
         self.setGeometry(x, y, width, height)
         outer_layout = QVBoxLayout()
         outer_layout.setContentsMargins(15, 15, 15, 15)
@@ -3005,6 +3005,64 @@ class abogen(QWidget):
                     self.input_box.clear_input()
             else:
                 self.input_box.clear_input()
+            return
+
+        # Treat explicit error/failure results as unsuccessful completion.
+        message_text = ""
+        message_level = ""
+        if isinstance(message, tuple) and message:
+            message_text = str(message[0])
+            if len(message) > 1:
+                message_level = str(message[1]).strip().lower()
+        elif isinstance(message, str):
+            message_text = message
+
+        normalized_message = message_text.strip().lower()
+        is_failed = (
+            message_level in {"red", "error", "critical"}
+            or "failed" in normalized_message
+            or "error" in normalized_message
+        )
+
+        if is_failed:
+            self.update_log(message)
+            self.etr_label.hide()
+            self.elapsed_label.hide()
+            self.overall_progress_label.hide()
+            self.progress_bar.hide()
+            self.chapter_progress_label.hide()
+            self.chapter_progress_bar.hide()
+            self.current_chapter_label.hide()
+            self.btn_cancel.hide()
+            self.is_converting = False
+            self.controls_widget.show()
+            self.finish_widget.hide()
+
+            failure_reason = message_text or "Unknown error"
+
+            # Reset queue position so a retry starts from the beginning.
+            if self.queued_items:
+                failed_item_name = ""
+                if 0 <= self.current_queue_index < len(self.queued_items):
+                    failed_item_name = os.path.basename(
+                        self.queued_items[self.current_queue_index].file_name
+                    )
+                self.current_queue_index = 0
+                if failed_item_name:
+                    QMessageBox.warning(
+                        self,
+                        "Queue Stopped",
+                        (
+                            f"Queue stopped because conversion failed for '{failed_item_name}'.\n\n"
+                            f"Reason:\n{failure_reason}"
+                        ),
+                    )
+            else:
+                QMessageBox.critical(
+                    self,
+                    "Conversion Failed",
+                    f"Reason:\n{failure_reason}",
+                )
             return
 
         self.update_log(message)
