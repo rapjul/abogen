@@ -68,7 +68,9 @@ class AudiobookshelfClient:
                 # data['libraries'] is a list of library objects
                 return data.get("libraries", [])
         except httpx.HTTPError as exc:
-            raise AudiobookshelfUploadError(f"Failed to fetch libraries: {exc}") from exc
+            raise AudiobookshelfUploadError(
+                f"Failed to fetch libraries: {exc}"
+            ) from exc
 
     def _api_path(self, suffix: str = "") -> str:
         """Join the API prefix with the provided suffix without losing proxies."""
@@ -104,11 +106,11 @@ class AudiobookshelfClient:
                 message = f"Audiobookshelf upload failed with status {status}: {detail}"
             else:
                 message = f"Audiobookshelf upload failed with status {status}"
-            raise AudiobookshelfUploadError(
-                message
-            ) from exc
+            raise AudiobookshelfUploadError(message) from exc
         except httpx.HTTPError as exc:
-            raise AudiobookshelfUploadError(f"Audiobookshelf upload failed: {exc}") from exc
+            raise AudiobookshelfUploadError(
+                f"Audiobookshelf upload failed: {exc}"
+            ) from exc
 
         return {}
 
@@ -135,9 +137,10 @@ class AudiobookshelfClient:
         author = self._extract_author(metadata)
         series = self._extract_series(metadata)
         series_sequence = self._extract_series_sequence(metadata)
+        library_id = (self._config.library_id or "").strip()
 
         fields: Dict[str, str] = {
-            "library": self._config.library_id,
+            "library": library_id,
             "folder": folder_id,
             "title": title,
         }
@@ -160,9 +163,13 @@ class AudiobookshelfClient:
             if "authors" in metadata_payload:
                 authors_val = metadata_payload["authors"]
                 if isinstance(authors_val, str):
-                    metadata_payload["authors"] = [a.strip() for a in authors_val.split(",") if a.strip()]
+                    metadata_payload["authors"] = [
+                        a.strip() for a in authors_val.split(",") if a.strip()
+                    ]
                 elif isinstance(authors_val, list):
-                    metadata_payload["authors"] = [str(a).strip() for a in authors_val if str(a).strip()]
+                    metadata_payload["authors"] = [
+                        str(a).strip() for a in authors_val if str(a).strip()
+                    ]
 
             try:
                 fields["metadata"] = json.dumps(metadata_payload, ensure_ascii=False)
@@ -234,7 +241,9 @@ class AudiobookshelfClient:
                     try:
                         response = client.get(route, params=params)
                     except httpx.HTTPError as exc:
-                        logger.debug("Audiobookshelf lookup failed for %s: %s", route, exc)
+                        logger.debug(
+                            "Audiobookshelf lookup failed for %s: %s", route, exc
+                        )
                         continue
 
                     if response.status_code == 404:
@@ -248,7 +257,9 @@ class AudiobookshelfClient:
                             raise AudiobookshelfUploadError(
                                 "Audiobookshelf authentication failed while checking for existing items."
                             ) from exc
-                        logger.debug("Audiobookshelf lookup error %s for %s", status, route)
+                        logger.debug(
+                            "Audiobookshelf lookup error %s for %s", status, route
+                        )
                         continue
 
                     try:
@@ -380,7 +391,11 @@ class AudiobookshelfClient:
                     "library": library_name,
                 }
             )
-        results.sort(key=lambda entry: (entry.get("path") or entry.get("name") or entry.get("id") or "").lower())
+        results.sort(
+            key=lambda entry: (
+                entry.get("path") or entry.get("name") or entry.get("id") or ""
+            ).lower()
+        )
         return results
 
     def _ensure_folder(self) -> Tuple[str, str, str]:
@@ -421,15 +436,27 @@ class AudiobookshelfClient:
                 if not candidate_norm:
                     continue
                 if candidate_norm == identifier_norm:
-                    self._folder_cache = (folder_id, folder_name or folder_id, library_name)
+                    self._folder_cache = (
+                        folder_id,
+                        folder_name or folder_id,
+                        library_name,
+                    )
                     return self._folder_cache
                 if has_path_component and candidate_norm.endswith(identifier_norm):
-                    self._folder_cache = (folder_id, folder_name or folder_id, library_name)
+                    self._folder_cache = (
+                        folder_id,
+                        folder_name or folder_id,
+                        library_name,
+                    )
                     return self._folder_cache
                 if not has_path_component:
                     tail = candidate_norm.split("/")[-1]
                     if tail and tail == identifier_norm:
-                        self._folder_cache = (folder_id, folder_name or folder_id, library_name)
+                        self._folder_cache = (
+                            folder_id,
+                            folder_name or folder_id,
+                            library_name,
+                        )
                         return self._folder_cache
 
         raise AudiobookshelfUploadError(
@@ -440,13 +467,17 @@ class AudiobookshelfClient:
     def _load_library_metadata(self) -> Tuple[str, List[Mapping[str, Any]]]:
         try:
             with self._open_client() as client:
-                response = client.get(self._api_path(f"libraries/{self._config.library_id}"))
+                response = client.get(
+                    self._api_path(f"libraries/{self._config.library_id}")
+                )
                 response.raise_for_status()
                 payload = response.json()
         except httpx.HTTPStatusError as exc:
             status = exc.response.status_code
             if status == 404:
-                message = f"Audiobookshelf library '{self._config.library_id}' not found."
+                message = (
+                    f"Audiobookshelf library '{self._config.library_id}' not found."
+                )
             else:
                 detail = (exc.response.text or "").strip()
                 if detail:
@@ -469,7 +500,9 @@ class AudiobookshelfClient:
         if not isinstance(payload, Mapping):
             return self._config.library_id, []
 
-        library_name = str(payload.get("name") or payload.get("label") or self._config.library_id)
+        library_name = str(
+            payload.get("name") or payload.get("label") or self._config.library_id
+        )
         raw_folders = payload.get("libraryFolders") or payload.get("folders") or []
         folders = [entry for entry in raw_folders if isinstance(entry, Mapping)]
         return library_name, folders
@@ -609,7 +642,11 @@ class AudiobookshelfClient:
             candidate = authors.strip()
             return candidate
         if isinstance(authors, Iterable) and not isinstance(authors, (str, Mapping)):
-            names = [str(entry).strip() for entry in authors if isinstance(entry, str) and entry.strip()]
+            names = [
+                str(entry).strip()
+                for entry in authors
+                if isinstance(entry, str) and entry.strip()
+            ]
             if names:
                 # ABS expects a comma-separated string for multiple authors.
                 return ", ".join(names)
@@ -617,7 +654,9 @@ class AudiobookshelfClient:
 
     @staticmethod
     def _extract_series(metadata: Mapping[str, Any]) -> str:
-        series_name = metadata.get("seriesName") if isinstance(metadata, Mapping) else None
+        series_name = (
+            metadata.get("seriesName") if isinstance(metadata, Mapping) else None
+        )
         if isinstance(series_name, str) and series_name.strip():
             return series_name.strip()
         return ""
@@ -641,7 +680,9 @@ class AudiobookshelfClient:
         for key in preferred_keys:
             if key not in metadata:
                 continue
-            normalized = AudiobookshelfClient._normalize_series_sequence(metadata.get(key))
+            normalized = AudiobookshelfClient._normalize_series_sequence(
+                metadata.get(key)
+            )
             if normalized:
                 return normalized
         return ""

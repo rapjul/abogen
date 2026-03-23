@@ -4,6 +4,7 @@
 
 import logging
 from copy import deepcopy
+from typing import Any
 
 from PyQt6.QtCore import QFileInfo, Qt
 from PyQt6.QtGui import QFontDatabase, QFontMetrics
@@ -127,8 +128,12 @@ class DroppableQueueListWidget(QListWidget):
         )
 
     def dragEnterEvent(self, event):
-        if event.mimeData().hasUrls():
-            for url in event.mimeData().urls():
+        if event is None:
+            self.drag_overlay.setVisible(False)
+            return
+        mime_data = event.mimeData()
+        if mime_data is not None and mime_data.hasUrls():
+            for url in mime_data.urls():
                 file_path = url.toLocalFile().lower()
                 if url.isLocalFile() and (
                     file_path.endswith(".txt")
@@ -142,8 +147,11 @@ class DroppableQueueListWidget(QListWidget):
         event.ignore()
 
     def dragMoveEvent(self, event):
-        if event.mimeData().hasUrls():
-            for url in event.mimeData().urls():
+        if event is None:
+            return
+        mime_data = event.mimeData()
+        if mime_data is not None and mime_data.hasUrls():
+            for url in mime_data.urls():
                 file_path = url.toLocalFile().lower()
                 if url.isLocalFile() and (
                     file_path.endswith(".txt")
@@ -154,15 +162,22 @@ class DroppableQueueListWidget(QListWidget):
         event.ignore()
 
     def dragLeaveEvent(self, event):
+        if event is None:
+            self.drag_overlay.setVisible(False)
+            return
         self.drag_overlay.setVisible(False)
         event.accept()
 
     def dropEvent(self, event):
+        if event is None:
+            self.drag_overlay.setVisible(False)
+            return
         self.drag_overlay.setVisible(False)
-        if event.mimeData().hasUrls():
+        mime_data = event.mimeData()
+        if mime_data is not None and mime_data.hasUrls():
             file_paths = [
                 url.toLocalFile()
-                for url in event.mimeData().urls()
+                for url in mime_data.urls()
                 if url.isLocalFile()
                 and (
                     url.toLocalFile().lower().endswith(".txt")
@@ -190,7 +205,7 @@ class QueueManager(QDialog):
         self._original_queue = deepcopy(
             queue
         )  # Store a deep copy of the original queue
-        self.parent = parent
+        self.parent_gui = parent
         self.config = load_config()  # Load config for persistence
 
         layout = QVBoxLayout()
@@ -363,7 +378,7 @@ class QueueManager(QDialog):
             icon_provider = QFileIconProvider()
             for item in self.queue:
                 # Dynamic Attribute Retrieval Helper
-                def get_val(attr, default=""):
+                def get_val(attr, default: Any = "") -> Any:
                     # If override is ON and attr is overridable, use global setting
                     if is_override_active and attr in OVERRIDE_FIELDS:
                         return current_global_settings.get(attr, default)
@@ -576,8 +591,8 @@ class QueueManager(QDialog):
 
     def get_current_attributes(self):
         # Fetch current attribute values from the parent abogen GUI
-        attrs = {}
-        parent = self.parent
+        attrs: dict[str, Any] = {}
+        parent = self.parent_gui
         if parent is not None:
             # lang_code: use parent's get_voice_formula and get_selected_lang
             if hasattr(parent, "get_voice_formula") and hasattr(
@@ -674,7 +689,7 @@ class QueueManager(QDialog):
             class QueueItem:
                 pass
 
-            item = QueueItem()
+            item: Any = QueueItem()
             item.file_name = file_path
             item.save_base_path = (
                 file_path  # For .txt files, processing and save paths are the same
@@ -814,7 +829,10 @@ class QueueManager(QDialog):
         from PyQt6.QtGui import QAction, QDesktopServices
         from PyQt6.QtWidgets import QMenu
 
-        global_pos = self.listwidget.viewport().mapToGlobal(pos)
+        viewport = self.listwidget.viewport()
+        if viewport is None:
+            return
+        global_pos = viewport.mapToGlobal(pos)
         selected_items = self.listwidget.selectedItems()
         menu = QMenu(self)
         if len(selected_items) == 1:

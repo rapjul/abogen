@@ -21,6 +21,10 @@ from typing import (
     Tuple,
 )
 
+from abogen.spacy_contraction_resolver import (
+    resolve_ambiguous_contractions,
+)
+
 logger = logging.getLogger(__name__)
 
 try:  # pragma: no cover - optional dependency guard
@@ -38,10 +42,6 @@ HAS_NUM2WORDS = num2words is not None
 
 if TYPE_CHECKING:  # pragma: no cover - type checking only
     from abogen.llm_client import LLMCompletion
-
-from abogen.spacy_contraction_resolver import (
-    resolve_ambiguous_contractions,
-)
 
 # ---------- Contraction Category Defaults ----------
 

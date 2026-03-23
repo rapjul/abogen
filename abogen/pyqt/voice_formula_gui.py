@@ -1,3 +1,5 @@
+# pyright: reportOptionalMemberAccess=false, reportAttributeAccessIssue=false
+
 import json
 import os
 import platform
@@ -26,7 +28,6 @@ from PyQt6.QtWidgets import (
     QSizePolicy,
     QSlider,
     QSplitter,
-    QStyle,
     QVBoxLayout,
     QWidget,
 )
@@ -122,6 +123,7 @@ class FlowLayout(QLayout):
         for item in self._item_list:
             size = size.expandedTo(item.minimumSize())
         margin, _, _, _ = self.getContentsMargins()
+        margin = margin or 0
         size += QSize(2 * margin, 2 * margin)
         return size
 
@@ -131,7 +133,8 @@ class FlowLayout(QLayout):
         spacing = self.spacing()
 
         for item in self._item_list:
-            style = self.parentWidget().style() if self.parentWidget() else QStyle()
+            parent_widget = self.parentWidget()
+            style = parent_widget.style() if parent_widget is not None else self.style()
             layout_spacing_x = style.layoutSpacing(
                 QSizePolicy.ControlType.PushButton,
                 QSizePolicy.ControlType.PushButton,
@@ -262,7 +265,9 @@ class VoiceMixer(QWidget):
         # Layout for slider and labels
         slider_layout = QVBoxLayout()
         slider_layout.addWidget(self.spin_box)
-        slider_layout.addWidget(QLabel("1", alignment=Qt.AlignmentFlag.AlignCenter))
+        label_top = QLabel("1")
+        label_top.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        slider_layout.addWidget(label_top)
 
         slider_center_layout = QHBoxLayout()
         slider_center_layout.addWidget(
@@ -274,7 +279,9 @@ class VoiceMixer(QWidget):
         slider_center_widget.setLayout(slider_center_layout)
 
         slider_layout.addWidget(slider_center_widget, stretch=1)
-        slider_layout.addWidget(QLabel("0", alignment=Qt.AlignmentFlag.AlignCenter))
+        label_bottom = QLabel("0")
+        label_bottom.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        slider_layout.addWidget(label_bottom)
         slider_layout.setStretch(2, 1)
 
         layout.addLayout(slider_layout, stretch=1)
@@ -1103,13 +1110,14 @@ class VoiceFormulaDialog(QDialog):
             return
         # Save weights to current profile
         profiles = load_profiles()
-        profiles[self.current_profile] = {
+        current_profile = self.current_profile or "New profile"
+        profiles[current_profile] = {
             "voices": selected_voices,
             "language": self.language_combo.currentData(),
         }
         save_profiles(profiles)
         # Mark this profile as not dirty
-        self._profile_dirty[self.current_profile] = False
+        self._profile_dirty[current_profile] = False
         super().accept()
 
     def reject(self):
@@ -1164,7 +1172,7 @@ class VoiceFormulaDialog(QDialog):
         if item and not item.text().startswith("*"):
             item.setText("*" + item.text())
         # Flag profile as dirty and store unsaved state
-        name = self.current_profile
+        name = self.current_profile or "New profile"
         self._profile_dirty[name] = True
         self._profile_states[name] = {
             "voices": self.get_selected_voices(),

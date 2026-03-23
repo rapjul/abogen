@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, List, Sequence
 
-
 MARKER_PREFIX = "[[ABOGEN-DBG:"
 MARKER_SUFFIX = "]]"
 

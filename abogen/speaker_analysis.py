@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
-
-import unicodedata
 
 _DIALOGUE_VERBS = (
     "said",

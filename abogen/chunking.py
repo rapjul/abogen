@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Dict, Iterable, Iterator, List, Literal, Optional, Tuple
-from typing import Pattern
-
 import re
+from dataclasses import dataclass
+from typing import Dict, Iterable, Iterator, List, Literal, Optional, Pattern, Tuple
 
 from abogen.kokoro_text_normalization import ApostropheConfig, normalize_for_pipeline
 from abogen.normalization_settings import build_apostrophe_config, get_runtime_settings

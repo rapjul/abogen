@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import ast
-from dataclasses import dataclass
 import logging
 import re
+from dataclasses import dataclass
 from typing import Any, Iterable, Iterator, Optional
 
 import numpy as np
-
 
 logger = logging.getLogger(__name__)
 

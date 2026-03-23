@@ -6,24 +6,24 @@ and spaCy language models. The code favors clarity, avoids duplication,
 and handles optional dependencies gracefully.
 """
 
-from typing import List, Optional, Tuple
 import importlib
 import importlib.util
+from typing import Dict, List, Optional, Tuple
 
+from PyQt6.QtCore import QThread, pyqtSignal
 from PyQt6.QtWidgets import (
     QDialog,
-    QVBoxLayout,
     QHBoxLayout,
     QLabel,
     QPushButton,
-    QSpacerItem,
     QSizePolicy,
+    QSpacerItem,
+    QVBoxLayout,
 )
-from PyQt6.QtCore import QThread, pyqtSignal
 
+import abogen.hf_tracker
 from abogen.constants import COLORS, VOICES_INTERNAL
 from abogen.spacy_utils import SPACY_MODELS
-import abogen.hf_tracker
 
 
 # Helpers
@@ -180,20 +180,23 @@ class PreDownloadWorker(QThread):
         # Determine which models to process: prefer parent-provided missing list to avoid
         # re-checking everything; otherwise use the full unique list.
         parent = self.parent()
+        parent_dialog = parent if isinstance(parent, PreDownloadDialog) else None
         models_to_process: List[str] = _unique_sorted_models()
         try:
             if (
-                parent is not None
-                and hasattr(parent, "_spacy_models_missing")
-                and parent._spacy_models_missing
+                parent_dialog is not None
+                and hasattr(parent_dialog, "_spacy_models_missing")
+                and parent_dialog._spacy_models_missing
             ):
-                models_to_process = list(dict.fromkeys(parent._spacy_models_missing))
+                models_to_process = list(
+                    dict.fromkeys(parent_dialog._spacy_models_missing)
+                )
         except Exception:
             pass
 
         # If spaCy is not available to run the CLI, skip gracefully
         try:
-            import spacy.cli as _spacy_cli
+            from spacy.cli.download import download as _spacy_download
         except Exception:
             self.progress.emit(
                 "spacy", "warning", "spaCy not available, skipping spaCy models..."
@@ -218,7 +221,7 @@ class PreDownloadWorker(QThread):
                 f"{idx}/{len(models_to_process)}: {model_name}...",
             )
             try:
-                _spacy_cli.download(model_name)
+                _spacy_download(model_name)
                 self.progress.emit("spacy", "downloaded", f"{model_name} downloaded")
             except Exception as exc:
                 self.progress.emit(
@@ -246,7 +249,7 @@ class PreDownloadDialog(QDialog):
         self._status_worker = None
 
         # Map keywords to (label, prefix) - labels filled after UI creation
-        self.status_map = {
+        self.status_map: Dict[str, Tuple[Optional[QLabel], str]] = {
             "voice": (None, self.VOICE_PREFIX),
             "spacy": (None, self.SPACY_PREFIX),
             "model": (None, self.MODEL_PREFIX),
@@ -345,7 +348,7 @@ class PreDownloadDialog(QDialog):
 
         def run(self):
             parent = self.parent()
-            if parent is None:
+            if parent is None or not isinstance(parent, PreDownloadDialog):
                 return
 
             voices_ok, missing_voices = parent._check_kokoro_voices()

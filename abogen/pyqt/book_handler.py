@@ -1,3 +1,5 @@
+# pyright: reportOptionalMemberAccess=false, reportAttributeAccessIssue=false
+
 import base64
 import logging
 import os
@@ -132,6 +134,7 @@ class HandlerDialog(QDialog):
         # Initialize UI elements that are used in other methods
         self.save_chapters_checkbox = None
         self.merge_chapters_checkbox = None
+        self.has_pdf_bookmarks = True
 
         # Build treeview
         self.treeWidget = QTreeWidget(self)
@@ -173,7 +176,8 @@ class HandlerDialog(QDialog):
         # Hide expand/collapse decoration if there are no parent items
         has_parents = False
         for i in range(self.treeWidget.topLevelItemCount()):
-            if self.treeWidget.topLevelItem(i).childCount() > 0:
+            top_item = self.treeWidget.topLevelItem(i)
+            if top_item is not None and top_item.childCount() > 0:
                 has_parents = True
                 break
         self.treeWidget.setRootIsDecorated(has_parents)
@@ -222,7 +226,7 @@ class HandlerDialog(QDialog):
             # Insert at top of main layout if present, otherwise keep as child
             try:
                 layout = self.layout()
-                if layout is not None:
+                if isinstance(layout, QVBoxLayout):
                     layout.insertWidget(0, container)
             except Exception:
                 pass
@@ -422,11 +426,38 @@ class HandlerDialog(QDialog):
             has_parents = True
         self.treeWidget.setRootIsDecorated(has_parents)
 
-    def _update_checkbox_states(self):
+    def _sync_parent_checkbox_states(self):
         """Update the checkbox states based on the current checked chapters."""
         for i in range(self.treeWidget.topLevelItemCount()):
             item = self.treeWidget.topLevelItem(i)
-            self._update_item_checkbox_state(item)
+            if item is not None:
+                self._update_item_checkbox_state(item)
+
+    def _update_item_checkbox_state(self, item):
+        """Keep parent check state synchronized with checked children."""
+        if item is None or item.childCount() == 0:
+            return
+        checked_children = 0
+        checkable_children = 0
+        for idx in range(item.childCount()):
+            child = item.child(idx)
+            if child is None:
+                continue
+            if child.flags() & Qt.ItemFlag.ItemIsUserCheckable:
+                checkable_children += 1
+                if child.checkState(0) == Qt.CheckState.Checked:
+                    checked_children += 1
+        if (
+            not (item.flags() & Qt.ItemFlag.ItemIsUserCheckable)
+            or checkable_children == 0
+        ):
+            return
+        if checked_children == checkable_children:
+            item.setCheckState(0, Qt.CheckState.Checked)
+        elif checked_children == 0:
+            item.setCheckState(0, Qt.CheckState.Unchecked)
+        else:
+            item.setCheckState(0, Qt.CheckState.PartiallyChecked)
 
     def _build_tree_from_nav(self, nav_nodes, parent_item, seen_content_hashes=None):
         if seen_content_hashes is None:
@@ -479,6 +510,9 @@ class HandlerDialog(QDialog):
         iterator = QTreeWidgetItemIterator(self.treeWidget)
         while iterator.value():
             item = iterator.value()
+            if item is None:
+                iterator += 1
+                continue
             if item.flags() & Qt.ItemFlag.ItemIsUserCheckable:
                 identifier = item.data(0, Qt.ItemDataRole.UserRole)
                 if identifier:
@@ -641,7 +675,8 @@ class HandlerDialog(QDialog):
             and not self.has_pdf_bookmarks
         ):
             self.save_chapters_checkbox.setEnabled(False)
-            self.merge_chapters_checkbox.setEnabled(False)
+            if self.merge_chapters_checkbox is not None:
+                self.merge_chapters_checkbox.setEnabled(False)
             return
 
         checked_count = 0
@@ -650,6 +685,9 @@ class HandlerDialog(QDialog):
             iterator = QTreeWidgetItemIterator(self.treeWidget)
             while iterator.value():
                 item = iterator.value()
+                if item is None:
+                    iterator += 1
+                    continue
                 if (
                     item.flags() & Qt.ItemFlag.ItemIsUserCheckable
                     and item.checkState(0) == Qt.CheckState.Checked
@@ -665,6 +703,9 @@ class HandlerDialog(QDialog):
             iterator = QTreeWidgetItemIterator(self.treeWidget)
             while iterator.value():
                 item = iterator.value()
+                if item is None:
+                    iterator += 1
+                    continue
                 if (
                     item.flags() & Qt.ItemFlag.ItemIsUserCheckable
                     and item.checkState(0) == Qt.CheckState.Checked
@@ -681,16 +722,20 @@ class HandlerDialog(QDialog):
         min_groups_required = 2
         self.save_chapters_checkbox.setEnabled(checked_count >= min_groups_required)
 
-        self.merge_chapters_checkbox.setEnabled(
-            self.save_chapters_checkbox.isEnabled()
-            and self.save_chapters_checkbox.isChecked()
-        )
+        if self.merge_chapters_checkbox is not None:
+            self.merge_chapters_checkbox.setEnabled(
+                self.save_chapters_checkbox.isEnabled()
+                and self.save_chapters_checkbox.isChecked()
+            )
 
     def select_all_chapters(self):
         self._block_signals = True
         iterator = QTreeWidgetItemIterator(self.treeWidget)
         while iterator.value():
             item = iterator.value()
+            if item is None:
+                iterator += 1
+                continue
             if item.flags() & Qt.ItemFlag.ItemIsUserCheckable:
                 item.setCheckState(0, Qt.CheckState.Checked)
             iterator += 1
@@ -702,6 +747,9 @@ class HandlerDialog(QDialog):
         iterator = QTreeWidgetItemIterator(self.treeWidget)
         while iterator.value():
             item = iterator.value()
+            if item is None:
+                iterator += 1
+                continue
             if item.flags() & Qt.ItemFlag.ItemIsUserCheckable:
                 item.setCheckState(0, Qt.CheckState.Unchecked)
             iterator += 1
@@ -713,6 +761,9 @@ class HandlerDialog(QDialog):
         iterator = QTreeWidgetItemIterator(self.treeWidget)
         while iterator.value():
             item = iterator.value()
+            if item is None:
+                iterator += 1
+                continue
             if item.flags() & Qt.ItemFlag.ItemIsUserCheckable and item.childCount() > 0:
                 item.setCheckState(0, Qt.CheckState.Checked)
             iterator += 1
@@ -724,6 +775,9 @@ class HandlerDialog(QDialog):
         iterator = QTreeWidgetItemIterator(self.treeWidget)
         while iterator.value():
             item = iterator.value()
+            if item is None:
+                iterator += 1
+                continue
             if item.flags() & Qt.ItemFlag.ItemIsUserCheckable and item.childCount() > 0:
                 item.setCheckState(0, Qt.CheckState.Unchecked)
             iterator += 1
@@ -921,9 +975,7 @@ class HandlerDialog(QDialog):
                 elif cover_image.startswith(b"GIF"):
                     image_type = "gif"
 
-                html_content += (
-                    "<div style='text-align: center; margin-bottom: 20px;'>"
-                )
+                html_content += "<div style='text-align: center; margin-bottom: 20px;'>"
                 html_content += (
                     f"<img src='data:image/{image_type};base64,{image_data}' "
                 )
@@ -1450,7 +1502,8 @@ class HandlerDialog(QDialog):
 
     def on_save_chapters_changed(self, state):
         self.save_chapters_separately = bool(state)
-        self.merge_chapters_checkbox.setEnabled(self.save_chapters_separately)
+        if self.merge_chapters_checkbox is not None:
+            self.merge_chapters_checkbox.setEnabled(self.save_chapters_separately)
         HandlerDialog._save_chapters_separately = self.save_chapters_separately
 
     def on_merge_chapters_changed(self, state):
@@ -1497,9 +1550,11 @@ class HandlerDialog(QDialog):
         if self.treeWidget.selectedItems() and len(self.treeWidget.selectedItems()) > 1:
             menu = QMenu(self)
             action = menu.addAction("Select")
-            action.triggered.connect(self.check_selected_items)
+            if action is not None:
+                action.triggered.connect(self.check_selected_items)
             action = menu.addAction("Clear")
-            action.triggered.connect(self.uncheck_selected_items)
+            if action is not None:
+                action.triggered.connect(self.uncheck_selected_items)
             menu.exec(self.treeWidget.mapToGlobal(pos))
             return
 
@@ -1522,5 +1577,6 @@ class HandlerDialog(QDialog):
             self.treeWidget.blockSignals(False)
             self._update_checked_set_from_tree()
 
-        action.triggered.connect(do_toggle)
+        if action is not None:
+            action.triggered.connect(do_toggle)
         menu.exec(self.treeWidget.mapToGlobal(pos))

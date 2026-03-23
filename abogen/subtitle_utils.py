@@ -1,7 +1,8 @@
-import re
 import platform
-from abogen.utils import detect_encoding, load_config
+import re
+
 from abogen.constants import SAMPLE_VOICE_TEXTS
+from abogen.utils import detect_encoding, load_config
 
 # Pre-compile frequently used regex patterns for better performance
 _METADATA_TAG_PATTERN = re.compile(r"<<METADATA_[^:]+:[^>]*>>")
@@ -542,7 +543,9 @@ def split_text_by_voice_markers(text, default_voice):
     for idx, match in enumerate(voice_splits):
         voice_name = match.group(1).strip()
         start = match.end()
-        end = voice_splits[idx + 1].start() if idx + 1 < len(voice_splits) else len(text)
+        end = (
+            voice_splits[idx + 1].start() if idx + 1 < len(voice_splits) else len(text)
+        )
         segment_text = text[start:end].strip()
 
         # Validate voice name
@@ -560,8 +563,12 @@ def split_text_by_voice_markers(text, default_voice):
                         # Find the canonical (lowercase) voice name
                         voice_part_lower = voice_part.strip().lower()
                         canonical_voice = next(
-                            (v for v in VOICES_INTERNAL if v.lower() == voice_part_lower),
-                            voice_part.strip()
+                            (
+                                v
+                                for v in VOICES_INTERNAL
+                                if v.lower() == voice_part_lower
+                            ),
+                            voice_part.strip(),
                         )
                         normalized_parts.append(f"{canonical_voice}*{weight.strip()}")
                 current_voice = " + ".join(normalized_parts)
@@ -570,7 +577,7 @@ def split_text_by_voice_markers(text, default_voice):
                 voice_name_lower = voice_name.lower()
                 current_voice = next(
                     (v for v in VOICES_INTERNAL if v.lower() == voice_name_lower),
-                    voice_name
+                    voice_name,
                 )
             valid_markers += 1
         else:

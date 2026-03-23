@@ -1,10 +1,10 @@
-import os
-import sys
-import platform
 import atexit
+import os
+import platform
 import signal
-from abogen.utils import get_resource_path, load_config, prevent_sleep_end
+import sys
 
+from abogen.utils import get_resource_path, load_config, prevent_sleep_end
 
 # Fix PyTorch DLL loading issue ([WinError 1114]) on Windows before importing PyQt6
 if platform.system() == "Windows":
@@ -49,15 +49,21 @@ except ImportError:
 # Pre-load "libxcb-cursor" on Linux (fixes #101)
 if platform.system() == "Linux":
     arch = platform.machine().lower()
-    lib_filename = {"x86_64": "libxcb-cursor-amd64.so.0", "amd64": "libxcb-cursor-amd64.so.0", "aarch64": "libxcb-cursor-arm64.so.0", "arm64": "libxcb-cursor-arm64.so.0"}.get(arch)
+    lib_filename = {
+        "x86_64": "libxcb-cursor-amd64.so.0",
+        "amd64": "libxcb-cursor-amd64.so.0",
+        "aarch64": "libxcb-cursor-arm64.so.0",
+        "arm64": "libxcb-cursor-arm64.so.0",
+    }.get(arch)
     if lib_filename:
         import ctypes
+
         try:
             # Try to load the system libxcb-cursor.so.0 first
-            ctypes.CDLL('libxcb-cursor.so.0', mode=ctypes.RTLD_GLOBAL)
+            ctypes.CDLL("libxcb-cursor.so.0", mode=ctypes.RTLD_GLOBAL)
         except OSError:
             # System lib not available, load the bundled version
-            lib_path = get_resource_path('abogen.libs', lib_filename)
+            lib_path = get_resource_path("abogen.libs", lib_filename)
             if lib_path:
                 try:
                     ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
@@ -70,21 +76,24 @@ if platform.system() == "Linux":
 # Set application ID for Windows taskbar icon
 if platform.system() == "Windows":
     try:
-        from abogen.constants import PROGRAM_NAME, VERSION
         import ctypes
 
+        from abogen.constants import PROGRAM_NAME, VERSION
+
         app_id = f"{PROGRAM_NAME}.{VERSION}"
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(app_id)
+        windll = getattr(ctypes, "windll", None)
+        if windll is not None:
+            windll.shell32.SetCurrentProcessExplicitAppUserModelID(app_id)
     except Exception as e:
         print("Warning: failed to set AppUserModelID:", e)
 
-from PyQt6.QtWidgets import QApplication
-from PyQt6.QtGui import QIcon
 from PyQt6.QtCore import (
     QLibraryInfo,
-    qInstallMessageHandler,
     QtMsgType,
+    qInstallMessageHandler,
 )
+from PyQt6.QtGui import QIcon
+from PyQt6.QtWidgets import QApplication
 
 # Add the directory to Python path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
@@ -98,8 +107,8 @@ if load_config().get("disable_kokoro_internet", False):
     print("INFO: Kokoro's internet access is disabled.")
     os.environ["HF_HUB_OFFLINE"] = "1"  # Disable Hugging Face Hub internet access
 
-from abogen.pyqt.gui import abogen
 from abogen.constants import PROGRAM_NAME, VERSION
+from abogen.pyqt.gui import abogen
 
 # Set environment variables for AMD ROCm
 os.environ["MIOPEN_FIND_MODE"] = "FAST"

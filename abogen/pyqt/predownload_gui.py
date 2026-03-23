@@ -241,14 +241,17 @@ class PreDownloadWorker(QThread):
         # Determine which models to process: prefer parent-provided missing list to avoid
         # re-checking everything; otherwise use the full unique list.
         parent = self.parent()
+        parent_any = parent if isinstance(parent, PreDownloadDialog) else None
         models_to_process: List[str] = _unique_sorted_models()
         try:
             if (
-                parent is not None
-                and hasattr(parent, "_spacy_models_missing")
-                and parent._spacy_models_missing
+                parent_any is not None
+                and hasattr(parent_any, "_spacy_models_missing")
+                and parent_any._spacy_models_missing
             ):
-                models_to_process = list(dict.fromkeys(parent._spacy_models_missing))
+                models_to_process = list(
+                    dict.fromkeys(parent_any._spacy_models_missing)
+                )
         except Exception:
             pass
 
@@ -279,7 +282,7 @@ class PreDownloadWorker(QThread):
                 f"{idx}/{len(models_to_process)}: {model_name}...",
             )
             try:
-                _spacy_cli.download(model_name)
+                _spacy_cli.download(model_name)  # pyright: ignore[reportPrivateImportUsage]
                 self.progress.emit("spacy", "downloaded", f"{model_name} downloaded")
             except Exception as exc:
                 self.progress.emit(
@@ -331,7 +334,7 @@ class PreDownloadDialog(QDialog):
         self._voice_no_match = False
 
         # Map keywords to (label, prefix) - labels filled after UI creation
-        self.status_map = {
+        self.status_map: Dict[str, Tuple[Optional[QLabel], str]] = {
             "voice": (None, self.VOICE_PREFIX),
             "spacy": (None, self.SPACY_PREFIX),
             "model": (None, self.MODEL_PREFIX),
@@ -519,6 +522,9 @@ class PreDownloadDialog(QDialog):
 
         def run(self):
             parent = self.parent()
+            if parent is None:
+                return
+            parent = parent if isinstance(parent, PreDownloadDialog) else None
             if parent is None:
                 return
 

@@ -1,11 +1,12 @@
-import os
-import platform
 import ctypes
 import importlib.util
+import os
+import platform
+
 
 def check_cuda_with_fix():
     """
-    Check if CUDA is available, with a fix for PyTorch DLL loading issue 
+    Check if CUDA is available, with a fix for PyTorch DLL loading issue
     ([WinError 1114]) on Windows.
     """
     # Fix PyTorch DLL loading issue ([WinError 1114]) on Windows
@@ -21,9 +22,11 @@ def check_cuda_with_fix():
 
     try:
         from torch.cuda import is_available
+
         print(is_available())
     except ImportError:
         print("False")
+
 
 if __name__ == "__main__":
     check_cuda_with_fix()

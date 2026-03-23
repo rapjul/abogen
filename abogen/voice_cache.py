@@ -128,18 +128,20 @@ def _ensure_single_voice_asset(
         raise RuntimeError("huggingface_hub is required to cache voices")
 
     filename = f"voices/{voice_id}.pt"
-    common_kwargs = {
-        "repo_id": repo_id,
-        "filename": filename,
-    }
-    if cache_dir is not None:
-        common_kwargs["cache_dir"] = cache_dir
-
     try:
-        hf_hub_download(local_files_only=True, **common_kwargs)
+        hf_hub_download(
+            repo_id=repo_id,
+            filename=filename,
+            cache_dir=cache_dir,
+            local_files_only=True,
+        )
         return False
     except LocalEntryNotFoundError:
         pass
 
-    hf_hub_download(resume_download=True, **common_kwargs)
+    hf_hub_download(
+        repo_id=repo_id,
+        filename=filename,
+        cache_dir=cache_dir,
+    )
     return True

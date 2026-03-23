@@ -1,3 +1,5 @@
+# pyright: reportAttributeAccessIssue=false, reportOptionalMemberAccess=false, reportOptionalSubscript=false
+
 import base64
 import hashlib  # Added for cache path generation
 import html
@@ -8,6 +10,7 @@ import sys
 import tempfile
 import threading
 import time
+from typing import Any, cast
 
 from PyQt6.QtCore import (
     QBuffer,
@@ -227,6 +230,9 @@ class InputBox(QLabel):
         self.go_to_folder_btn.clicked.connect(self.on_go_to_folder_clicked)
         self.go_to_folder_btn.hide()
 
+    def _main_window(self) -> Any | None:
+        return cast(Any, self.window())
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
         margin = 12
@@ -253,12 +259,14 @@ class InputBox(QLabel):
         buffer = QBuffer()
         buffer.open(QIODevice.OpenModeFlag.WriteOnly)
         pixmap.save(buffer, "PNG")
-        img_data = base64.b64encode(buffer.data()).decode()
+        img_data = base64.b64encode(bytes(buffer.data())).decode()  # pyright: ignore[reportArgumentType]
 
         size_str = self._human_readable_size(os.path.getsize(file_path))
         name = os.path.basename(file_path)
         char_count = 0
-        window = self.window()
+        window = self._main_window()
+        if window is None:
+            return
         cache = getattr(window, "_char_count_cache", None)
 
         def parse_size(size_str):
@@ -385,17 +393,22 @@ class InputBox(QLabel):
         # Show textbox button in error state as well
         self.textbox_btn.show()
         # Disable add to queue button on error
-        if hasattr(self.window(), "btn_add_to_queue"):
-            self.window().btn_add_to_queue.setEnabled(False)
+        window = self._main_window()
+        if window is not None and hasattr(window, "btn_add_to_queue"):
+            window.btn_add_to_queue.setEnabled(False)
 
     def clear_input(self):
-        self.window().selected_file = None
-        self.window().displayed_file_path = (
+        window = self._main_window()
+        if window is None:
+            return
+
+        window.selected_file = None
+        window.displayed_file_path = (
             None  # Reset the displayed file path when clearing input
         )
         # Reset book handler attributes
-        self.window().save_chapters_separately = None
-        self.window().merge_chapters_at_end = None
+        window.save_chapters_separately = None
+        window.merge_chapters_at_end = None
         self.setText(
             "Drag and drop your file here or click to browse.\n(.txt, .epub, .pdf, .md, .srt, .ass, .vtt)"
         )
@@ -411,7 +424,6 @@ class InputBox(QLabel):
         self.go_to_folder_btn.hide()
 
         # Re-enable subtitle and replace newlines controls when cleared
-        window = self.window()
         if hasattr(window, "subtitle_combo"):
             # Only enable if language supports it
             current_lang = getattr(window, "selected_lang", "a")
@@ -425,8 +437,8 @@ class InputBox(QLabel):
         if hasattr(window, "btn_add_to_queue"):
             window.btn_add_to_queue.setEnabled(False)
         # Reset the input_box_cleared_by_queue flag after setting file info
-        if hasattr(self.window(), "input_box_cleared_by_queue"):
-            self.window().input_box_cleared_by_queue = True
+        if hasattr(window, "input_box_cleared_by_queue"):
+            window.input_box_cleared_by_queue = True
 
     def _human_readable_size(self, size, decimal_places=2):
         for unit in ["B", "KB", "MB", "GB", "TB"]:
@@ -437,7 +449,9 @@ class InputBox(QLabel):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            self.window().open_file_dialog()
+            window = self._main_window()
+            if window is not None and hasattr(window, "open_file_dialog"):
+                window.open_file_dialog()
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
@@ -491,7 +505,10 @@ class InputBox(QLabel):
                 event.ignore()
                 return
             file_path = urls[0].toLocalFile()
-            win = self.window()
+            win = self._main_window()
+            if win is None:
+                event.ignore()
+                return
             if file_path.lower().endswith(".txt"):
                 win.selected_file, win.selected_file_type = file_path, "txt"
                 win.displayed_file_path = (
@@ -536,7 +553,9 @@ class InputBox(QLabel):
             event.ignore()
 
     def on_chapters_clicked(self):
-        win = self.window()
+        win = self._main_window()
+        if win is None:
+            return
         if (
             win.selected_file_type in ["epub", "pdf", "md", "markdown"]
             and win.selected_book_path
@@ -547,10 +566,14 @@ class InputBox(QLabel):
                 self.set_file_info(win.selected_book_path)
 
     def on_textbox_clicked(self):
-        self.window().open_textbox_dialog()
+        win = self._main_window()
+        if win is not None and hasattr(win, "open_textbox_dialog"):
+            win.open_textbox_dialog()
 
     def on_edit_clicked(self):
-        win = self.window()
+        win = self._main_window()
+        if win is None:
+            return
         # For PDFs and EPUBs, use the temporary text file
         if (
             win.selected_file_type in ["epub", "pdf", "md", "markdown"]
@@ -563,7 +586,9 @@ class InputBox(QLabel):
             win.open_textbox_dialog()
 
     def on_go_to_folder_clicked(self):
-        win = self.window()
+        win = self._main_window()
+        if win is None:
+            return
         # win.selected_file holds the path to the text that is converted.
         file_to_check = win.selected_file
 
@@ -2717,7 +2742,7 @@ class abogen(QWidget):
             ]
             return " + ".join(filter(None, formula_components))
         else:
-            return self.selected_voice
+            return self.selected_voice or ""
 
     def get_selected_lang(self, voice_formula) -> str:
         if self.selected_profile_name:
@@ -2731,7 +2756,7 @@ class abogen(QWidget):
         if not selected_lang:
             m = re.search(r"\b([a-z])", voice_formula)
             selected_lang = m.group(1) if m else None
-        return selected_lang
+        return selected_lang or ""
 
     def get_actual_subtitle_mode(self) -> str:
         return "Disabled" if not self.subtitle_combo.isEnabled() else self.subtitle_mode

@@ -6,8 +6,8 @@ from functools import lru_cache
 from typing import Any, Dict, Mapping, Optional
 
 from abogen.kokoro_text_normalization import (
-    ApostropheConfig,
     CONTRACTION_CATEGORY_DEFAULTS,
+    ApostropheConfig,
 )
 from abogen.llm_client import LLMConfiguration
 from abogen.utils import load_config

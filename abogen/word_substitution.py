@@ -13,7 +13,6 @@ All substitutions preserve special markers (chapter, voice, metadata, timestamps
 import re
 
 
-
 def apply_word_substitutions(
     text,
     substitutions_list_str,

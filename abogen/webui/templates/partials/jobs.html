@@ -5,10 +5,8 @@
     <h3>Active jobs</h3>
   </header>
   {% if active_jobs %}
-    <ul class="job-cards">
-      {% for job in active_jobs %}
-        {% set progress_value = ((job.progress or 0) * 100)|round(1) %}
-        <li class="job-card" data-status="{{ job.status.value }}">
+    <div class="job-cards">{%- for job in active_jobs -%}
+        <div class="job-card" data-status="{{ job.status.value }}">
           <div class="job-card__header">
             <div>
               <a class="job-card__title" href="{{ url_for('jobs.job_detail', job_id=job.id) }}">{{ job.original_filename }}</a>
@@ -23,11 +21,11 @@
             <span class="badge badge--{{ job.status.value }}">{{ job.status.value|title }}</span>
           </div>
           <div class="job-card__progress">
-            <div class="progress-bar" style="--progress: {{ progress_value }}%">
+            <div class="progress-bar" data-progress="{{ ((job.progress or 0) * 100)|round(1) }}">
               <div class="progress-bar__fill"></div>
             </div>
             <div class="job-card__progress-meta">
-              <small>{{ progress_value }}% · {{ job.processed_characters }} / {{ job.total_characters or '—' }}</small>
+              <small>{{ ((job.progress or 0) * 100)|round(1) }}% · {{ job.processed_characters }} / {{ job.total_characters or '—' }}</small>
               {% if job.estimated_time_remaining %}
                 <small class="job-card__eta">~{{ job.estimated_time_remaining | durationformat }} remaining</small>
               {% endif %}
@@ -46,9 +44,9 @@
               <button type="button" class="button button--ghost" hx-post="{{ url_for('jobs.cancel_job', job_id=job.id) }}" hx-target="#jobs-panel" hx-swap="innerHTML" hx-confirm="Cancel this conversion?">Cancel</button>
             {% endif %}
           </div>
-        </li>
-      {% endfor %}
-    </ul>
+        </div>
+      {%- endfor -%}
+    </div>
   {% else %}
     <p class="queue-empty">No active jobs. Drop a file or paste text to get started.</p>
   {% endif %}
@@ -57,14 +55,14 @@
 <section class="queue-section">
   <header class="queue-section__header">
     <h3>Recent results</h3>
-    {% if total_finished > 0 %}
+    {% if total_finished|int %}
       <button type="button" class="button button--ghost" hx-post="{{ url_for('jobs.clear_finished_jobs') }}" hx-target="#jobs-panel" hx-swap="innerHTML" hx-confirm="Remove completed jobs from this list?">Clear finished</button>
     {% endif %}
   </header>
   {% if finished_jobs %}
-    <ul class="job-cards job-cards--compact">
-      {% for job in finished_jobs %}
-        <li class="job-card">
+    {% set hidden_finished_count = (total_finished|int) - (finished_jobs|length) %}
+    <div class="job-cards job-cards--compact">{%- for job in finished_jobs -%}
+      <div class="job-card">
           <div class="job-card__header">
             <div>
               <a class="job-card__title" href="{{ url_for('jobs.job_detail', job_id=job.id) }}">{{ job.original_filename }}</a>
@@ -120,14 +118,14 @@
             {% endif %}
             <button type="button" class="button button--ghost" hx-post="{{ url_for('jobs.delete_job', job_id=job.id) }}" hx-target="#jobs-panel" hx-swap="innerHTML" hx-confirm="Remove this job from the list?">Remove</button>
           </div>
-        </li>
-      {% endfor %}
-      {% if total_finished > finished_jobs|length %}
-        <li class="job-card job-card--info">
-          <div class="job-card__meta">{{ total_finished - finished_jobs|length }} more finished job{{ 's' if (total_finished - finished_jobs|length) != 1 else '' }} hidden. Clear finished to remove them.</div>
-        </li>
+        </div>
+      {%- endfor -%}
+      {% if hidden_finished_count %}
+        <div class="job-card job-card--info">
+          <div class="job-card__meta">{{ hidden_finished_count }} more finished job{{ 's' if hidden_finished_count != 1 else '' }} hidden. Clear finished to remove them.</div>
+        </div>
       {% endif %}
-    </ul>
+    </div>
   {% else %}
     <p class="queue-empty">Completed jobs will appear here.</p>
   {% endif %}

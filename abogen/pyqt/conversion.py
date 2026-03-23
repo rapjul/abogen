@@ -1,3 +1,5 @@
+# pyright: reportOptionalMemberAccess=false, reportAttributeAccessIssue=false
+
 import hashlib  # For generating unique cache filenames
 import logging
 import os
@@ -24,6 +26,7 @@ from abogen.constants import (
 from abogen.subtitle_utils import (
     _CHAPTER_MARKER_SEARCH_PATTERN,
     clean_text,
+    detect_timestamps_in_text,
     get_sample_voice_text,
     parse_ass_file,
     parse_srt_file,
@@ -105,7 +108,7 @@ class CountdownDialog(QDialog):
         )
 
         self.countdown_seconds = countdown_seconds
-        self.layout = QVBoxLayout(self)
+        self._layout = QVBoxLayout(self)
         self._timer = None
         self._button_box = None
 
@@ -115,11 +118,11 @@ class CountdownDialog(QDialog):
             f"Auto-accepting in {self.countdown_seconds} seconds..."
         )
         self.countdown_label.setStyleSheet(f"color: {COLORS['GREEN']};")
-        self.layout.addWidget(self.countdown_label)
+        self._layout.addWidget(self.countdown_label)
 
         self._button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)
         self._button_box.accepted.connect(self.accept)
-        self.layout.addWidget(self._button_box)
+        self._layout.addWidget(self._button_box)
 
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._on_timer_tick)
@@ -132,8 +135,10 @@ class CountdownDialog(QDialog):
                 f"Auto-accepting in {self.countdown_seconds} seconds..."
             )
         else:
-            self._timer.stop()
-            self._button_box.accepted.emit()
+            if self._timer is not None:
+                self._timer.stop()
+            if self._button_box is not None:
+                self._button_box.accepted.emit()
 
     def closeEvent(self, event):
         event.ignore()
@@ -152,7 +157,7 @@ class ChapterOptionsDialog(CountdownDialog):
         self.layout.addWidget(
             QLabel(f"Detected {chapter_count} chapters in the text file.")
         )
-        self.layout.addWidget(QLabel("How would you like to process these chapters?"))
+        self._layout.addWidget(QLabel("How would you like to process these chapters?"))
 
         self.save_separately_checkbox = QCheckBox("Save each chapter separately")
         self.merge_at_end_checkbox = QCheckBox("Create a merged version at the end")
@@ -164,8 +169,8 @@ class ChapterOptionsDialog(CountdownDialog):
             self.update_merge_checkbox_state
         )
 
-        self.layout.addWidget(self.save_separately_checkbox)
-        self.layout.addWidget(self.merge_at_end_checkbox)
+        self._layout.addWidget(self.save_separately_checkbox)
+        self._layout.addWidget(self.merge_at_end_checkbox)
 
         self.add_countdown_and_buttons()
         self.update_merge_checkbox_state()
@@ -217,8 +222,10 @@ class TimestampDetectionDialog(QDialog):
         yes_button = button_box.addButton("Yes", QDialogButtonBox.ButtonRole.AcceptRole)
         no_button = button_box.addButton("No", QDialogButtonBox.ButtonRole.RejectRole)
 
-        yes_button.clicked.connect(lambda: self._set_result(True))
-        no_button.clicked.connect(lambda: self._set_result(False))
+        if yes_button is not None:
+            yes_button.clicked.connect(lambda: self._set_result(True))
+        if no_button is not None:
+            no_button.clicked.connect(lambda: self._set_result(False))
 
         layout.addWidget(button_box)
 
@@ -335,6 +342,8 @@ class ConversionThread(QThread):
         self.processed_char_count = 0  # Initialize processed character count
         self.display_path = None  # Add variable for display path
         self.save_base_path = save_base_path  # Store the save base path
+        self.ffmpeg_proc = None
+        self.chapter_ffmpeg_proc = None
         self.is_direct_text = (
             False  # Flag to indicate if input is from textbox rather than file
         )
@@ -425,7 +434,7 @@ class ConversionThread(QThread):
 
         return samples_processed
 
-    def run(self):
+    def run(self):  # pyright: ignore[reportGeneralTypeIssues]
         _install_phonemizer_warning_filter()
         print(
             f"\nVoice: {self.voice}\nLanguage: {self.lang_code}\nSpeed: {self.speed}\nGPU: {self.use_gpu}\nFile: {self.file_name}\nSubtitle mode: {self.subtitle_mode}\nOutput format: {self.output_format}\nSave option: {self.save_option}\n"
@@ -477,14 +486,14 @@ class ConversionThread(QThread):
             self.log_updated.emit(f"- Subtitle mode: {self.subtitle_mode}")
             self.log_updated.emit(f"- Output format: {self.output_format}")
             self.log_updated.emit(
-                f"- Subtitle format: {next((label for value, label in SUBTITLE_FORMATS if value == getattr(self, 'subtitle_format', 'srt')), getattr(self, 'subtitle_format', 'srt'))}"
+                f"- Subtitle format: {next((label for value, label in SUPPORTED_SUBTITLE_FORMATS if value == getattr(self, 'subtitle_format', 'srt')), getattr(self, 'subtitle_format', 'srt'))}"
             )
             self.log_updated.emit(
                 f"- Use spaCy for sentence segmentation: {'Yes' if getattr(self, 'use_spacy_segmentation', False) else 'No'}"
             )
             self.log_updated.emit(f"- Save option: {self.save_option}")
             if self.replace_single_newlines:
-                self.log_updated.emit(f"- Replace single newlines: Yes")
+                self.log_updated.emit("- Replace single newlines: Yes")
 
             # Check if input is a subtitle file for additional configuration
             is_subtitle_input = False
@@ -2071,8 +2080,10 @@ class ConversionThread(QThread):
                 merged_out_file.write(audio_buffer)
                 merged_out_file.close()
             elif ffmpeg_proc:
-                ffmpeg_proc.stdin.write(audio_buffer.astype("float32").tobytes())
-                ffmpeg_proc.stdin.close()
+                stdin = ffmpeg_proc.stdin
+                if stdin is not None:
+                    stdin.write(audio_buffer.astype("float32").tobytes())
+                    stdin.close()
                 ffmpeg_proc.wait()
 
             if subtitle_file:
@@ -2087,7 +2098,9 @@ class ConversionThread(QThread):
         except Exception as e:
             try:
                 if "ffmpeg_proc" in locals() and ffmpeg_proc:
-                    ffmpeg_proc.stdin.close()
+                    stdin = ffmpeg_proc.stdin
+                    if stdin is not None:
+                        stdin.close()
                     ffmpeg_proc.terminate()
                     ffmpeg_proc.wait()
                 if "subtitle_file" in locals() and subtitle_file:
@@ -2597,14 +2610,16 @@ class ConversionThread(QThread):
         # Terminate ffmpeg subprocesses if running
         try:
             if hasattr(self, "ffmpeg_proc") and self.ffmpeg_proc:
-                self.ffmpeg_proc.stdin.close()
+                if self.ffmpeg_proc.stdin is not None:
+                    self.ffmpeg_proc.stdin.close()
                 self.ffmpeg_proc.terminate()
                 self.ffmpeg_proc.wait()
         except Exception:
             pass
         try:
             if hasattr(self, "chapter_ffmpeg_proc") and self.chapter_ffmpeg_proc:
-                self.chapter_ffmpeg_proc.stdin.close()
+                if self.chapter_ffmpeg_proc.stdin is not None:
+                    self.chapter_ffmpeg_proc.stdin.close()
                 self.chapter_ffmpeg_proc.terminate()
                 self.chapter_ffmpeg_proc.wait()
         except Exception:

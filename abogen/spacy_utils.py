@@ -95,7 +95,7 @@ def get_spacy_model(lang_code, log_callback=None):
         # Model not found, attempt download
         log(f"\nspaCy: Downloading model '{model_name}'...")
         try:
-            from spacy.cli import download
+            from spacy.cli.download import download
 
             download(model_name)
             # Retry loading with the same fix

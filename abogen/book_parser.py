@@ -1,14 +1,18 @@
+# pyright: reportOptionalMemberAccess=false
+
 import logging
 import os
 import re
 import textwrap
 import urllib.parse
 from abc import ABC, abstractmethod
+from typing import Any
 
 import ebooklib
 import fitz  # PyMuPDF
 import markdown
-from bs4 import BeautifulSoup, NavigableString
+from bs4 import BeautifulSoup
+from bs4.element import NavigableString
 from ebooklib import epub
 
 from abogen.subtitle_utils import calculate_text_length, clean_text
@@ -135,10 +139,13 @@ class PdfParser(BaseBookParser):
     def process_content(self, replace_single_newlines=True):
         if not self.pdf_doc:
             self.load()
+        pdf_doc = self.pdf_doc
+        if pdf_doc is None:
+            raise RuntimeError(f"Failed to load PDF: {self.book_path}")
 
         # 1. Extract text from all pages first
-        for page_num in range(len(self.pdf_doc)):
-            text = clean_text(self.pdf_doc[page_num].get_text())
+        for page_num in range(len(pdf_doc)):
+            text = clean_text(pdf_doc[page_num].get_text())
 
             # Clean up common PDF artifacts:
             text = _BRACKETED_NUMBERS_PATTERN.sub("", text)
@@ -151,7 +158,7 @@ class PdfParser(BaseBookParser):
             self.content_lengths[page_id] = calculate_text_length(text)
 
         # 2. Build Navigation Structure
-        toc = self.pdf_doc.get_toc()
+        toc = pdf_doc.get_toc()
 
         if not toc:
             # Fallback: Flat list of pages if no TOC
@@ -163,7 +170,7 @@ class PdfParser(BaseBookParser):
                 "has_content": False,
             }
             # Add all pages as children
-            for page_num in range(len(self.pdf_doc)):
+            for page_num in range(len(pdf_doc)):
                 page_id = f"page_{page_num + 1}"
                 title = self._get_page_title(
                     page_num, self.content_texts.get(page_id, "")
@@ -191,6 +198,9 @@ class PdfParser(BaseBookParser):
         return title
 
     def _build_structure_from_toc(self, toc):
+        pdf_doc = self.pdf_doc
+        if pdf_doc is None:
+            return []
         # 1. Flatten TOC to easier list (page_num, title, level)
         # fitz TOC is [[lvl, title, page, dest], ...]
 
@@ -247,7 +257,7 @@ class PdfParser(BaseBookParser):
             bookmarks_by_page[p].append(node)
 
         # Let's iterate.
-        for page_num in range(len(self.pdf_doc)):
+        for page_num in range(len(pdf_doc)):
             page_id = f"page_{page_num + 1}"
 
             # Check if this page STARTS bookmarks
@@ -322,7 +332,7 @@ class MarkdownParser(BaseBookParser):
         original_text = textwrap.dedent(self.markdown_text)
         md = markdown.Markdown(extensions=["toc", "fenced_code"])
         html = md.convert(original_text)
-        markdown_toc = md.toc_tokens
+        markdown_toc = getattr(md, "toc_tokens", [])
 
         # Convert markdown TOC tokens to our unified navigation structure
         self.processed_nav_structure = self._convert_markdown_toc_to_nav(markdown_toc)
@@ -638,7 +648,7 @@ class EpubParser(BaseBookParser):
         link = li_element.find("a", recursive=False)
         span_text = li_element.find("span", recursive=False)
         src = None
-        current_entry_node = {"children": []}
+        current_entry_node: dict[str, Any] = {"children": []}
 
         if link and "href" in link.attrs:
             src = link["href"]
@@ -915,11 +925,17 @@ class EpubParser(BaseBookParser):
                     tag.append("\n\n")
 
                 for ol in slice_soup.find_all("ol"):
-                    start = int(ol.get("start", 1))
+                    start = 1
+                    start_attr = ol.get("start")
+                    if start_attr is not None:
+                        try:
+                            start = int(str(start_attr))
+                        except (TypeError, ValueError):
+                            start = 1
                     for idx, li in enumerate(ol.find_all("li", recursive=False)):
                         number_text = f"{start + idx}) "
-                        if li.string:
-                            li.string.replace_with(number_text + li.string)
+                        if li.string and isinstance(li.string, NavigableString):
+                            li.string.replace_with(number_text + str(li.string))
                         else:
                             li.insert(0, NavigableString(number_text))
 
@@ -1006,11 +1022,17 @@ class EpubParser(BaseBookParser):
 
                 # Handle ordered lists
                 for ol in soup.find_all("ol"):
-                    start = int(ol.get("start", 1))
+                    start = 1
+                    start_attr = ol.get("start")
+                    if start_attr is not None:
+                        try:
+                            start = int(str(start_attr))
+                        except (TypeError, ValueError):
+                            start = 1
                     for idx, li in enumerate(ol.find_all("li", recursive=False)):
                         number_text = f"{start + idx}) "
-                        if li.string:
-                            li.string.replace_with(number_text + li.string)
+                        if li.string and isinstance(li.string, NavigableString):
+                            li.string.replace_with(number_text + str(li.string))
                         else:
                             li.insert(0, NavigableString(number_text))
 

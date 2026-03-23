@@ -7,12 +7,11 @@ import shutil
 import subprocess
 import sys
 import warnings
+from functools import lru_cache
 from threading import Thread
 from typing import Dict, Optional
 
-from functools import lru_cache
-
-from dotenv import load_dotenv, find_dotenv
+from dotenv import find_dotenv, load_dotenv
 
 
 def _load_environment() -> None:
@@ -445,7 +444,9 @@ def calculate_text_length(text):
 def get_gpu_acceleration(enabled):
     try:
         import torch  # type: ignore[import-not-found]
-        from torch.cuda import is_available as cuda_available  # type: ignore[import-not-found]
+        from torch.cuda import (
+            is_available as cuda_available,  # type: ignore[import-not-found]
+        )
 
         if not enabled:
             return "GPU available but using CPU.", False

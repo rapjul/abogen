@@ -1679,7 +1679,7 @@ def _embed_m4b_metadata(
         )
 
 
-def run_conversion_job(job: Job) -> None:
+def run_conversion_job(job: Job) -> None:  # pyright: ignore[reportGeneralTypeIssues]
     job.add_log("Preparing conversion pipeline")
     canceller = _make_canceller(job)
 
