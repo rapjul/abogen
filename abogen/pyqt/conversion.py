@@ -6,7 +6,6 @@ import re
 import subprocess
 import threading  # for efficient waiting
 import time
-from typing import NamedTuple
 
 import soundfile as sf
 import static_ffmpeg
@@ -19,14 +18,12 @@ from abogen.constants import (
     CHAPTER_OPTIONS_COUNTDOWN,
     COLORS,
     LANGUAGE_DESCRIPTIONS,
-    SUBTITLE_FORMATS,
     SUPPORTED_SOUND_FORMATS,
     SUPPORTED_SUBTITLE_FORMATS,
 )
 from abogen.subtitle_utils import (
     _CHAPTER_MARKER_SEARCH_PATTERN,
     clean_text,
-    detect_timestamps_in_text,
     get_sample_voice_text,
     parse_ass_file,
     parse_srt_file,
@@ -41,12 +38,6 @@ from abogen.utils import (
     get_user_cache_path,
 )
 from abogen.voice_formulas import extract_voice_ids, get_new_voice
-
-
-class BatchSizeProfile(NamedTuple):
-    min_chars: int
-    target_chars: int
-    max_chars: int
 
 
 def _voice_name_only_from_spec(voice_spec):
@@ -270,16 +261,6 @@ class ConversionThread(QThread):
     PUNCTUATION_SENTENCE_COMMA = ".!?,।。！？、，"
     PUNCTUATION_COMMAS = ",，、"
 
-    DEFAULT_TTS_BATCH_TARGET_CHARS = 500
-    DEFAULT_TTS_BATCH_MIN_CHARS = 220
-    DEFAULT_TTS_BATCH_MAX_CHARS = 900
-    DEFAULT_BATCH_SHRINK_FAILURE_THRESHOLD = 2
-    DEFAULT_BATCH_SHRINK_FACTOR = 0.8
-    DEFAULT_BATCH_SHRINK_COOLDOWN_SUCCESS_BATCHES = 6
-    MIN_TTS_BATCH_MIN_CHARS = 80
-    MIN_TTS_BATCH_TARGET_CHARS = 140
-    MIN_TTS_BATCH_MAX_CHARS = 220
-
     def _get_split_pattern(self, lang_code, subtitle_mode):
         """
         Get the appropriate split pattern based on language and subtitle mode.
@@ -313,356 +294,6 @@ class ConversionThread(QThread):
             )
         else:
             return r"\n+"  # Default to line breaks
-
-    def _split_long_text_chunk(self, text, max_chars):
-        """Split an oversized chunk into smaller pieces, preferring whitespace breaks."""
-        text = (text or "").strip()
-        if not text:
-            return []
-
-        chunks = []
-        remaining = text
-        while len(remaining) > max_chars:
-            split_at = remaining.rfind(" ", 0, max_chars + 1)
-            if split_at <= 0:
-                split_at = max_chars
-            chunk = remaining[:split_at].strip()
-            if chunk:
-                chunks.append(chunk)
-            remaining = remaining[split_at:].strip()
-        if remaining:
-            chunks.append(remaining)
-        return chunks
-
-    def _sentence_aware_char_batches(self, text):
-        """Build near-target text batches while respecting sentence boundaries."""
-        raw_text = (text or "").strip()
-        if not raw_text:
-            return []
-
-        min_chars = max(1, int(getattr(self, "tts_batch_min_chars", 1)))
-        target_chars = max(
-            min_chars, int(getattr(self, "tts_batch_target_chars", min_chars))
-        )
-        max_chars = max(
-            target_chars, int(getattr(self, "tts_batch_max_chars", target_chars))
-        )
-
-        sentence_punctuation = re.escape(self.PUNCTUATION_SENTENCE)
-        sentence_pattern = re.compile(
-            rf".+?(?:[{sentence_punctuation}]+(?:\s+|$)|\n+|$)", re.S
-        )
-        sentence_like_parts = [
-            m.group(0).strip()
-            for m in sentence_pattern.finditer(raw_text)
-            if m.group(0).strip()
-        ]
-        if not sentence_like_parts:
-            sentence_like_parts = [raw_text]
-
-        batches = []
-        current_parts = []
-        current_len = 0
-
-        for part in sentence_like_parts:
-            part_len = len(part)
-
-            if part_len > max_chars:
-                if current_parts:
-                    batches.append(" ".join(current_parts).strip())
-                    current_parts = []
-                    current_len = 0
-                batches.extend(self._split_long_text_chunk(part, max_chars))
-                continue
-
-            projected_len = part_len if current_len == 0 else current_len + 1 + part_len
-            should_flush = current_len >= min_chars and projected_len > target_chars
-            if should_flush and current_parts:
-                batches.append(" ".join(current_parts).strip())
-                current_parts = [part]
-                current_len = part_len
-            else:
-                current_parts.append(part)
-                current_len = projected_len
-
-        if current_parts:
-            batches.append(" ".join(current_parts).strip())
-
-        return [batch for batch in batches if batch]
-
-    def _iter_tts_results_for_segments(
-        self, tts, segments, loaded_voice, speed, split_pattern
-    ):
-        for segment in segments:
-            for result in tts(
-                segment,
-                voice=loaded_voice,
-                speed=speed,
-                split_pattern=split_pattern,
-            ):
-                yield result
-
-    def _is_batch_shrink_eligible_exception(self, exc):
-        """Return True only for likely backend/memory pressure errors."""
-        signal_text = f"{type(exc).__name__}: {exc}".lower()
-        indicators = (
-            "out of memory",
-            "oom",
-            "cuda",
-            "cublas",
-            "cudnn",
-            "mps",
-            "metal",
-            "hip",
-            "xpu",
-            "runtimeerror",
-            "failed to allocate",
-            "insufficient memory",
-        )
-        return any(indicator in signal_text for indicator in indicators)
-
-    def _log_batch_sizes(self, prefix):
-        self.log_updated.emit(
-            (
-                f"{prefix} batch chars min/target/max: "
-                f"{self.tts_batch_min_chars}/{self.tts_batch_target_chars}/{self.tts_batch_max_chars}",
-                "grey",
-            )
-        )
-
-    def _apply_device_specific_batch_defaults(self, device):
-        """Apply device-tuned defaults only when values are still untouched defaults."""
-        if not getattr(self, "use_sentence_char_batching", False):
-            return
-
-        current = (
-            int(getattr(self, "tts_batch_min_chars", 0)),
-            int(getattr(self, "tts_batch_target_chars", 0)),
-            int(getattr(self, "tts_batch_max_chars", 0)),
-        )
-        untouched_defaults = (
-            self.DEFAULT_TTS_BATCH_MIN_CHARS,
-            self.DEFAULT_TTS_BATCH_TARGET_CHARS,
-            self.DEFAULT_TTS_BATCH_MAX_CHARS,
-        )
-        if current != untouched_defaults:
-            return
-
-        if device == "mps":
-            total_memory_gb = self._get_total_memory_gb()
-            if total_memory_gb <= 16:
-                tuned = BatchSizeProfile(140, 320, 600)
-            elif total_memory_gb <= 32:
-                tuned = BatchSizeProfile(180, 420, 760)
-            elif total_memory_gb <= 64:
-                tuned = BatchSizeProfile(230, 540, 980)
-            else:
-                tuned = BatchSizeProfile(260, 620, 1100)
-        elif device == "cuda":
-            tuned = BatchSizeProfile(260, 620, 1100)
-        else:
-            tuned = BatchSizeProfile(160, 360, 680)
-
-        (
-            self.tts_batch_min_chars,
-            self.tts_batch_target_chars,
-            self.tts_batch_max_chars,
-        ) = tuned
-        self.log_updated.emit(
-            (
-                f"- Device-tuned batch defaults for {device}: "
-                f"min/target/max {tuned[0]}/{tuned[1]}/{tuned[2]}",
-                "grey",
-            )
-        )
-
-    def _get_total_memory_gb(self):
-        """Return approximate total system memory in GiB."""
-        try:
-            if platform.system() == "Darwin":
-                output = subprocess.check_output(
-                    ["sysctl", "-n", "hw.memsize"],
-                    text=True,
-                ).strip()
-                if output.isdigit():
-                    return max(
-                        1,
-                        int(int(output) / (1024**3)),
-                    )
-        except Exception:
-            pass
-
-        try:
-            page_size = os.sysconf("SC_PAGE_SIZE")
-            phys_pages = os.sysconf("SC_PHYS_PAGES")
-            total_bytes = int(page_size) * int(phys_pages)
-            return max(1, int(total_bytes / (1024**3)))
-        except Exception:
-            return 8  # Fallback to a safe default if detection fails
-
-    def _auto_shrink_batch_sizes_if_needed(self):
-        """Shrink batching limits after repeated sentence-batch failures."""
-        if int(getattr(self, "batch_shrink_cooldown_remaining", 0)) > 0:
-            self.batch_failure_count = 0
-            return False
-
-        failure_count = int(getattr(self, "batch_failure_count", 0)) + 1
-        self.batch_failure_count = failure_count
-
-        threshold = max(
-            1,
-            int(
-                getattr(
-                    self,
-                    "batch_shrink_failure_threshold",
-                    self.DEFAULT_BATCH_SHRINK_FAILURE_THRESHOLD,
-                )
-            ),
-        )
-        if failure_count < threshold:
-            return False
-
-        shrink_factor = float(
-            getattr(self, "batch_shrink_factor", self.DEFAULT_BATCH_SHRINK_FACTOR)
-        )
-        # Keep shrink factor sane even if customized.
-        shrink_factor = min(max(shrink_factor, 0.1), 0.95)
-
-        old_min = max(1, int(getattr(self, "tts_batch_min_chars", 1)))
-        old_target = max(old_min, int(getattr(self, "tts_batch_target_chars", old_min)))
-        old_max = max(old_target, int(getattr(self, "tts_batch_max_chars", old_target)))
-
-        min_floor = max(
-            1,
-            int(
-                getattr(
-                    self,
-                    "tts_batch_min_floor_chars",
-                    self.MIN_TTS_BATCH_MIN_CHARS,
-                )
-            ),
-        )
-        target_floor = max(
-            min_floor,
-            int(
-                getattr(
-                    self,
-                    "tts_batch_target_floor_chars",
-                    self.MIN_TTS_BATCH_TARGET_CHARS,
-                )
-            ),
-        )
-        max_floor = max(
-            target_floor,
-            int(
-                getattr(
-                    self,
-                    "tts_batch_max_floor_chars",
-                    self.MIN_TTS_BATCH_MAX_CHARS,
-                )
-            ),
-        )
-
-        new_min = max(min_floor, int(old_min * shrink_factor))
-        new_target = max(target_floor, int(old_target * shrink_factor))
-        new_max = max(max_floor, int(old_max * shrink_factor))
-
-        if new_target < new_min:
-            new_target = new_min
-        if new_max < new_target:
-            new_max = new_target
-
-        changed = (new_min, new_target, new_max) != (old_min, old_target, old_max)
-
-        self.batch_failure_count = 0
-        if not changed:
-            return False
-
-        self.tts_batch_min_chars = new_min
-        self.tts_batch_target_chars = new_target
-        self.tts_batch_max_chars = new_max
-        self.batch_shrink_cooldown_remaining = max(
-            0,
-            int(
-                getattr(
-                    self,
-                    "batch_shrink_cooldown_success_batches",
-                    self.DEFAULT_BATCH_SHRINK_COOLDOWN_SUCCESS_BATCHES,
-                )
-            ),
-        )
-        self.log_updated.emit(
-            (
-                "⚠ Auto-shrunk batch sizes after repeated synth failures: "
-                f"min {old_min}->{new_min}, target {old_target}->{new_target}, max {old_max}->{new_max}",
-                "orange",
-            )
-        )
-        if self.batch_shrink_cooldown_remaining > 0:
-            self.log_updated.emit(
-                (
-                    "- Shrink cooldown enabled: waiting for "
-                    f"{self.batch_shrink_cooldown_remaining} successful batched synth calls before next shrink",
-                    "grey",
-                )
-            )
-        self._log_batch_sizes("- Active")
-        return True
-
-    def _iter_tts_results_with_safe_fallback(
-        self,
-        tts,
-        text_segment,
-        loaded_voice,
-        speed,
-        active_split_pattern,
-    ):
-        """Yield TTS results with per-segment fallback to safer split mode on errors."""
-        if not getattr(self, "use_sentence_char_batching", False):
-            yield from self._iter_tts_results_for_segments(
-                tts,
-                [text_segment],
-                loaded_voice,
-                speed,
-                active_split_pattern,
-            )
-            return
-
-        batched_segments = self._sentence_aware_char_batches(text_segment) or [
-            text_segment
-        ]
-        for batched_segment in batched_segments:
-            try:
-                yield from self._iter_tts_results_for_segments(
-                    tts,
-                    [batched_segment],
-                    loaded_voice,
-                    speed,
-                    None,
-                )
-                self.batch_failure_count = 0
-                if int(getattr(self, "batch_shrink_cooldown_remaining", 0)) > 0:
-                    self.batch_shrink_cooldown_remaining -= 1
-            except Exception as exc:
-                eligible_for_shrink = self._is_batch_shrink_eligible_exception(exc)
-                if eligible_for_shrink:
-                    self._auto_shrink_batch_sizes_if_needed()
-                else:
-                    self.batch_failure_count = 0
-                self.log_updated.emit(
-                    (
-                        "⚠ Sentence-batch synth failed, retrying with safer split mode...",
-                        "orange",
-                    )
-                )
-                print(f"Sentence-batch fallback triggered: {type(exc).__name__}: {exc}")
-                yield from self._iter_tts_results_for_segments(
-                    tts,
-                    [batched_segment],
-                    loaded_voice,
-                    speed,
-                    active_split_pattern,
-                )
 
     def __init__(
         self,
@@ -713,22 +344,6 @@ class ConversionThread(QThread):
         self.max_subtitle_words = 50  # Default value, will be overridden from GUI
         self.silence_duration = 2.0  # Default value, will be overridden from GUI
         self.use_spacy_segmentation = True  # Default, will be overridden from GUI
-        self.use_sentence_char_batching = True
-        self.tts_batch_target_chars = self.DEFAULT_TTS_BATCH_TARGET_CHARS
-        self.tts_batch_min_chars = self.DEFAULT_TTS_BATCH_MIN_CHARS
-        self.tts_batch_max_chars = self.DEFAULT_TTS_BATCH_MAX_CHARS
-        self.batch_failure_count = 0
-        self.batch_shrink_failure_threshold = (
-            self.DEFAULT_BATCH_SHRINK_FAILURE_THRESHOLD
-        )
-        self.batch_shrink_factor = self.DEFAULT_BATCH_SHRINK_FACTOR
-        self.batch_shrink_cooldown_success_batches = (
-            self.DEFAULT_BATCH_SHRINK_COOLDOWN_SUCCESS_BATCHES
-        )
-        self.batch_shrink_cooldown_remaining = 0
-        self.tts_batch_min_floor_chars = self.MIN_TTS_BATCH_MIN_CHARS
-        self.tts_batch_target_floor_chars = self.MIN_TTS_BATCH_TARGET_CHARS
-        self.tts_batch_max_floor_chars = self.MIN_TTS_BATCH_MAX_CHARS
         # Set split pattern based on language and subtitle mode
         self.split_pattern = self._get_split_pattern(lang_code, subtitle_mode)
         self.voice_cache = {}  # Cache for loaded voices
@@ -836,9 +451,9 @@ class ConversionThread(QThread):
                 else processing_file
             )
 
-            self.log_updated.emit(f"  - Input File: {input_file}")
+            self.log_updated.emit(f"- Input File: {input_file}")
             if input_file != processing_file:
-                self.log_updated.emit(f"  - Processing File: {processing_file}")
+                self.log_updated.emit(f"- Processing File: {processing_file}")
 
             # Use file_name for logs if from_queue, otherwise use display_path if available
             if getattr(self, "from_queue", False):
@@ -850,36 +465,26 @@ class ConversionThread(QThread):
 
             # Use file size string passed from GUI
             if hasattr(self, "file_size_str"):
-                self.log_updated.emit(f"  - File size: {self.file_size_str}")
+                self.log_updated.emit(f"- File size: {self.file_size_str}")
+
+            self.log_updated.emit(f"- Total characters: {int(self.total_char_count):,}")
 
             self.log_updated.emit(
-                f"  - Total characters: {int(self.total_char_count):,}"
+                f"- Language: {self.lang_code} ({LANGUAGE_DESCRIPTIONS.get(self.lang_code, 'Unknown')})"
             )
-
+            self.log_updated.emit(f"- Voice: {self.voice}")
+            self.log_updated.emit(f"- Speed: {self.speed}")
+            self.log_updated.emit(f"- Subtitle mode: {self.subtitle_mode}")
+            self.log_updated.emit(f"- Output format: {self.output_format}")
             self.log_updated.emit(
-                f"  - Language: {self.lang_code} ({LANGUAGE_DESCRIPTIONS.get(self.lang_code, 'Unknown')})"
-            )
-            self.log_updated.emit(f"  - Voice: {self.voice}")
-            self.log_updated.emit(f"  - Speed: {self.speed}")
-            self.log_updated.emit(f"  - Subtitle mode: {self.subtitle_mode}")
-
-            self.log_updated.emit(f"  - Output format: {self.output_format}")
-            self.log_updated.emit(
-                f"  - Subtitle format: {next((label for value, label in SUBTITLE_FORMATS if value == getattr(self, 'subtitle_format', 'srt')), getattr(self, 'subtitle_format', 'srt'))}"
+                f"- Subtitle format: {next((label for value, label in SUBTITLE_FORMATS if value == getattr(self, 'subtitle_format', 'srt')), getattr(self, 'subtitle_format', 'srt'))}"
             )
             self.log_updated.emit(
-                f"  - Use spaCy for sentence segmentation: {'Yes' if getattr(self, 'use_spacy_segmentation', False) else 'No'}"
+                f"- Use spaCy for sentence segmentation: {'Yes' if getattr(self, 'use_spacy_segmentation', False) else 'No'}"
             )
-
-            # Save options (only show output folder, if applicable)
-            self.log_updated.emit(f"  - Save option: {self.save_option}")
-            if self.save_option == "Choose output folder":
-                self.log_updated.emit(
-                    f"  - Output folder: {self.output_folder or os.getcwd()}"
-                )
-
+            self.log_updated.emit(f"- Save option: {self.save_option}")
             if self.replace_single_newlines:
-                self.log_updated.emit("  - Replace single newlines: Yes")
+                self.log_updated.emit(f"- Replace single newlines: Yes")
 
             # Check if input is a subtitle file for additional configuration
             is_subtitle_input = False
@@ -904,25 +509,30 @@ class ConversionThread(QThread):
             if hasattr(self, "save_chapters_separately"):
                 self.log_updated.emit(
                     (
-                        f"  - Save chapters separately: {'Yes' if self.save_chapters_separately else 'No'}"
+                        f"- Save chapters separately: {'Yes' if self.save_chapters_separately else 'No'}"
                     )
                 )
                 # Display merge_chapters_at_end flag if save_chapters_separately is True
                 if self.save_chapters_separately:
                     merge_at_end = getattr(self, "merge_chapters_at_end", True)
                     self.log_updated.emit(
-                        f"  - Merge chapters at the end: {'Yes' if merge_at_end else 'No'}"
+                        f"- Merge chapters at the end: {'Yes' if merge_at_end else 'No'}"
                     )
                     # Display the separate chapters format if it's set
                     separate_format = getattr(self, "separate_chapters_format", "wav")
                     self.log_updated.emit(
-                        f"  - Separate chapters format: {separate_format}"
+                        f"- Separate chapters format: {separate_format}"
                     )
 
             # If merge_at_end is True, display the silence duration
             if getattr(self, "merge_chapters_at_end", True):
                 self.log_updated.emit(
-                    f"  - Silence between chapters: {self.silence_duration} seconds"
+                    f"- Silence between chapters: {self.silence_duration} seconds"
+                )
+
+            if self.save_option == "Choose output folder":
+                self.log_updated.emit(
+                    f"- Output folder: {self.output_folder or os.getcwd()}"
                 )
 
             self.log_updated.emit(("\nInitializing TTS pipeline...", "grey"))
@@ -935,10 +545,6 @@ class ConversionThread(QThread):
                     device = "cuda"  # Use CUDA for other platforms
             else:
                 device = "cpu"
-
-            self._apply_device_specific_batch_defaults(device)
-            if self.use_sentence_char_batching:
-                self._log_batch_sizes("- Active")
 
             tts = self.KPipeline(
                 lang_code=self.lang_code, repo_id="hexgrad/Kokoro-82M", device=device
@@ -1635,12 +1241,11 @@ class ConversionThread(QThread):
                         print("Using split pattern: (unprintable)")
 
                     for text_segment in text_segments:
-                        for result in self._iter_tts_results_with_safe_fallback(
-                            tts,
+                        for result in tts(
                             text_segment,
-                            loaded_voice,
-                            self.speed,
-                            active_split_pattern,
+                            voice=loaded_voice,
+                            speed=self.speed,
+                            split_pattern=active_split_pattern,
                         ):
                             # Print the result for debugging
                             # print(f"Result: {result}")

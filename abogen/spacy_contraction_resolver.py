@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import os
 import logging
+import os
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, Dict, Optional, Tuple
@@ -133,7 +133,6 @@ def _resolve_apostrophe_s(token: Token) -> Optional[ContractionResolution]:
         return None
 
     prev_lower = prev.lemma_.lower()
-    surface = token.doc.text[prev.idx : token.idx + len(token.text)]
 
     if prev_lower == "let":
         return _resolution(prev, token, "us", "contraction_let_us", "us")

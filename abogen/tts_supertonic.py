@@ -3,7 +3,6 @@ from __future__ import annotations
 import ast
 from dataclasses import dataclass
 import logging
-import math
 import re
 from typing import Any, Iterable, Iterator, Optional
 

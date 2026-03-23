@@ -899,7 +899,7 @@ class QueueManager(QDialog):
 
                 if not os.path.exists(target_path):
                     QMessageBox.warning(
-                        self, "File Not Found", f"The file does not exist."
+                        self, "File Not Found", "The file does not exist."
                     )
                     return
                 QDesktopServices.openUrl(QUrl.fromLocalFile(target_path))
@@ -1012,7 +1012,7 @@ class QueueManager(QDialog):
                             )
                             if not os.path.exists(target_path):
                                 QMessageBox.warning(
-                                    self, "File Not Found", f"The file does not exist."
+                                    self, "File Not Found", "The file does not exist."
                                 )
                                 return
                             folder = os.path.dirname(target_path)
@@ -1065,7 +1065,7 @@ class QueueManager(QDialog):
             reply = QMessageBox.question(
                 self,
                 "Confirm Cancel",
-                f"Are you sure you want to cancel and discard all changes?",
+                "Are you sure you want to cancel and discard all changes?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
             )

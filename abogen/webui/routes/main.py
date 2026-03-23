@@ -1,13 +1,12 @@
 import logging
-import time
 import uuid
 from pathlib import Path
-from typing import Any, Dict, Optional, cast
+from typing import Optional
 
 from flask import Blueprint, redirect, render_template, request, url_for, jsonify, current_app
 from werkzeug.utils import secure_filename
 
-from abogen.webui.service import PendingJob, JobStatus
+from abogen.webui.service import JobStatus
 from abogen.webui.routes.utils.service import get_service, remove_pending_job, submit_job
 from abogen.webui.routes.utils.settings import load_settings
 from abogen.webui.routes.utils.voice import template_options

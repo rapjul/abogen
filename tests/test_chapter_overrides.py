@@ -103,8 +103,11 @@ def _install_dependency_stubs() -> None:
 
 _install_dependency_stubs()
 
-from abogen.text_extractor import ExtractedChapter
-from abogen.webui.conversion_runner import _apply_chapter_overrides, _merge_metadata
+from abogen.text_extractor import ExtractedChapter  # noqa: E402
+from abogen.webui.conversion_runner import (  # noqa: E402
+    _apply_chapter_overrides,
+    _merge_metadata,
+)
 
 
 def _sample_chapters() -> list[ExtractedChapter]:

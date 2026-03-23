@@ -2,7 +2,6 @@ import json
 from pathlib import Path
 
 import numpy as np
-import pytest
 
 from abogen.debug_tts_samples import (
     DEBUG_TTS_SAMPLES,

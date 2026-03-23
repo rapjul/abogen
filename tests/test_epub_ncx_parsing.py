@@ -7,7 +7,7 @@ from ebooklib import epub
 # Ensure we can import the module
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from abogen.book_parser import get_book_parser, EpubParser
+from abogen.book_parser import get_book_parser
 
 
 class TestEpubNcxParsing(unittest.TestCase):

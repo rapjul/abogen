@@ -1,23 +1,17 @@
-from typing import Any, Dict, List, Optional
-from flask import Blueprint, render_template, request, jsonify, abort, flash, redirect, url_for
+from flask import Blueprint, render_template, request, jsonify, abort, redirect, url_for
 from flask.typing import ResponseReturnValue
 
 from abogen.webui.routes.utils.voice import (
     template_options,
-    resolve_voice_setting,
-    resolve_voice_choice,
-    parse_voice_formula,
 )
 from abogen.webui.routes.utils.settings import load_settings, coerce_bool
 from abogen.webui.routes.utils.preview import synthesize_preview
 from abogen.speaker_configs import (
     list_configs,
-    get_config,
     load_configs,
     save_configs,
     delete_config,
 )
-from abogen.constants import VOICES_INTERNAL
 
 voices_bp = Blueprint("voices", __name__)
 

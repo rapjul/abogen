@@ -1,5 +1,3 @@
-import pytest
-from unittest.mock import patch
 from abogen.kokoro_text_normalization import (
     normalize_for_pipeline,
     DEFAULT_APOSTROPHE_CONFIG,
