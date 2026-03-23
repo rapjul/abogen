@@ -64,6 +64,21 @@ def _build_narration_phrase(voice_spec):
     return f"Narrated by {voice_name_only} ({voice_name_string}) through Kokoro TTS"
 
 
+_MAX_COVER_BYTES = 1 * 1024 * 1024
+_JPEG_QUALITY_PERCENT = 75
+
+
+def _cover_size_text(size_bytes: int) -> str:
+    return f"{size_bytes / (1024 * 1024):.2f} MB"
+
+
+def _jpeg_quality_percent_to_ffmpeg_q(quality_percent: int) -> int:
+    clamped = max(1, min(100, int(quality_percent)))
+    # FFmpeg mjpeg: lower q is better. Map 1-100 roughly to q 31-2.
+    mapped = int(round(31 - (clamped / 100.0) * 29))
+    return max(2, min(31, mapped))
+
+
 class _SuppressPhonemizerWordsMismatchFilter(logging.Filter):
     """Hide noisy phonemizer word-count mismatch summary warnings."""
 
@@ -2159,18 +2174,181 @@ class ConversionThread(QThread):
                 )
                 return None
 
-            # Check supported formats (JPEG, PNG, BMP that FFmpeg's mjpeg encoder supports)
+            # Convert select unsupported formats to JPEG before embedding.
             suffix = os.path.splitext(cover_path)[1].lower()
             supported_formats = {".jpg", ".jpeg", ".png", ".bmp"}
+            convertible_formats = {".webp", ".gif"}
+
+            if suffix in convertible_formats:
+                self.log_updated.emit(
+                    f"Cover image format '{suffix}' will be converted to JPEG at {_JPEG_QUALITY_PERCENT}% quality."
+                )
+                converted_cover = self._convert_cover_to_jpeg(
+                    cover_path,
+                    quality_percent=_JPEG_QUALITY_PERCENT,
+                )
+                if not converted_cover:
+                    self.log_updated.emit(
+                        f"Warning: Failed to convert cover format '{suffix}' to JPEG. Skipping artwork."
+                    )
+                    return None
+                cover_path = converted_cover
+                suffix = os.path.splitext(cover_path)[1].lower()
+
             if suffix not in supported_formats:
                 self.log_updated.emit(
                     f"Warning: Cover image format '{suffix}' not supported (supported: {supported_formats}). Skipping artwork."
                 )
                 return None
 
+            cover_size = os.path.getsize(cover_path)
+            if cover_size > _MAX_COVER_BYTES:
+                self.log_updated.emit(
+                    "Warning: Cover image is %s (over 1.00 MB). Attempting to downscale/re-encode for better metadata compatibility."
+                    % _cover_size_text(cover_size)
+                )
+                optimized_cover = self._optimize_cover_image_for_m4b(cover_path)
+                if optimized_cover:
+                    cover_path = optimized_cover
+                    try:
+                        cover_size = os.path.getsize(cover_path)
+                    except OSError:
+                        pass
+                if cover_size > _MAX_COVER_BYTES:
+                    self.log_updated.emit(
+                        "Warning: Cover image is still %s after optimization; embedding anyway as requested."
+                        % _cover_size_text(cover_size)
+                    )
+
             return cover_path
         except (OSError, ValueError) as e:
             self.log_updated.emit(f"Warning: Error validating cover image: {e}")
+            return None
+
+    def _optimize_cover_image_for_m4b(self, cover_path):
+        """Best-effort cover optimization for large images while preserving compatibility."""
+        try:
+            static_ffmpeg.add_paths()
+            source = os.path.normpath(cover_path)
+            stem = os.path.splitext(os.path.basename(source))[0]
+            cache_dir = get_user_cache_path()
+            os.makedirs(cache_dir, exist_ok=True)
+
+            digest_src = (
+                f"{source}|{os.path.getmtime(source)}|{os.path.getsize(source)}"
+            )
+            digest = hashlib.sha1(digest_src.encode("utf-8")).hexdigest()[:10]
+            best_path = None
+            best_size = None
+
+            # Iteratively increase quantization to reduce size while keeping readable art.
+            for q in (5, 8, 12, 18, 24):
+                candidate = os.path.join(
+                    cache_dir, f"{stem}_m4b_cover_{digest}_q{q}.jpg"
+                )
+                cmd = [
+                    "ffmpeg",
+                    "-y",
+                    "-i",
+                    source,
+                    "-vf",
+                    "scale='min(1600,iw)':'min(1600,ih)':force_original_aspect_ratio=decrease",
+                    "-frames:v",
+                    "1",
+                    "-q:v",
+                    str(q),
+                    candidate,
+                ]
+                proc = create_process(cmd, text=True)
+                rc = proc.wait()
+                if rc != 0 or not os.path.exists(candidate):
+                    continue
+
+                try:
+                    size = os.path.getsize(candidate)
+                except OSError:
+                    continue
+
+                if best_size is None or size < best_size:
+                    best_size = size
+                    best_path = candidate
+
+                if size <= _MAX_COVER_BYTES:
+                    self.log_updated.emit(
+                        "Cover optimization successful: %s -> %s"
+                        % (
+                            _cover_size_text(os.path.getsize(source)),
+                            _cover_size_text(size),
+                        )
+                    )
+                    return candidate
+
+            if best_path:
+                self.log_updated.emit(
+                    "Warning: Cover optimization reduced size to %s but is still above 1.00 MB."
+                    % _cover_size_text(best_size or 0)
+                )
+                return best_path
+
+            self.log_updated.emit(
+                "Warning: Cover optimization failed; using original image."
+            )
+            return source
+        except Exception as e:
+            self.log_updated.emit(
+                f"Warning: Cover optimization failed with error: {e}. Using original image."
+            )
+            return cover_path
+
+    def _convert_cover_to_jpeg(self, cover_path, quality_percent=75):
+        """Convert a cover image to JPEG using FFmpeg with a target quality percentage."""
+        try:
+            static_ffmpeg.add_paths()
+            source = os.path.normpath(cover_path)
+            stem = os.path.splitext(os.path.basename(source))[0]
+            cache_dir = get_user_cache_path()
+            os.makedirs(cache_dir, exist_ok=True)
+            digest_src = f"{source}|{os.path.getmtime(source)}|{os.path.getsize(source)}|{quality_percent}"
+            digest = hashlib.sha1(digest_src.encode("utf-8")).hexdigest()[:10]
+            target = os.path.join(
+                cache_dir,
+                f"{stem}_m4b_cover_convert_{digest}.jpg",
+            )
+
+            ffmpeg_q = _jpeg_quality_percent_to_ffmpeg_q(quality_percent)
+            cmd = [
+                "ffmpeg",
+                "-y",
+                "-i",
+                source,
+                "-frames:v",
+                "1",
+                "-q:v",
+                str(ffmpeg_q),
+                target,
+            ]
+            proc = create_process(cmd, text=True)
+            rc = proc.wait()
+            if rc != 0 or not os.path.exists(target):
+                return None
+
+            try:
+                original_size = os.path.getsize(source)
+                new_size = os.path.getsize(target)
+                self.log_updated.emit(
+                    "Converted cover to JPEG (%d%%): %s -> %s"
+                    % (
+                        int(quality_percent),
+                        _cover_size_text(original_size),
+                        _cover_size_text(new_size),
+                    )
+                )
+            except OSError:
+                pass
+
+            return target
+        except Exception as e:
+            self.log_updated.emit(f"Warning: Cover conversion to JPEG failed: {e}")
             return None
 
     def _extract_and_add_metadata_tags_to_ffmpeg_cmd(self):
