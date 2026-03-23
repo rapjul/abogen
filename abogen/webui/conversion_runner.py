@@ -1427,6 +1427,45 @@ def _metadata_to_ffmpeg_args(metadata: Dict[str, Any]) -> List[str]:
     return args
 
 
+def _voice_name_only_from_spec(voice_spec: Any) -> str:
+    text = str(voice_spec or "").strip()
+    if not text:
+        return "Unknown"
+    try:
+        ids = extract_voice_ids(text)
+    except Exception:
+        ids = []
+    primary = ids[0] if ids else text
+    if "_" in primary:
+        primary = primary.split("_", 1)[1]
+    label = primary.replace("_", " ").strip()
+    return label.title() if label else "Unknown"
+
+
+def _build_narration_phrase(voice_spec: Any) -> str:
+    voice_name_string = str(voice_spec or "").strip() or "unknown"
+    voice_name_only = _voice_name_only_from_spec(voice_name_string)
+    return (
+        f"Narrated by {voice_name_only} ({voice_name_string}) through Kokoro TTS"
+    )
+
+
+def _augment_metadata_with_narration(
+    metadata: Dict[str, Any],
+    voice_spec: Any,
+) -> Dict[str, Any]:
+    merged = dict(metadata or {})
+    phrase = _build_narration_phrase(voice_spec)
+    merged["composer"] = phrase
+    existing_comment = str(merged.get("comment") or "").strip()
+    if existing_comment:
+        if phrase not in existing_comment:
+            merged["comment"] = f"{existing_comment}\n\n{phrase}"
+    else:
+        merged["comment"] = phrase
+    return merged
+
+
 def _render_ffmetadata(metadata: Dict[str, Any], chapters: List[Dict[str, Any]]) -> str:
     lines: List[str] = [";FFMETADATA1"]
     for key, value in (metadata or {}).items():
@@ -2591,7 +2630,10 @@ def run_conversion_job(job: Job) -> None:
             job.result.audio_path = chapter_paths[0]
 
         metadata_payload = {
-            "metadata": dict(job.metadata_tags or {}),
+            "metadata": _augment_metadata_with_narration(
+                dict(job.metadata_tags or {}),
+                job.voice,
+            ),
             "chapters": chapter_markers,
             "chunks": chunk_markers,
             "chunk_level": job.chunk_level,

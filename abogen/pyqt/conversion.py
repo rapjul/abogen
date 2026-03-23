@@ -37,7 +37,30 @@ from abogen.utils import (
     detect_encoding,
     get_user_cache_path,
 )
-from abogen.voice_formulas import get_new_voice
+from abogen.voice_formulas import extract_voice_ids, get_new_voice
+
+
+def _voice_name_only_from_spec(voice_spec):
+    text = str(voice_spec or "").strip()
+    if not text:
+        return "Unknown"
+    try:
+        ids = extract_voice_ids(text)
+    except Exception:
+        ids = []
+    primary = ids[0] if ids else text
+    if "_" in primary:
+        primary = primary.split("_", 1)[1]
+    label = primary.replace("_", " ").strip()
+    return label.title() if label else "Unknown"
+
+
+def _build_narration_phrase(voice_spec):
+    voice_name_string = str(voice_spec or "").strip() or "unknown"
+    voice_name_only = _voice_name_only_from_spec(voice_name_string)
+    return (
+        f"Narrated by {voice_name_only} ({voice_name_string}) through Kokoro TTS"
+    )
 
 
 class _SuppressPhonemizerWordsMismatchFilter(logging.Filter):
@@ -1595,8 +1618,11 @@ class ConversionThread(QThread):
                     chapter_ffmpeg_proc.wait()
             except Exception:
                 pass
-            self.log_updated.emit((f"Error occurred: {str(e)}", "red"))
-            self.conversion_finished.emit(("Audio generation failed.", "red"), None)
+            error_detail = str(e).strip() or type(e).__name__
+            self.log_updated.emit((f"Error occurred: {error_detail}", "red"))
+            self.conversion_finished.emit(
+                (f"Audio generation failed: {error_detail}", "red"), None
+            )
 
     def _process_subtitle_file(self, tts, base_path, is_timestamp_text=False):
         """Process subtitle files with precise timing and generate output subtitles."""
@@ -2072,8 +2098,17 @@ class ConversionThread(QThread):
                     subtitle_file.close()
             except:
                 pass
-            self.log_updated.emit((f"Error processing subtitle file: {str(e)}", "red"))
-            self.conversion_finished.emit(("Audio generation failed.", "red"), None)
+            error_detail = str(e).strip() or type(e).__name__
+            self.log_updated.emit(
+                (f"Error processing subtitle file: {error_detail}", "red")
+            )
+            self.conversion_finished.emit(
+                (
+                    f"Audio generation failed while processing subtitle file: {error_detail}",
+                    "red",
+                ),
+                None,
+            )
 
     def set_chapter_options(self, options):
         """Set chapter options from the dialog and resume processing"""
@@ -2148,7 +2183,7 @@ class ConversionThread(QThread):
                 self.log_updated.emit(
                     f"Warning: Could not read file for metadata extraction: {e}"
                 )
-                return []
+                return [], None
 
         # Extract metadata tags using regex
         title_match = re.search(r"<<METADATA_TITLE:([^>]*)>>", text)
@@ -2156,8 +2191,13 @@ class ConversionThread(QThread):
         album_match = re.search(r"<<METADATA_ALBUM:([^>]*)>>", text)
         year_match = re.search(r"<<METADATA_YEAR:([^>]*)>>", text)
         album_artist_match = re.search(r"<<METADATA_ALBUM_ARTIST:([^>]*)>>", text)
-        composer_match = re.search(r"<<METADATA_COMPOSER:([^>]*)>>", text)
         genre_match = re.search(r"<<METADATA_GENRE:([^>]*)>>", text)
+        publisher_match = re.search(r"<<METADATA_PUBLISHER:([^>]*)>>", text)
+        comment_match = re.search(r"<<METADATA_COMMENT:([^>]*)>>", text)
+        language_match = re.search(r"<<METADATA_LANGUAGE:([^>]*)>>", text)
+        series_match = re.search(r"<<METADATA_SERIES:([^>]*)>>", text)
+        series_index_match = re.search(r"<<METADATA_SERIES_INDEX:([^>]*)>>", text)
+        chapter_count_match = re.search(r"<<METADATA_CHAPTER_COUNT:([^>]*)>>", text)
         cover_match = re.search(r"<<METADATA_COVER_PATH:([^>]*)>>", text)
         cover_path = cover_match.group(1) if cover_match else None
 
@@ -2208,19 +2248,39 @@ class ConversionThread(QThread):
         else:
             metadata_options.extend(["-metadata", f"album_artist=Unknown"])
 
-        # Add composer metadata
-        if composer_match:
-            metadata_options.extend(
-                ["-metadata", f"composer={composer_match.group(1)}"]
-            )
-        else:
-            metadata_options.extend(["-metadata", f"composer=Narrator"])
+        narration_phrase = _build_narration_phrase(self.voice)
+
+        # Add composer metadata (required narration phrase)
+        metadata_options.extend(["-metadata", f"composer={narration_phrase}"])
 
         # Add genre metadata
         if genre_match:
             metadata_options.extend(["-metadata", f"genre={genre_match.group(1)}"])
         else:
             metadata_options.extend(["-metadata", f"genre=Audiobook"])
+
+        # Add extended metadata fields if present
+        if publisher_match:
+            metadata_options.extend(["-metadata", f"publisher={publisher_match.group(1)}"])
+        if language_match:
+            metadata_options.extend(["-metadata", f"language={language_match.group(1)}"])
+        if series_match:
+            metadata_options.extend(["-metadata", f"series={series_match.group(1)}"])
+        if series_index_match:
+            metadata_options.extend(["-metadata", f"series_index={series_index_match.group(1)}"])
+        if chapter_count_match:
+            metadata_options.extend(["-metadata", f"chapter_count={chapter_count_match.group(1)}"])
+
+        # Add comment metadata and append narration phrase
+        existing_comment = comment_match.group(1).strip() if comment_match else ""
+        if existing_comment:
+            if narration_phrase in existing_comment:
+                full_comment = existing_comment
+            else:
+                full_comment = f"{existing_comment}\n\n{narration_phrase}"
+        else:
+            full_comment = narration_phrase
+        metadata_options.extend(["-metadata", f"comment={full_comment}"])
 
         # Validate cover image before returning
         validated_cover = self._validate_cover_image(cover_path)

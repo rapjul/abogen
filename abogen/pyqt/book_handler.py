@@ -1,4 +1,6 @@
 import base64
+import ebooklib
+import fitz
 import logging
 import os
 import re
@@ -979,6 +981,9 @@ class HandlerDialog(QDialog):
             "cover_image": None,
             "publisher": None,
             "publication_year": None,
+            "language": None,
+            "series": None,
+            "series_index": None,
         }
 
         if self.parser.file_type == "epub":
@@ -1025,6 +1030,52 @@ class HandlerDialog(QDialog):
                         metadata["publication_year"] = date_str
             except Exception as e:
                 logging.warning(f"Error extracting publication date metadata: {e}")
+
+            try:
+                language_items = self.book.get_metadata("DC", "language")
+                if language_items and len(language_items) > 0:
+                    metadata["language"] = language_items[0][0]
+            except Exception as e:
+                logging.warning(f"Error extracting language metadata: {e}")
+
+            try:
+                meta_items = self.book.get_metadata("OPF", "meta")
+            except Exception as e:
+                logging.warning(f"Error extracting OPF metadata: {e}")
+                meta_items = []
+
+            series_name = None
+            series_index = None
+            for value, attrs in meta_items or []:
+                attrs_dict = attrs or {}
+                name = str(attrs_dict.get("name") or "").strip().casefold()
+                prop = str(attrs_dict.get("property") or "").strip().casefold()
+                content = attrs_dict.get("content")
+                candidate = content if content is not None else value
+                candidate_text = str(candidate or "").strip()
+                if not candidate_text:
+                    continue
+
+                if name in {"calibre:series", "series"} and series_name is None:
+                    series_name = candidate_text
+                    continue
+                if (
+                    name
+                    in {
+                        "calibre:series_index",
+                        "calibre:seriesindex",
+                        "series_index",
+                        "seriesindex",
+                    }
+                    and series_index is None
+                ):
+                    series_index = candidate_text
+                    continue
+                if prop.endswith("belongs-to-collection") and series_name is None:
+                    series_name = candidate_text
+
+            metadata["series"] = series_name
+            metadata["series_index"] = series_index
 
             for item in self.book.get_items_of_type(ebooklib.ITEM_COVER):
                 metadata["cover_image"] = item.get_content()
@@ -1205,7 +1256,21 @@ class HandlerDialog(QDialog):
             f"<<METADATA_ALBUM_ARTIST:{album_artist}>>",
             f"<<METADATA_COMPOSER:Narrator>>",
             f"<<METADATA_GENRE:Audiobook>>",
+            f"<<METADATA_CHAPTER_COUNT:{total_chapters}>>",
         ]
+
+        if metadata.get("publisher"):
+            metadata_tags.append(f"<<METADATA_PUBLISHER:{metadata.get('publisher')}>>")
+        if metadata.get("description"):
+            metadata_tags.append(f"<<METADATA_COMMENT:{metadata.get('description')}>>")
+        if metadata.get("language"):
+            metadata_tags.append(f"<<METADATA_LANGUAGE:{metadata.get('language')}>>")
+        if metadata.get("series"):
+            metadata_tags.append(f"<<METADATA_SERIES:{metadata.get('series')}>>")
+        if metadata.get("series_index"):
+            metadata_tags.append(
+                f"<<METADATA_SERIES_INDEX:{metadata.get('series_index')}>>"
+            )
 
         if cover_tag:
             metadata_tags.append(cover_tag)
