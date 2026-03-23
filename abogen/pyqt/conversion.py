@@ -836,9 +836,9 @@ class ConversionThread(QThread):
                 else processing_file
             )
 
-            self.log_updated.emit(f"- Input File: {input_file}")
+            self.log_updated.emit(f"  - Input File: {input_file}")
             if input_file != processing_file:
-                self.log_updated.emit(f"- Processing File: {processing_file}")
+                self.log_updated.emit(f"  - Processing File: {processing_file}")
 
             # Use file_name for logs if from_queue, otherwise use display_path if available
             if getattr(self, "from_queue", False):
@@ -850,26 +850,36 @@ class ConversionThread(QThread):
 
             # Use file size string passed from GUI
             if hasattr(self, "file_size_str"):
-                self.log_updated.emit(f"- File size: {self.file_size_str}")
-
-            self.log_updated.emit(f"- Total characters: {int(self.total_char_count):,}")
+                self.log_updated.emit(f"  - File size: {self.file_size_str}")
 
             self.log_updated.emit(
-                f"- Language: {self.lang_code} ({LANGUAGE_DESCRIPTIONS.get(self.lang_code, 'Unknown')})"
+                f"  - Total characters: {int(self.total_char_count):,}"
             )
-            self.log_updated.emit(f"- Voice: {self.voice}")
-            self.log_updated.emit(f"- Speed: {self.speed}")
-            self.log_updated.emit(f"- Subtitle mode: {self.subtitle_mode}")
-            self.log_updated.emit(f"- Output format: {self.output_format}")
+
             self.log_updated.emit(
-                f"- Subtitle format: {next((label for value, label in SUBTITLE_FORMATS if value == getattr(self, 'subtitle_format', 'srt')), getattr(self, 'subtitle_format', 'srt'))}"
+                f"  - Language: {self.lang_code} ({LANGUAGE_DESCRIPTIONS.get(self.lang_code, 'Unknown')})"
+            )
+            self.log_updated.emit(f"  - Voice: {self.voice}")
+            self.log_updated.emit(f"  - Speed: {self.speed}")
+            self.log_updated.emit(f"  - Subtitle mode: {self.subtitle_mode}")
+
+            self.log_updated.emit(f"  - Output format: {self.output_format}")
+            self.log_updated.emit(
+                f"  - Subtitle format: {next((label for value, label in SUBTITLE_FORMATS if value == getattr(self, 'subtitle_format', 'srt')), getattr(self, 'subtitle_format', 'srt'))}"
             )
             self.log_updated.emit(
-                f"- Use spaCy for sentence segmentation: {'Yes' if getattr(self, 'use_spacy_segmentation', False) else 'No'}"
+                f"  - Use spaCy for sentence segmentation: {'Yes' if getattr(self, 'use_spacy_segmentation', False) else 'No'}"
             )
-            self.log_updated.emit(f"- Save option: {self.save_option}")
+
+            # Save options (only show output folder, if applicable)
+            self.log_updated.emit(f"  - Save option: {self.save_option}")
+            if self.save_option == "Choose output folder":
+                self.log_updated.emit(
+                    f"  - Output folder: {self.output_folder or os.getcwd()}"
+                )
+
             if self.replace_single_newlines:
-                self.log_updated.emit(f"- Replace single newlines: Yes")
+                self.log_updated.emit("  - Replace single newlines: Yes")
 
             # Check if input is a subtitle file for additional configuration
             is_subtitle_input = False
@@ -894,30 +904,25 @@ class ConversionThread(QThread):
             if hasattr(self, "save_chapters_separately"):
                 self.log_updated.emit(
                     (
-                        f"- Save chapters separately: {'Yes' if self.save_chapters_separately else 'No'}"
+                        f"  - Save chapters separately: {'Yes' if self.save_chapters_separately else 'No'}"
                     )
                 )
                 # Display merge_chapters_at_end flag if save_chapters_separately is True
                 if self.save_chapters_separately:
                     merge_at_end = getattr(self, "merge_chapters_at_end", True)
                     self.log_updated.emit(
-                        f"- Merge chapters at the end: {'Yes' if merge_at_end else 'No'}"
+                        f"  - Merge chapters at the end: {'Yes' if merge_at_end else 'No'}"
                     )
                     # Display the separate chapters format if it's set
                     separate_format = getattr(self, "separate_chapters_format", "wav")
                     self.log_updated.emit(
-                        f"- Separate chapters format: {separate_format}"
+                        f"  - Separate chapters format: {separate_format}"
                     )
 
             # If merge_at_end is True, display the silence duration
             if getattr(self, "merge_chapters_at_end", True):
                 self.log_updated.emit(
-                    f"- Silence between chapters: {self.silence_duration} seconds"
-                )
-
-            if self.save_option == "Choose output folder":
-                self.log_updated.emit(
-                    f"- Output folder: {self.output_folder or os.getcwd()}"
+                    f"  - Silence between chapters: {self.silence_duration} seconds"
                 )
 
             self.log_updated.emit(("\nInitializing TTS pipeline...", "grey"))

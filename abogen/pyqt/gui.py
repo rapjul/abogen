@@ -156,9 +156,7 @@ LOG_COLOR_MAP = {
 }
 
 # Strictly match known conversion story line formats emitted by ConversionThread.
-STORY_CHAR_PROGRESS_RE = re.compile(
-    r"^\s*\d{1,3}(?:,\d{3})*/\d{1,3}(?:,\d{3})*:\s+"
-)
+STORY_CHAR_PROGRESS_RE = re.compile(r"^\s*\d{1,3}(?:,\d{3})*/\d{1,3}(?:,\d{3})*:\s+")
 STORY_SUBTITLE_PROGRESS_RE = re.compile(
     r"^\s*\[\d+/\d+\]\s+\d{2}:\d{2}:\d{2}(?:,\d{3})?\s+-\s+(?:AUTO|\d{2}:\d{2}:\d{2}(?:,\d{3})?):\s+"
 )
@@ -1035,6 +1033,13 @@ class abogen(QWidget):
         # Queued items list
         self.queued_items = []
         self.current_queue_index = 0
+        self.queue_started_at = None
+        self.queue_elapsed_seconds = 0
+        self.queue_item_started_at = {}
+        self.queue_item_elapsed_seconds = {}
+        self.queue_item_status = {}
+        self.queue_run_active = False
+        self.queue_last_outcome = None
 
         self.initUI()
         self.set_speed_slider_from_config(self.config.get("speed", 1.00))
@@ -2292,7 +2297,7 @@ class abogen(QWidget):
         if match:
             leading_ws = match.group(1)
             prefix = match.group(2)
-            rest = text_str[match.end():]
+            rest = text_str[match.end() :]
 
             if leading_ws:
                 fmt = cursor.charFormat()
@@ -2533,6 +2538,13 @@ class abogen(QWidget):
             if reply != QMessageBox.StandardButton.Yes:
                 return
         self.queued_items = []
+        self.queue_started_at = None
+        self.queue_elapsed_seconds = 0
+        self.queue_item_started_at = {}
+        self.queue_item_elapsed_seconds = {}
+        self.queue_item_status = {}
+        self.queue_run_active = False
+        self.queue_last_outcome = None
         self.enable_disable_queue_buttons()
 
     def manage_queue(self):
@@ -2557,6 +2569,13 @@ class abogen(QWidget):
 
     def start_queue(self):
         self.current_queue_index = 0  # Start from the first item
+        self.queue_started_at = time.time()
+        self.queue_elapsed_seconds = 0
+        self.queue_item_started_at = {}
+        self.queue_item_elapsed_seconds = {}
+        self.queue_item_status = {}
+        self.queue_run_active = True
+        self.queue_last_outcome = None
         # Set progress bar to 0% (1/M) immediately
         if self.queued_items:
             self.progress_bar.setValue(0)
@@ -2567,6 +2586,8 @@ class abogen(QWidget):
     def start_next_queued_item(self):
         if self.current_queue_index < len(self.queued_items):
             queued_item = self.queued_items[self.current_queue_index]
+            self.queue_item_started_at[self.current_queue_index] = time.time()
+            self.queue_item_status[self.current_queue_index] = "In Progress"
 
             self.selected_file = queued_item.file_name
             self.char_count = queued_item.total_char_count
@@ -2654,6 +2675,7 @@ class abogen(QWidget):
             self.start_conversion(from_queue=True)
         else:
             # Queue finished, reset index
+            self.queue_run_active = False
             self.current_queue_index = 0
 
     def queue_item_conversion_finished(self):
@@ -2662,7 +2684,32 @@ class abogen(QWidget):
         if self.current_queue_index < len(self.queued_items):
             self.start_next_queued_item()
         else:
+            self.queue_run_active = False
             self.current_queue_index = 0  # Reset for next time
+
+    def _format_elapsed_hms(self, elapsed_seconds):
+        if elapsed_seconds is None:
+            return "--:--:--"
+        total_seconds = max(0, int(elapsed_seconds))
+        h, m, s = (
+            total_seconds // 3600,
+            (total_seconds % 3600) // 60,
+            total_seconds % 60,
+        )
+        return f"{h:02d}:{m:02d}:{s:02d}"
+
+    def _record_current_queue_item_elapsed(self, status):
+        if not self.queued_items:
+            return
+        if not (0 <= self.current_queue_index < len(self.queued_items)):
+            return
+
+        idx = self.current_queue_index
+        now = time.time()
+        started_at = self.queue_item_started_at.get(idx, self.start_time)
+        elapsed_seconds = max(0, int(now - started_at))
+        self.queue_item_elapsed_seconds[idx] = elapsed_seconds
+        self.queue_item_status[idx] = status
 
     def get_voice_formula(self) -> str:
         if self.mixed_voice_state:
@@ -2872,7 +2919,7 @@ class abogen(QWidget):
 
         threading.Thread(target=gpu_and_load, daemon=True).start()
 
-    def show_queue_summary(self):
+    def show_queue_summary(self, outcome="completed"):
         """Show a summary dialog after queue finishes."""
         if not self.queued_items:
             return
@@ -2891,16 +2938,53 @@ class abogen(QWidget):
             g_silent_gaps = self.use_silent_gaps
             g_speed_method = self.subtitle_speed_method
 
-        # Build HTML summary (Default Styling)
-        summary_html = "<html><body>"
-
-        header_text = "Queue finished"
+        outcome_label_map = {
+            "completed": "Queue finished",
+            "cancelled": "Queue cancelled",
+            "failed": "Queue stopped (failure)",
+        }
+        header_text = outcome_label_map.get(outcome, "Queue finished")
         if override_active:
             header_text += " (Global Settings Applied)"
 
-        summary_html += (
-            f"<h2>{header_text}</h2>Processed {len(self.queued_items)} items:<br><br>"
+        total_items = len(self.queued_items)
+        completed_items = sum(
+            1 for s in self.queue_item_status.values() if s == "Completed"
         )
+        overall_elapsed_text = self._format_elapsed_hms(self.queue_elapsed_seconds)
+
+        summary_html = (
+            "<html><body>"
+            f"<h2 style='margin-bottom:8px;'>{html.escape(header_text)}</h2>"
+            f"<p style='margin:0 0 4px 0;'><b>Processed:</b> {completed_items}/{total_items} items</p>"
+            f"<p style='margin:0 0 12px 0;'><b>Overall elapsed:</b> {html.escape(overall_elapsed_text)}</p>"
+            "<table cellspacing='0' cellpadding='6' style='border-collapse:collapse; width:100%; font-size:11px;'>"
+            "<tr>"
+            "<th style='border:1px solid #666; text-align:left;'>#</th>"
+            "<th style='border:1px solid #666; text-align:left;'>Input</th>"
+            "<th style='border:1px solid #666; text-align:left;'>Output</th>"
+            "<th style='border:1px solid #666; text-align:left;'>Language</th>"
+            "<th style='border:1px solid #666; text-align:left;'>Voice</th>"
+            "<th style='border:1px solid #666; text-align:left;'>Speed</th>"
+            "<th style='border:1px solid #666; text-align:left;'>Chars</th>"
+            "<th style='border:1px solid #666; text-align:left;'>Format</th>"
+            "<th style='border:1px solid #666; text-align:left;'>Subtitle Mode</th>"
+            "<th style='border:1px solid #666; text-align:left;'>Method</th>"
+            "<th style='border:1px solid #666; text-align:left;'>Silent Gaps</th>"
+            "<th style='border:1px solid #666; text-align:left;'>Repl. Newlines</th>"
+            "<th style='border:1px solid #666; text-align:left;'>Split Chapters</th>"
+            "<th style='border:1px solid #666; text-align:left;'>Merge End</th>"
+            "<th style='border:1px solid #666; text-align:left;'>Status</th>"
+            "<th style='border:1px solid #666; text-align:left;'>Elapsed</th>"
+            "</tr>"
+        )
+
+        if outcome != "completed":
+            summary_html = summary_html.replace(
+                "<table",
+                "<p style='margin:0 0 12px 0; color:#ffb86c;'><b>Note:</b> Elapsed values for queued items that did not complete are partial.</p><table",
+                1,
+            )
 
         for idx, item in enumerate(self.queued_items, 1):
             # Resolve Effective Settings
@@ -2929,38 +3013,56 @@ class abogen(QWidget):
             eff_output = getattr(item, "output_path", "Unknown")
             eff_save_sep = getattr(item, "save_chapters_separately", None)
             eff_merge = getattr(item, "merge_chapters_at_end", None)
+            status_key = idx - 1
+            row_status = self.queue_item_status.get(status_key, "Not Completed")
+            row_elapsed_seconds = self.queue_item_elapsed_seconds.get(status_key)
+            is_partial = row_status != "Completed"
+            status_text = row_status if not is_partial else f"{row_status} (partial)"
 
-            # --- Construct Display Block ---
-            summary_html += (
-                f"<span style='color:{COLORS['GREEN']}; font-weight:bold;'>{idx}) {os.path.basename(eff_input)}</span><br>"
-                f"<span style='color:{COLORS['LIGHT_DISABLED']};'>Language:</span> {eff_lang}<br>"
-                f"<span style='color:{COLORS['LIGHT_DISABLED']};'>Voice:</span> {eff_voice}<br>"
-                f"<span style='color:{COLORS['LIGHT_DISABLED']};'>Speed:</span> {eff_speed}<br>"
-                f"<span style='color:{COLORS['LIGHT_DISABLED']};'>Characters:</span> {eff_chars}<br>"
-                f"<span style='color:{COLORS['LIGHT_DISABLED']};'>Format:</span> {eff_format}<br>"
-                f"<span style='color:{COLORS['LIGHT_DISABLED']};'>Subtitle Mode:</span> {eff_sub_mode}<br>"
-                f"<span style='color:{COLORS['LIGHT_DISABLED']};'>Method:</span> {eff_method}<br>"
-                f"<span style='color:{COLORS['LIGHT_DISABLED']};'>Silent Gaps:</span> {eff_silent}<br>"
-                f"<span style='color:{COLORS['LIGHT_DISABLED']};'>Repl. Newlines:</span> {eff_newlines}<br>"
-            )
+            if is_partial:
+                if row_elapsed_seconds is None:
+                    elapsed_text = "N/A (partial; item not completed)"
+                else:
+                    elapsed_text = (
+                        f"{self._format_elapsed_hms(row_elapsed_seconds)} (partial)"
+                    )
+            else:
+                elapsed_text = self._format_elapsed_hms(row_elapsed_seconds)
 
-            # Book/Chapter specific options
-            if eff_save_sep is not None:
-                summary_html += f"<span style='color:{COLORS['LIGHT_DISABLED']};'>Split Chapters:</span> {eff_save_sep}<br>"
-                if eff_save_sep and eff_merge is not None:
-                    summary_html += f"<span style='color:{COLORS['LIGHT_DISABLED']};'>Merge End:</span> {eff_merge}<br>"
+            row_bg = "#1f1f1f" if idx % 2 == 0 else "#151515"
+            row_cells = [
+                str(idx),
+                os.path.basename(eff_input),
+                eff_output,
+                eff_lang,
+                eff_voice,
+                f"{eff_speed}",
+                f"{eff_chars}",
+                eff_format,
+                eff_sub_mode,
+                eff_method,
+                str(eff_silent),
+                str(eff_newlines),
+                "N/A" if eff_save_sep is None else str(eff_save_sep),
+                "N/A" if eff_merge is None else str(eff_merge),
+                status_text,
+                elapsed_text,
+            ]
+            summary_html += f"<tr style='background:{row_bg};'>"
+            for cell in row_cells:
+                summary_html += (
+                    "<td style='border:1px solid #444; vertical-align:top;'>"
+                    f"{html.escape(str(cell))}"
+                    "</td>"
+                )
+            summary_html += "</tr>"
 
-            summary_html += (
-                f"<span style='color:{COLORS['LIGHT_DISABLED']};'>Input:</span> {eff_input}<br>"
-                f"<span style='color:{COLORS['LIGHT_DISABLED']};'>Output:</span> {eff_output}<br><br>"
-            )
-
-        summary_html += "</body></html>"
+        summary_html += "</table></body></html>"
 
         dialog = QDialog(self)
         dialog.setWindowTitle("Queue Summary")
         # Allow resizing
-        dialog.resize(550, 650)
+        dialog.resize(1200, 680)
 
         layout = QVBoxLayout(dialog)
         text_edit = QTextEdit(dialog)
@@ -2981,6 +3083,12 @@ class abogen(QWidget):
     def on_conversion_finished(self, message, output_path):
         prevent_sleep_end()
         if message == "Cancelled":
+            self._record_current_queue_item_elapsed("Cancelled")
+            if self.queue_started_at is not None:
+                self.queue_elapsed_seconds = max(
+                    0, int(time.time() - self.queue_started_at)
+                )
+            self.queue_last_outcome = "cancelled"
             self.etr_label.hide()  # Hide ETR label
             self.elapsed_label.hide()  # Hide elapsed label
             self.overall_progress_label.hide()
@@ -3006,6 +3114,9 @@ class abogen(QWidget):
                     self.input_box.clear_input()
             else:
                 self.input_box.clear_input()
+            if self.queue_run_active and self.queued_items:
+                self.show_queue_summary(outcome="cancelled")
+            self.queue_run_active = False
             return
 
         # Treat explicit error/failure results as unsuccessful completion.
@@ -3026,6 +3137,12 @@ class abogen(QWidget):
         )
 
         if is_failed:
+            self._record_current_queue_item_elapsed("Failed")
+            if self.queue_started_at is not None:
+                self.queue_elapsed_seconds = max(
+                    0, int(time.time() - self.queue_started_at)
+                )
+            self.queue_last_outcome = "failed"
             self.update_log(message)
             self.etr_label.hide()
             self.elapsed_label.hide()
@@ -3058,6 +3175,9 @@ class abogen(QWidget):
                             f"Reason:\n{failure_reason}"
                         ),
                     )
+                if self.queue_run_active:
+                    self.show_queue_summary(outcome="failed")
+                self.queue_run_active = False
             else:
                 QMessageBox.critical(
                     self,
@@ -3066,6 +3186,7 @@ class abogen(QWidget):
                 )
             return
 
+        self._record_current_queue_item_elapsed("Completed")
         self.update_log(message)
         if output_path:
             self.last_output_path = output_path
@@ -3105,6 +3226,11 @@ class abogen(QWidget):
             self.current_queue_index + 1 >= len(self.queued_items)
             or not self.queued_items
         ):
+            if self.queue_started_at is not None:
+                self.queue_elapsed_seconds = max(
+                    0, int(time.time() - self.queue_started_at)
+                )
+            self.queue_last_outcome = "completed"
             # Queue finished, show finish screen
             self.controls_widget.hide()
             self.finish_widget.show()
@@ -3112,8 +3238,8 @@ class abogen(QWidget):
             sb.setValue(sb.maximum())
             save_config(self.config)
             # Show queue summary if more than one item
-            if len(self.queued_items) > 1:
-                self.show_queue_summary()
+            if self.queued_items:
+                self.show_queue_summary(outcome="completed")
         else:
             # More items in queue: clear log and reload for next item
             self._clear_log_display_and_buffer()
