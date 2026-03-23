@@ -622,6 +622,8 @@ TERMINAL_PUNCTUATION = {".", "?", "!", "…", ";", ":"}
 CLOSING_PUNCTUATION = "\"'”’)]}»›"
 ELLIPSIS_SUFFIXES = ("...", "…")
 _LINE_SPLIT_RE = re.compile(r"(\n+)")
+_PRE_TTS_REMOVED_CHARS = "~`|\\"
+_PRE_TTS_REMOVE_TRANSLATION_TABLE = str.maketrans("", "", _PRE_TTS_REMOVED_CHARS)
 
 TITLE_ABBREVIATIONS = {
     "mr": "mister",
@@ -2316,7 +2318,7 @@ def normalize_for_pipeline(
     cfg = build_apostrophe_config(settings=runtime_settings, base=base_config)
 
     mode = str(runtime_settings.get("normalization_apostrophe_mode", "spacy")).lower()
-    normalized = text
+    normalized = text.translate(_PRE_TTS_REMOVE_TRANSLATION_TABLE)
 
     # Pre-normalization that must happen before number/url parsing.
     if runtime_settings.get("normalization_numbers", True):

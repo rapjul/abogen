@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import pytest
 from unittest.mock import patch
+
+import pytest
 
 from abogen.kokoro_text_normalization import (
     DEFAULT_APOSTROPHE_CONFIG,
@@ -10,11 +11,12 @@ from abogen.kokoro_text_normalization import (
 )
 from abogen.normalization_settings import (
     apply_overrides as apply_normalization_overrides,
+)
+from abogen.normalization_settings import (
     build_apostrophe_config,
     get_runtime_settings,
 )
 from abogen.spacy_contraction_resolver import resolve_ambiguous_contractions
-
 
 SPACY_RESOLVER_AVAILABLE = bool(
     resolve_ambiguous_contractions("It's been a long time.")
@@ -59,6 +61,12 @@ def test_terminal_punctuation_respects_closing_quotes():
     normalized = _normalize_text('"Chapter 1"')
     compact = normalized.replace(" ", "")
     assert compact.endswith('."')
+
+
+def test_tilde_is_removed_but_em_dash_is_preserved():
+    normalized = _normalize_text("Wait ~ now — please")
+    assert "~" not in normalized
+    assert "—" in normalized
 
 
 def test_normalization_preserves_spacing_around_quotes_and_hyphen():
@@ -356,6 +364,6 @@ def test_currency_magnitude():
 
     for input_text, expected in cases:
         normalized = _normalize_text(input_text, normalization_overrides=settings)
-        assert (
-            expected.lower() in normalized.lower()
-        ), f"Failed for {input_text}: got '{normalized}'"
+        assert expected.lower() in normalized.lower(), (
+            f"Failed for {input_text}: got '{normalized}'"
+        )
