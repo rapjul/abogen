@@ -1,4 +1,4 @@
-from typing import Any, Dict, Mapping, List, Optional
+from typing import Any, Dict, Mapping
 import base64
 import uuid
 from pathlib import Path
@@ -42,7 +42,6 @@ from abogen.integrations.calibre_opds import (
 from abogen.webui.routes.utils.service import get_service
 from abogen.webui.routes.utils.form import build_pending_job_from_extraction
 from abogen.text_extractor import extract_from_path
-from werkzeug.utils import secure_filename
 
 api_bp = Blueprint("api", __name__)
 

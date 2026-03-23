@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import json
+import locale
+import logging
+import os
 import re
 import unicodedata
-import os
-import locale
-from fractions import Fraction
 from dataclasses import dataclass, field
+from fractions import Fraction
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -19,7 +20,6 @@ from typing import (
     Sequence,
     Tuple,
 )
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,9 @@ HAS_NUM2WORDS = num2words is not None
 if TYPE_CHECKING:  # pragma: no cover - type checking only
     from abogen.llm_client import LLMCompletion
 
-from abogen.spacy_contraction_resolver import resolve_ambiguous_contractions
+from abogen.spacy_contraction_resolver import (
+    resolve_ambiguous_contractions,
+)
 
 # ---------- Contraction Category Defaults ----------
 
@@ -2099,11 +2101,11 @@ def _normalize_with_llm(
     settings: Mapping[str, Any],
     config: ApostropheConfig,
 ) -> str:
+    from abogen.llm_client import LLMClientError, generate_completion
     from abogen.normalization_settings import (
-        build_llm_configuration,
         DEFAULT_LLM_PROMPT,
+        build_llm_configuration,
     )
-    from abogen.llm_client import generate_completion, LLMClientError
 
     llm_config = build_llm_configuration(settings)
     if not llm_config.is_configured():
@@ -2303,11 +2305,11 @@ def normalize_for_pipeline(
 ) -> str:
     """Normalize text for the synthesis pipeline with runtime settings."""
 
+    from abogen.llm_client import LLMClientError
     from abogen.normalization_settings import (
         build_apostrophe_config,
         get_runtime_settings,
     )
-    from abogen.llm_client import LLMClientError
 
     runtime_settings = settings or get_runtime_settings()
     base_config = config or DEFAULT_APOSTROPHE_CONFIG

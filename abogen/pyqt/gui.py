@@ -2064,7 +2064,6 @@ class abogen(QWidget):
                     item.setEnabled(False)
 
         # If current selection is disabled, switch to a valid one
-        current_text = self.subtitle_combo.currentText()
         current_idx = self.subtitle_combo.currentIndex()
         current_item = model.item(current_idx)
 
@@ -4800,7 +4799,7 @@ Categories=AudioVideo;Audio;Utility;
             try:
                 remote_num = int("".join(remote_version.split(".")))
                 local_num = int("".join(local_version.split(".")))
-            except ValueError as ve:
+            except ValueError:
                 return
 
             if remote_num > local_num:

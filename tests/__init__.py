@@ -6,6 +6,7 @@ without the full runtime stack.
 
 from __future__ import annotations
 
+import importlib.util
 import sys
 from types import ModuleType
 
@@ -28,9 +29,7 @@ def _soundfile_write_stub(
             pass
 
 
-try:
-    import soundfile
-except ImportError:
+if importlib.util.find_spec("soundfile") is None:
     if "soundfile" not in sys.modules:  # pragma: no cover - import guard
         stub = ModuleType("soundfile")
         stub.write = _soundfile_write_stub  # type: ignore[attr-defined]

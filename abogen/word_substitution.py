@@ -12,12 +12,6 @@ All substitutions preserve special markers (chapter, voice, metadata, timestamps
 
 import re
 
-from abogen.subtitle_utils import (
-    _CHAPTER_MARKER_PATTERN,
-    _VOICE_MARKER_PATTERN,
-    _METADATA_TAG_PATTERN,
-    _TIMESTAMP_ONLY_PATTERN,
-)
 
 
 def apply_word_substitutions(

@@ -1,18 +1,18 @@
+import logging
 import os
 import re
-import logging
 import textwrap
 import urllib.parse
 from abc import ABC, abstractmethod
 
 import ebooklib
-from ebooklib import epub
-from bs4 import BeautifulSoup, NavigableString
 import fitz  # PyMuPDF
 import markdown
+from bs4 import BeautifulSoup, NavigableString
+from ebooklib import epub
 
+from abogen.subtitle_utils import calculate_text_length, clean_text
 from abogen.utils import detect_encoding
-from abogen.subtitle_utils import clean_text, calculate_text_length
 
 # Pre-compile frequently used regex patterns
 _BRACKETED_NUMBERS_PATTERN = re.compile(r"\[\s*\d+\s*\]")
@@ -139,7 +139,7 @@ class PdfParser(BaseBookParser):
         # 1. Extract text from all pages first
         for page_num in range(len(self.pdf_doc)):
             text = clean_text(self.pdf_doc[page_num].get_text())
-            
+
             # Clean up common PDF artifacts:
             text = _BRACKETED_NUMBERS_PATTERN.sub("", text)
             text = _STANDALONE_PAGE_NUMBERS_PATTERN.sub("", text)
@@ -152,7 +152,7 @@ class PdfParser(BaseBookParser):
 
         # 2. Build Navigation Structure
         toc = self.pdf_doc.get_toc()
-        
+
         if not toc:
             # Fallback: Flat list of pages if no TOC
             self.processed_nav_structure = []
@@ -160,18 +160,22 @@ class PdfParser(BaseBookParser):
                 "title": "Pages",
                 "src": None,
                 "children": [],
-                "has_content": False
+                "has_content": False,
             }
             # Add all pages as children
             for page_num in range(len(self.pdf_doc)):
-               page_id = f"page_{page_num + 1}"
-               title = self._get_page_title(page_num, self.content_texts.get(page_id, ""))
-               pages_node["children"].append({
-                   "title": title,
-                   "src": page_id,
-                   "children": [],
-                   "has_content": True
-               })
+                page_id = f"page_{page_num + 1}"
+                title = self._get_page_title(
+                    page_num, self.content_texts.get(page_id, "")
+                )
+                pages_node["children"].append(
+                    {
+                        "title": title,
+                        "src": page_id,
+                        "children": [],
+                        "has_content": True,
+                    }
+                )
             self.processed_nav_structure.append(pages_node)
         else:
             self.processed_nav_structure = self._build_structure_from_toc(toc)
@@ -189,58 +193,51 @@ class PdfParser(BaseBookParser):
     def _build_structure_from_toc(self, toc):
         # 1. Flatten TOC to easier list (page_num, title, level)
         # fitz TOC is [[lvl, title, page, dest], ...]
-        
+
         bookmarks = []
         for entry in toc:
             lvl, title, page = entry[:3]
             if isinstance(page, int):
                 page_idx = page - 1
             else:
-                 # Handle potential complex destinations if necessary, but usually simple int
-                 # PyMuPDF docs say int.
-                 page_idx = -1 
-            
+                # Handle potential complex destinations if necessary, but usually simple int
+                # PyMuPDF docs say int.
+                page_idx = -1
+
             if page_idx >= 0:
                 bookmarks.append({"level": lvl, "title": title, "page": page_idx})
 
-        
         root_children = []
-        stack = [] # Stack of (level, list_to_append_to)
-        stack.append((0, root_children)) 
+        stack = []  # Stack of (level, list_to_append_to)
+        stack.append((0, root_children))
 
         # Step 1: Build the Skeleton Tree from TOC
         # And keep a flat list of these nodes to associate with pages.
-        
-        processed_nodes = [] # List of (page_idx, node_dict)
-        
+
+        processed_nodes = []  # List of (page_idx, node_dict)
+
         for entry in bookmarks:
             node = {
                 "title": entry["title"],
                 "src": f"page_{entry['page'] + 1}",
                 "children": [],
-                "has_content": True
+                "has_content": True,
             }
-            
+
             # Find parent
             level = entry["level"]
-            
+
             # Adjust stack
             while stack and stack[-1][0] >= level:
                 stack.pop()
-            
+
             parent_list = stack[-1][1]
             parent_list.append(node)
-            
+
             stack.append((level, node["children"]))
             processed_nodes.append((entry["page"], node))
-            
+
         # Step 3: Add gap pages.
-        # Sort processed_nodes by page index to find ranges.
-        sorted_bookmarks = sorted(processed_nodes, key=lambda x: x[0])
-        
-        # Set of pages that are "bookmarks"
-        bookmarked_pages = set(p for p, n in sorted_bookmarks)
-        
         current_node = None
         # We need a way to look up bookmarks starting at p
         bookmarks_by_page = {}
@@ -249,17 +246,15 @@ class PdfParser(BaseBookParser):
                 bookmarks_by_page[p] = []
             bookmarks_by_page[p].append(node)
 
-        
         # Let's iterate.
         for page_num in range(len(self.pdf_doc)):
             page_id = f"page_{page_num + 1}"
-            
+
             # Check if this page STARTS bookmarks
             if page_num in bookmarks_by_page:
-                
                 starts = bookmarks_by_page[page_num]
-                current_node = starts[-1] 
-                
+                current_node = starts[-1]
+
                 continue
 
             # If page is NOT a bookmark, it's a "gap page".
@@ -269,15 +264,15 @@ class PdfParser(BaseBookParser):
                 "title": title,
                 "src": page_id,
                 "children": [],
-                "has_content": True
+                "has_content": True,
             }
-            
+
             if current_node:
                 current_node["children"].append(page_node)
             else:
                 # No preceding bookmark. Add to root.
                 root_children.append(page_node)
-                
+
         return root_children
 
 
@@ -340,8 +335,6 @@ class MarkdownParser(BaseBookParser):
             self.content_texts[chapter_id] = cleaned_full_text
             self.content_lengths[chapter_id] = calculate_text_length(cleaned_full_text)
             return
-
-        soup = BeautifulSoup(html, "html.parser")
 
         all_headers = []
 
@@ -416,7 +409,6 @@ class EpubParser(BaseBookParser):
             # TODO: should we just patch the ebooklib pre-emptively to avoid the need to catch this exception?
             logging.warning(f"EPUB missing referenced file: {e}. Attempting to patch.")
             # Patch ebooklib to skip missing files
-            import types
             from ebooklib import epub as _epub_module
 
             reader_class = _epub_module.EpubReader

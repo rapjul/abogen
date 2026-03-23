@@ -1,7 +1,7 @@
 import re
 import time
 import uuid
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple, cast
+from typing import Any, Dict, Iterable, List, Mapping, Optional, cast
 from flask import request, render_template, jsonify
 from flask.typing import ResponseReturnValue
 
@@ -30,7 +30,7 @@ from abogen.webui.routes.utils.entity import sync_pronunciation_overrides
 from abogen.webui.routes.utils.epub import job_download_flags
 from abogen.webui.routes.utils.common import split_profile_spec
 from abogen.utils import calculate_text_length
-from abogen.voice_profiles import serialize_profiles, normalize_profile_entry
+from abogen.voice_profiles import serialize_profiles
 from abogen.chunking import ChunkLevel, build_chunks_for_chapters
 from abogen.constants import VOICES_INTERNAL
 from abogen.speaker_configs import get_config

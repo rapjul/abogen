@@ -1110,7 +1110,6 @@ def _compile_pronunciation_rules(
             usage_normalized = (
                 normalize_entity_token(token_values[0]) or token_values[0]
             )
-        usage_token = str(entry.get("token") or token_values[0])
 
         for token_value in token_values:
             key = token_value.casefold()
@@ -1721,7 +1720,6 @@ def run_conversion_job(job: Job) -> None:
     metadata_payload: Dict[str, Any] = {}
     audio_output_path: Optional[Path] = None
     extraction: Optional[Any] = None
-    pipeline: Any = None
     pipelines: Dict[str, Any] = {}
     kokoro_cache_ready = False
     normalized_profiles: Dict[str, Dict[str, Any]] = {}
@@ -2761,7 +2759,6 @@ def run_conversion_job(job: Job) -> None:
         # Explicitly release the pipeline and force garbage collection to prevent
         # memory accumulation in the worker process, which can lead to host lockups.
         pipelines.clear()
-        pipeline = None
         gc.collect()
         try:
             import torch  # type: ignore[import-not-found]

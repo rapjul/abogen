@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Build PyPI package (wheel and sdist) to `dist` folder for abogen."""
 
-import subprocess
+import importlib.util
 import os
 import shutil
+import subprocess
 import tempfile
 
 
@@ -35,12 +36,13 @@ def main():
     original_path = sys.path[:]
     try:
         sys.path = [p for p in sys.path if os.path.abspath(p) != script_dir]
-        import build
-    except ImportError:
+        has_build = importlib.util.find_spec("build") is not None
+    except Exception:
+        has_build = False
+    if not has_build:
         print("📦 Installing build module...")
         subprocess.run([sys.executable, "-m", "pip", "install", "build"], check=True)
-    finally:
-        sys.path = original_path
+    sys.path = original_path
 
     # Create output directory
     print(f"📂 Preparing output directory: {output_dir}")

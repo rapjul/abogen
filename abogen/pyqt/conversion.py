@@ -1347,9 +1347,7 @@ class ConversionThread(QThread):
                             "ass_centered_narrow",
                         )
                         merged_subtitle_margin = "90" if is_narrow else ""
-                        merged_subtitle_alignment_tag = (
-                            f"{{\\an5}}" if is_centered else ""
-                        )
+                        merged_subtitle_alignment_tag = "{\\an5}" if is_centered else ""
                     else:
                         merged_subtitle_file = open(
                             merged_subtitle_path,
@@ -1910,8 +1908,8 @@ class ConversionThread(QThread):
                             f.write(";FFMETADATA1\n")
                             for chapter in chapters_time:
                                 chapter_title = chapter["chapter"].replace("=", "\\=")
-                                f.write(f"[CHAPTER]\n")
-                                f.write(f"TIMEBASE=1/1000\n")
+                                f.write("[CHAPTER]\n")
+                                f.write("TIMEBASE=1/1000\n")
                                 f.write(f"START={int(chapter['start'] * 1000)}\n")
                                 f.write(f"END={int(chapter['end'] * 1000)}\n")
                                 f.write(f"title={chapter_title}\n\n")
@@ -2489,7 +2487,7 @@ class ConversionThread(QThread):
                     ffmpeg_proc.wait()
                 if "subtitle_file" in locals() and subtitle_file:
                     subtitle_file.close()
-            except:
+            except Exception:
                 pass
             error_detail = str(e).strip() or type(e).__name__
             self.log_updated.emit(
@@ -2615,7 +2613,7 @@ class ConversionThread(QThread):
         if artist_match:
             metadata_options.extend(["-metadata", f"artist={artist_match.group(1)}"])
         else:
-            metadata_options.extend(["-metadata", f"artist=Unknown"])
+            metadata_options.extend(["-metadata", "artist=Unknown"])
 
         # Add album metadata
         if album_match:
@@ -2639,7 +2637,7 @@ class ConversionThread(QThread):
                 ["-metadata", f"album_artist={album_artist_match.group(1)}"]
             )
         else:
-            metadata_options.extend(["-metadata", f"album_artist=Unknown"])
+            metadata_options.extend(["-metadata", "album_artist=Unknown"])
 
         narration_phrase = _build_narration_phrase(self.voice)
 
@@ -2650,7 +2648,7 @@ class ConversionThread(QThread):
         if genre_match:
             metadata_options.extend(["-metadata", f"genre={genre_match.group(1)}"])
         else:
-            metadata_options.extend(["-metadata", f"genre=Audiobook"])
+            metadata_options.extend(["-metadata", "genre=Audiobook"])
 
         # Add extended metadata fields if present
         if publisher_match:
@@ -2804,7 +2802,6 @@ class ConversionThread(QThread):
                     full_text = ""
                     char_to_token = []  # Maps character index to token index
                     for idx, token in enumerate(processed_tokens):
-                        start_char = len(full_text)
                         text_part = token["text"] + (token.get("whitespace", "") or "")
                         full_text += text_part
                         char_to_token.extend([idx] * len(text_part))

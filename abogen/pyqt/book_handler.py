@@ -2,12 +2,9 @@ import base64
 import logging
 import os
 import re
-import textwrap
-import urllib.parse
 
 import ebooklib
 import fitz
-from bs4 import BeautifulSoup, NavigableString
 from PyQt6.QtCore import (
     QSize,
     Qt,
@@ -34,11 +31,9 @@ from PyQt6.QtWidgets import (
 
 from abogen.book_parser import get_book_parser
 from abogen.subtitle_utils import (
-    calculate_text_length,
     clean_text,
 )
 from abogen.utils import (
-    detect_encoding,
     get_resource_path,
 )
 
@@ -927,7 +922,7 @@ class HandlerDialog(QDialog):
                     image_type = "gif"
 
                 html_content += (
-                    f"<div style='text-align: center; margin-bottom: 20px;'>"
+                    "<div style='text-align: center; margin-bottom: 20px;'>"
                 )
                 html_content += (
                     f"<img src='data:image/{image_type};base64,{image_data}' "
@@ -1254,8 +1249,8 @@ class HandlerDialog(QDialog):
             f"<<METADATA_ALBUM:{title} ({chapter_text})>>",
             f"<<METADATA_YEAR:{year}>>",
             f"<<METADATA_ALBUM_ARTIST:{album_artist}>>",
-            f"<<METADATA_COMPOSER:Narrator>>",
-            f"<<METADATA_GENRE:Audiobook>>",
+            "<<METADATA_COMPOSER:Narrator>>",
+            "<<METADATA_GENRE:Audiobook>>",
             f"<<METADATA_CHAPTER_COUNT:{total_chapters}>>",
         ]
 

@@ -195,7 +195,6 @@ def _build_metadata_payload(
     authors_text = ", ".join(authors)
     if chapter_count <= 0:
         chapter_count = 1
-    chapter_label = "Chapters" if file_type in {"epub", "markdown"} else "Pages"
     metadata = {
         "TITLE": title,
         "ARTIST": authors_text,

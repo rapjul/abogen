@@ -1,7 +1,6 @@
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, Optional
 
 from flask import Blueprint, Response, abort, redirect, render_template, request, url_for, send_file
 from flask.typing import ResponseReturnValue
