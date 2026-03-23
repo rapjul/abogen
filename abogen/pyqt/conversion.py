@@ -18,12 +18,14 @@ from abogen.constants import (
     CHAPTER_OPTIONS_COUNTDOWN,
     COLORS,
     LANGUAGE_DESCRIPTIONS,
+    SUBTITLE_FORMATS,
     SUPPORTED_SOUND_FORMATS,
     SUPPORTED_SUBTITLE_FORMATS,
 )
 from abogen.subtitle_utils import (
     _CHAPTER_MARKER_SEARCH_PATTERN,
     clean_text,
+    detect_timestamps_in_text,
     get_sample_voice_text,
     parse_ass_file,
     parse_srt_file,
