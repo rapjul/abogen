@@ -1,63 +1,63 @@
 [project]
 name = "abogen"
 description = "Generate audiobooks from EPUBs, PDFs and text with synchronized captions."
-authors = [{ name = "Deniz Şafak", email = "denizsafak98@gmail.com" }]
 readme = "README.md"
-license = "MIT"
 requires-python = ">=3.10, <3.13"
+license = "MIT"
+authors = [{ name = "Deniz Şafak", email = "denizsafak98@gmail.com" }]
 keywords = [
-  "audiobook",
-  "epub",
-  "pdf",
-  "text-to-speech",
-  "subtitle",
-  "tts",
-  "kokoro",
   "accessibility",
+  "audiobook",
   "book-converter",
-  "voice-synthesis",
-  "multilingual",
   "chapter-management",
-  "subtitles",
   "content-creation",
+  "epub",
+  "kokoro",
   "media-generation",
+  "multilingual",
+  "pdf",
+  "subtitle",
+  "subtitles",
+  "text-to-speech",
+  "tts",
+  "voice-synthesis",
 ]
 dependencies = [
-  "pip",
+  "Flask>=3.0.3",
+  "Markdown>=3.9",
+  "PyMuPDF>=1.25.5",
+  "PyQt6>=6.5.0",
+  "beautifulsoup4>=4.13.4",
+  "chardet>=5.2.0",
+  "charset_normalizer>=3.4.1",
+  "ebooklib>=0.19",
+  "gpustat>=1.1.1",
+  "httpx>=0.27.0",
   "kokoro>=0.9.4",
   "misaki[en]>=0.9.4",
-  "supertonic>=0.1.0",
-  "ebooklib>=0.19",
-  "beautifulsoup4>=4.13.4",
-  "spacy>=3.8.7,<4.0",
-  "PyMuPDF>=1.25.5",
-  "platformdirs>=4.3.7",
-  "soundfile>=0.13.1",
   "mutagen>=1.47.0",
-  "pygame>=2.6.1",
-  "charset_normalizer>=3.4.1",
-  "chardet>=5.2.0",
-  "python-dotenv>=1.0.1",
-  "static_ffmpeg>=2.13",
-  "Markdown>=3.9",
-  "Flask>=3.0.3",
-  "numpy>=1.24.0",
-  "gpustat>=1.1.1",
   "num2words>=0.5.13",
-  "httpx>=0.27.0",
-  "PyQt6>=6.5.0",
+  "numpy>=1.24.0",
+  "pip",
+  "platformdirs>=4.3.7",
+  "pygame>=2.6.1",
+  "python-dotenv>=1.0.1",
+  "soundfile>=0.13.1",
+  "spacy>=3.8.7,<4.0",
+  "static_ffmpeg>=2.13",
+  "supertonic>=0.1.0",
 ]
 
 classifiers = [
   "Intended Audience :: End Users/Desktop",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
   "Topic :: Multimedia :: Sound/Audio :: Conversion",
   "Topic :: Multimedia :: Sound/Audio :: Sound Synthesis",
   "Topic :: Multimedia :: Sound/Audio :: Speech",
   "Topic :: Text Processing",
-  "Programming Language :: Python :: 3.10",
-  "Programming Language :: Python :: 3.11",
-  "Programming Language :: Python :: 3.12",
-  "Operating System :: OS Independent",
 ]
 
 dynamic = ["version"]
@@ -67,20 +67,41 @@ abogen = "abogen.pyqt.main:main"
 
 [project.scripts]
 abogen-cli = "abogen.webui.app:main"
-abogen-web = "abogen.webui.app:main"
 abogen-pyqt = "abogen.pyqt.main:main"
+abogen-web = "abogen.webui.app:main"
 
 [project.urls]
-Homepage = "https://github.com/denizsafak/abogen"
 Documentation = "https://github.com/denizsafak/abogen"
-Repository = "https://github.com/denizsafak/abogen"
+Homepage = "https://github.com/denizsafak/abogen"
 Issues = "https://github.com/denizsafak/abogen/issues"
+Repository = "https://github.com/denizsafak/abogen"
 
+# --- OPTIONAL DEPENDENCIES ---
+
+[project.optional-dependencies]
+# NVIDIA GPU (Windows) (CUDA 12.8)       # uv tool install abogen[cuda]
+cuda = ["torch; sys_platform == 'win32'"]
+# NVIDIA GPU (Windows) (CUDA 12.6)       # uv tool install abogen[cuda126]
+cuda126 = ["torch; sys_platform == 'win32'"]
+# NVIDIA GPU (Windows) (CUDA 13.0)       # uv tool install abogen[cuda130]
+cuda130 = ["torch; sys_platform == 'win32'"]
+# Development dependencies               # uv tool install abogen[dev]
+dev = ["build", "pytest"]
+# AMD GPU (Linux) (ROCm 6.4)             # uv tool install abogen[rocm]
+rocm = [
+  "torch; sys_platform == 'linux'",
+  "pytorch-triton-rocm; sys_platform == 'linux'"
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=9.0.2",
+  "ruff>=0.15.7",
+]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
-
 
 [tool.hatch.metadata]
 allow-direct-references = true
@@ -101,26 +122,11 @@ packages = ["abogen"]
 path = "abogen/VERSION"
 pattern = "^(?P<version>.+)$"
 
-
-[tool.pytest.ini_options]
+[tool.pytest]
 filterwarnings = [
   "ignore:builtin type .* has no __module__ attribute:DeprecationWarning",
   "ignore:Importing 'parser.split_arg_string' is deprecated:DeprecationWarning",
 ]
-
-# --- OPTIONAL DEPENDENCIES ---
-
-[project.optional-dependencies]
-# NVIDIA GPU (Windows) (CUDA 12.6)       # uv tool install abogen[cuda126]
-cuda126 = ["torch; sys_platform == 'win32'"]
-# NVIDIA GPU (Windows) (CUDA 12.8)       # uv tool install abogen[cuda]
-cuda = ["torch; sys_platform == 'win32'"]
-# NVIDIA GPU (Windows) (CUDA 13.0)       # uv tool install abogen[cuda130]
-cuda130 = ["torch; sys_platform == 'win32'"]
-# AMD GPU (Linux) (ROCm 6.4)             # uv tool install abogen[rocm]
-rocm = ["torch; sys_platform == 'linux'", "pytorch-triton-rocm; sys_platform == 'linux'"]
-# Development dependencies               # uv tool install abogen[dev]
-dev = ["build", "pytest"]
 
 # --- KOKORO CONFIGURATION (for macOS) ---
 
@@ -183,9 +189,3 @@ explicit = true
 name = "pytorch-rocm-64-nightly"
 url = "https://download.pytorch.org/whl/nightly/rocm6.4"
 explicit = true
-
-[dependency-groups]
-dev = [
-    "pytest>=9.0.2",
-    "ruff>=0.15.7",
-]
