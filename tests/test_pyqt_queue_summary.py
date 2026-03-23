@@ -155,7 +155,28 @@ def test_show_queue_summary_renders_html_table_with_elapsed(monkeypatch) -> None
     assert "00:02:17" in html_output
     assert "Cancelled (partial)" in html_output
     assert "00:00:12 (partial)" in html_output
-    assert (
-        "Elapsed values for queued items that did not complete are partial."
-        in html_output
-    )
+    assert "Elapsed values for queued items that did not complete are partial." in html_output
+
+
+def test_show_queue_summary_marks_not_started_items(monkeypatch) -> None:
+    monkeypatch.setattr(gui_module, "QDialog", _DialogStub)
+    monkeypatch.setattr(gui_module, "QVBoxLayout", _VBoxLayoutStub)
+    monkeypatch.setattr(gui_module, "QTextEdit", _TextEditStub)
+    monkeypatch.setattr(gui_module, "QPushButton", _PushButtonStub)
+
+    item_a = _build_queued_item("/tmp/first.txt", "/tmp/first.wav")
+    item_b = _build_queued_item("/tmp/second.txt")
+
+    window = gui_module.abogen.__new__(gui_module.abogen)
+    window.queued_items = [item_a, item_b]
+    window.config = {"queue_override_settings": False}
+    window.queue_item_status = {0: "Completed"}
+    window.queue_item_elapsed_seconds = {0: 5}
+    window.queue_elapsed_seconds = 5
+
+    window.show_queue_summary(outcome="cancelled")
+
+    html_output = _TextEditStub.last_html
+    assert html_output is not None
+    assert "Not Started" in html_output
+    assert "N/A (not started)" in html_output

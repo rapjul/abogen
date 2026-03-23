@@ -1,5 +1,3 @@
-# pyright: reportAttributeAccessIssue=false, reportOptionalMemberAccess=false, reportOptionalSubscript=false
-
 import base64
 import hashlib  # Added for cache path generation
 import html
@@ -10,7 +8,6 @@ import sys
 import tempfile
 import threading
 import time
-from typing import Any, cast
 
 from PyQt6.QtCore import (
     QBuffer,
@@ -159,7 +156,9 @@ LOG_COLOR_MAP = {
 }
 
 # Strictly match known conversion story line formats emitted by ConversionThread.
-STORY_CHAR_PROGRESS_RE = re.compile(r"^\s*\d{1,3}(?:,\d{3})*/\d{1,3}(?:,\d{3})*:\s+")
+STORY_CHAR_PROGRESS_RE = re.compile(
+    r"^\s*\d{1,3}(?:,\d{3})*/\d{1,3}(?:,\d{3})*:\s+"
+)
 STORY_SUBTITLE_PROGRESS_RE = re.compile(
     r"^\s*\[\d+/\d+\]\s+\d{2}:\d{2}:\d{2}(?:,\d{3})?\s+-\s+(?:AUTO|\d{2}:\d{2}:\d{2}(?:,\d{3})?):\s+"
 )
@@ -230,9 +229,6 @@ class InputBox(QLabel):
         self.go_to_folder_btn.clicked.connect(self.on_go_to_folder_clicked)
         self.go_to_folder_btn.hide()
 
-    def _main_window(self) -> Any | None:
-        return cast(Any, self.window())
-
     def resizeEvent(self, event):
         super().resizeEvent(event)
         margin = 12
@@ -259,14 +255,12 @@ class InputBox(QLabel):
         buffer = QBuffer()
         buffer.open(QIODevice.OpenModeFlag.WriteOnly)
         pixmap.save(buffer, "PNG")
-        img_data = base64.b64encode(bytes(buffer.data())).decode()  # pyright: ignore[reportArgumentType]
+        img_data = base64.b64encode(buffer.data()).decode()
 
         size_str = self._human_readable_size(os.path.getsize(file_path))
         name = os.path.basename(file_path)
         char_count = 0
-        window = self._main_window()
-        if window is None:
-            return
+        window = self.window()
         cache = getattr(window, "_char_count_cache", None)
 
         def parse_size(size_str):
@@ -393,22 +387,17 @@ class InputBox(QLabel):
         # Show textbox button in error state as well
         self.textbox_btn.show()
         # Disable add to queue button on error
-        window = self._main_window()
-        if window is not None and hasattr(window, "btn_add_to_queue"):
-            window.btn_add_to_queue.setEnabled(False)
+        if hasattr(self.window(), "btn_add_to_queue"):
+            self.window().btn_add_to_queue.setEnabled(False)
 
     def clear_input(self):
-        window = self._main_window()
-        if window is None:
-            return
-
-        window.selected_file = None
-        window.displayed_file_path = (
+        self.window().selected_file = None
+        self.window().displayed_file_path = (
             None  # Reset the displayed file path when clearing input
         )
         # Reset book handler attributes
-        window.save_chapters_separately = None
-        window.merge_chapters_at_end = None
+        self.window().save_chapters_separately = None
+        self.window().merge_chapters_at_end = None
         self.setText(
             "Drag and drop your file here or click to browse.\n(.txt, .epub, .pdf, .md, .srt, .ass, .vtt)"
         )
@@ -424,6 +413,7 @@ class InputBox(QLabel):
         self.go_to_folder_btn.hide()
 
         # Re-enable subtitle and replace newlines controls when cleared
+        window = self.window()
         if hasattr(window, "subtitle_combo"):
             # Only enable if language supports it
             current_lang = getattr(window, "selected_lang", "a")
@@ -437,8 +427,8 @@ class InputBox(QLabel):
         if hasattr(window, "btn_add_to_queue"):
             window.btn_add_to_queue.setEnabled(False)
         # Reset the input_box_cleared_by_queue flag after setting file info
-        if hasattr(window, "input_box_cleared_by_queue"):
-            window.input_box_cleared_by_queue = True
+        if hasattr(self.window(), "input_box_cleared_by_queue"):
+            self.window().input_box_cleared_by_queue = True
 
     def _human_readable_size(self, size, decimal_places=2):
         for unit in ["B", "KB", "MB", "GB", "TB"]:
@@ -449,9 +439,7 @@ class InputBox(QLabel):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            window = self._main_window()
-            if window is not None and hasattr(window, "open_file_dialog"):
-                window.open_file_dialog()
+            self.window().open_file_dialog()
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
@@ -505,10 +493,7 @@ class InputBox(QLabel):
                 event.ignore()
                 return
             file_path = urls[0].toLocalFile()
-            win = self._main_window()
-            if win is None:
-                event.ignore()
-                return
+            win = self.window()
             if file_path.lower().endswith(".txt"):
                 win.selected_file, win.selected_file_type = file_path, "txt"
                 win.displayed_file_path = (
@@ -553,9 +538,7 @@ class InputBox(QLabel):
             event.ignore()
 
     def on_chapters_clicked(self):
-        win = self._main_window()
-        if win is None:
-            return
+        win = self.window()
         if (
             win.selected_file_type in ["epub", "pdf", "md", "markdown"]
             and win.selected_book_path
@@ -566,14 +549,10 @@ class InputBox(QLabel):
                 self.set_file_info(win.selected_book_path)
 
     def on_textbox_clicked(self):
-        win = self._main_window()
-        if win is not None and hasattr(win, "open_textbox_dialog"):
-            win.open_textbox_dialog()
+        self.window().open_textbox_dialog()
 
     def on_edit_clicked(self):
-        win = self._main_window()
-        if win is None:
-            return
+        win = self.window()
         # For PDFs and EPUBs, use the temporary text file
         if (
             win.selected_file_type in ["epub", "pdf", "md", "markdown"]
@@ -586,9 +565,7 @@ class InputBox(QLabel):
             win.open_textbox_dialog()
 
     def on_go_to_folder_clicked(self):
-        win = self._main_window()
-        if win is None:
-            return
+        win = self.window()
         # win.selected_file holds the path to the text that is converted.
         file_to_check = win.selected_file
 
@@ -1065,6 +1042,7 @@ class abogen(QWidget):
         self.queue_item_status = {}
         self.queue_run_active = False
         self.queue_last_outcome = None
+        self.queue_cancel_summary_shown = False
 
         self.initUI()
         self.set_speed_slider_from_config(self.config.get("speed", 1.00))
@@ -2089,6 +2067,7 @@ class abogen(QWidget):
                     item.setEnabled(False)
 
         # If current selection is disabled, switch to a valid one
+        current_text = self.subtitle_combo.currentText()
         current_idx = self.subtitle_combo.currentIndex()
         current_item = model.item(current_idx)
 
@@ -2321,7 +2300,7 @@ class abogen(QWidget):
         if match:
             leading_ws = match.group(1)
             prefix = match.group(2)
-            rest = text_str[match.end() :]
+            rest = text_str[match.end():]
 
             if leading_ws:
                 fmt = cursor.charFormat()
@@ -2569,6 +2548,7 @@ class abogen(QWidget):
         self.queue_item_status = {}
         self.queue_run_active = False
         self.queue_last_outcome = None
+        self.queue_cancel_summary_shown = False
         self.enable_disable_queue_buttons()
 
     def manage_queue(self):
@@ -2600,6 +2580,7 @@ class abogen(QWidget):
         self.queue_item_status = {}
         self.queue_run_active = True
         self.queue_last_outcome = None
+        self.queue_cancel_summary_shown = False
         # Set progress bar to 0% (1/M) immediately
         if self.queued_items:
             self.progress_bar.setValue(0)
@@ -2742,7 +2723,7 @@ class abogen(QWidget):
             ]
             return " + ".join(filter(None, formula_components))
         else:
-            return self.selected_voice or ""
+            return self.selected_voice
 
     def get_selected_lang(self, voice_formula) -> str:
         if self.selected_profile_name:
@@ -2756,7 +2737,7 @@ class abogen(QWidget):
         if not selected_lang:
             m = re.search(r"\b([a-z])", voice_formula)
             selected_lang = m.group(1) if m else None
-        return selected_lang or ""
+        return selected_lang
 
     def get_actual_subtitle_mode(self) -> str:
         return "Disabled" if not self.subtitle_combo.isEnabled() else self.subtitle_mode
@@ -3038,12 +3019,19 @@ class abogen(QWidget):
             eff_save_sep = getattr(item, "save_chapters_separately", None)
             eff_merge = getattr(item, "merge_chapters_at_end", None)
             status_key = idx - 1
-            row_status = self.queue_item_status.get(status_key, "Not Completed")
+            row_status = self.queue_item_status.get(status_key, "Not Started")
             row_elapsed_seconds = self.queue_item_elapsed_seconds.get(status_key)
-            is_partial = row_status != "Completed"
-            status_text = row_status if not is_partial else f"{row_status} (partial)"
+            is_partial = row_status in {"In Progress", "Cancelled", "Failed"}
+            if row_status == "Not Started":
+                status_text = "Not Started"
+            elif is_partial:
+                status_text = f"{row_status} (partial)"
+            else:
+                status_text = row_status
 
-            if is_partial:
+            if row_status == "Not Started":
+                elapsed_text = "N/A (not started)"
+            elif is_partial:
                 if row_elapsed_seconds is None:
                     elapsed_text = "N/A (partial; item not completed)"
                 else:
@@ -3138,8 +3126,13 @@ class abogen(QWidget):
                     self.input_box.clear_input()
             else:
                 self.input_box.clear_input()
-            if self.queue_run_active and self.queued_items:
+            if (
+                self.queue_run_active
+                and self.queued_items
+                and not self.queue_cancel_summary_shown
+            ):
                 self.show_queue_summary(outcome="cancelled")
+                self.queue_cancel_summary_shown = True
             self.queue_run_active = False
             return
 
@@ -3792,6 +3785,19 @@ class abogen(QWidget):
                     self.input_box.clear_input()
             else:
                 self.input_box.clear_input()
+
+            # Show queue summary immediately when user explicitly cancels a queue run.
+            if self.queue_run_active and self.queued_items:
+                self._record_current_queue_item_elapsed("Cancelled")
+                if self.queue_started_at is not None:
+                    self.queue_elapsed_seconds = max(
+                        0, int(time.time() - self.queue_started_at)
+                    )
+                self.queue_last_outcome = "cancelled"
+                if not self.queue_cancel_summary_shown:
+                    self.show_queue_summary(outcome="cancelled")
+                    self.queue_cancel_summary_shown = True
+
             prevent_sleep_end()
         except Exception as e:
             self._show_error_message_box(
@@ -4824,7 +4830,7 @@ Categories=AudioVideo;Audio;Utility;
             try:
                 remote_num = int("".join(remote_version.split(".")))
                 local_num = int("".join(local_version.split(".")))
-            except ValueError:
+            except ValueError as ve:
                 return
 
             if remote_num > local_num:
