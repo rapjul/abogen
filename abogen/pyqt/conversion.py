@@ -58,9 +58,7 @@ def _voice_name_only_from_spec(voice_spec):
 def _build_narration_phrase(voice_spec):
     voice_name_string = str(voice_spec or "").strip() or "unknown"
     voice_name_only = _voice_name_only_from_spec(voice_name_string)
-    return (
-        f"Narrated by {voice_name_only} ({voice_name_string}) through Kokoro TTS"
-    )
+    return f"Narrated by {voice_name_only} ({voice_name_string}) through Kokoro TTS"
 
 
 class _SuppressPhonemizerWordsMismatchFilter(logging.Filter):
@@ -2261,15 +2259,23 @@ class ConversionThread(QThread):
 
         # Add extended metadata fields if present
         if publisher_match:
-            metadata_options.extend(["-metadata", f"publisher={publisher_match.group(1)}"])
+            metadata_options.extend(
+                ["-metadata", f"publisher={publisher_match.group(1)}"]
+            )
         if language_match:
-            metadata_options.extend(["-metadata", f"language={language_match.group(1)}"])
+            metadata_options.extend(
+                ["-metadata", f"language={language_match.group(1)}"]
+            )
         if series_match:
             metadata_options.extend(["-metadata", f"series={series_match.group(1)}"])
         if series_index_match:
-            metadata_options.extend(["-metadata", f"series_index={series_index_match.group(1)}"])
+            metadata_options.extend(
+                ["-metadata", f"series_index={series_index_match.group(1)}"]
+            )
         if chapter_count_match:
-            metadata_options.extend(["-metadata", f"chapter_count={chapter_count_match.group(1)}"])
+            metadata_options.extend(
+                ["-metadata", f"chapter_count={chapter_count_match.group(1)}"]
+            )
 
         # Add comment metadata and append narration phrase
         existing_comment = comment_match.group(1).strip() if comment_match else ""

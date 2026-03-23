@@ -90,6 +90,4 @@ def test_pyqt_extract_metadata_adds_extended_fields_and_narration_phrase() -> No
 
 def test_build_narration_phrase_from_formula_uses_primary_voice() -> None:
     phrase = _build_narration_phrase("af_heart*0.7+am_adam*0.3")
-    assert phrase == (
-        "Narrated by Heart (af_heart*0.7+am_adam*0.3) through Kokoro TTS"
-    )
+    assert phrase == ("Narrated by Heart (af_heart*0.7+am_adam*0.3) through Kokoro TTS")

@@ -1,12 +1,12 @@
 import base64
-import ebooklib
-import fitz
 import logging
 import os
 import re
 import textwrap
 import urllib.parse
 
+import ebooklib
+import fitz
 from bs4 import BeautifulSoup, NavigableString
 from PyQt6.QtCore import (
     QSize,

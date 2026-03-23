@@ -1445,9 +1445,7 @@ def _voice_name_only_from_spec(voice_spec: Any) -> str:
 def _build_narration_phrase(voice_spec: Any) -> str:
     voice_name_string = str(voice_spec or "").strip() or "unknown"
     voice_name_only = _voice_name_only_from_spec(voice_name_string)
-    return (
-        f"Narrated by {voice_name_only} ({voice_name_string}) through Kokoro TTS"
-    )
+    return f"Narrated by {voice_name_only} ({voice_name_string}) through Kokoro TTS"
 
 
 def _augment_metadata_with_narration(
