@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
 
 from abogen.webui.conversion_runner import (
     _augment_metadata_with_narration,

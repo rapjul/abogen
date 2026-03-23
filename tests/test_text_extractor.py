@@ -81,7 +81,6 @@ def test_epub_series_metadata_extracted_from_opf_meta(tmp_path):
 
 def test_pdf_cover_extraction_from_first_page():
     """Test that PDF cover extraction renders first page as PNG."""
-    import fitz
 
     # Mock a PDF document with a first page
     mock_document = MagicMock()
