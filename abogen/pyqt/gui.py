@@ -2171,7 +2171,7 @@ class abogen(QWidget):
         self.log_header_widget.show()
         self.story_text_visible = True
         self.btn_toggle_story.setText("Hide story text")
-        self.set_log_text_collapsed(False)
+        self.set_log_text_collapsed(False, resize_window=False)
         self.log_text.show()
         self._clear_log_display_and_buffer()
         QApplication.processEvents()
@@ -2184,11 +2184,12 @@ class abogen(QWidget):
     def toggle_log_text_visibility(self):
         self.set_log_text_collapsed(not self.log_text_collapsed)
 
-    def set_log_text_collapsed(self, collapsed):
+    def set_log_text_collapsed(self, collapsed, resize_window=True):
         self.log_text_collapsed = bool(collapsed)
         self.log_text.setVisible(not self.log_text_collapsed)
         self.btn_toggle_log.setText("Expand" if self.log_text_collapsed else "Collapse")
-        self._refresh_window_size_for_log_toggle()
+        if resize_window:
+            self._refresh_window_size_for_log_toggle()
 
     def toggle_story_visibility(self):
         self.story_text_visible = not self.story_text_visible
