@@ -6,7 +6,7 @@ import logging
 from copy import deepcopy
 
 from PyQt6.QtCore import QFileInfo, Qt
-from PyQt6.QtGui import QFontMetrics
+from PyQt6.QtGui import QFontDatabase, QFontMetrics
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -53,6 +53,15 @@ OVERRIDE_FIELDS = [
 ]
 
 
+def format_char_count(value):
+    if value in (None, ""):
+        return "0"
+    try:
+        return f"{int(value):,}"
+    except (TypeError, ValueError):
+        return str(value)
+
+
 class ElidedLabel(QLabel):
     def __init__(self, text):
         super().__init__(text)
@@ -86,7 +95,9 @@ class QueueListItemWidget(QWidget):
         import os
 
         name_label = ElidedLabel(os.path.basename(file_name))
-        char_label = QLabel(f"Chars: {char_count}")
+        formatted_count = format_char_count(char_count)
+        char_label = QLabel(f"Chars: {formatted_count}")
+        char_label.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
         char_label.setStyleSheet(f"color: {COLORS['LIGHT_DISABLED']};")
         char_label.setAlignment(
             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
@@ -416,10 +427,13 @@ class QueueManager(QDialog):
                 )
                 if output_folder not in (None, "", "None"):
                     tooltip += f"<b>Output Folder:</b> {output_folder}<br>"
+                formatted_char_count = format_char_count(
+                    getattr(item, "total_char_count", 0)
+                )
                 tooltip += (
                     f"<b>Subtitle Mode:</b> {get_val('subtitle_mode')}<br>"
                     f"<b>Output Format:</b> {get_val('output_format')}<br>"
-                    f"<b>Characters:</b> {getattr(item, 'total_char_count', '')}<br>"
+                    f"<b>Characters:</b> {formatted_char_count}<br>"
                     f"<b>Replace Single Newlines:</b> {get_val('replace_single_newlines', True)}<br>"
                     f"<b>Use Silent Gaps:</b> {get_val('use_silent_gaps', False)}<br>"
                     f"<b>Speed Method:</b> {get_val('subtitle_speed_method', 'tts')}"
