@@ -3,7 +3,10 @@
 # button to clear the queue
 
 import logging
+import os
+import tempfile
 from copy import deepcopy
+from types import SimpleNamespace
 from typing import Any
 
 from PyQt6.QtCore import QFileInfo, Qt
@@ -26,12 +29,19 @@ from PyQt6.QtWidgets import (
 )
 
 from abogen.constants import COLORS
+from abogen.pyqt.book_handler import HandlerDialog
+from abogen.subtitle_utils import calculate_text_length, clean_text
 from abogen.utils import load_config, save_config
 
 logger = logging.getLogger(__name__)
 
 # Show a summary pop-up only when there are many character-count read failures.
 CHAR_COUNT_FAILURE_WARNING_THRESHOLD = 3
+
+TEXT_EXTENSIONS = {".txt"}
+SUBTITLE_EXTENSIONS = {".srt", ".ass", ".vtt"}
+DOCUMENT_EXTENSIONS = {".epub", ".pdf", ".md", ".markdown"}
+SUPPORTED_EXTENSIONS = TEXT_EXTENSIONS | SUBTITLE_EXTENSIONS | DOCUMENT_EXTENSIONS
 
 # Define attributes that are safe to override with global settings
 OVERRIDE_FIELDS = [
@@ -135,9 +145,8 @@ class DroppableQueueListWidget(QListWidget):
         if mime_data is not None and mime_data.hasUrls():
             for url in mime_data.urls():
                 file_path = url.toLocalFile().lower()
-                if url.isLocalFile() and (
-                    file_path.endswith(".txt")
-                    or file_path.endswith((".srt", ".ass", ".vtt"))
+                if url.isLocalFile() and self.parent_dialog.is_supported_file(
+                    file_path
                 ):
                     self.drag_overlay.resize(self.size())
                     self.drag_overlay.setVisible(True)
@@ -153,9 +162,8 @@ class DroppableQueueListWidget(QListWidget):
         if mime_data is not None and mime_data.hasUrls():
             for url in mime_data.urls():
                 file_path = url.toLocalFile().lower()
-                if url.isLocalFile() and (
-                    file_path.endswith(".txt")
-                    or file_path.endswith((".srt", ".ass", ".vtt"))
+                if url.isLocalFile() and self.parent_dialog.is_supported_file(
+                    file_path
                 ):
                     event.acceptProposedAction()
                     return
@@ -179,10 +187,7 @@ class DroppableQueueListWidget(QListWidget):
                 url.toLocalFile()
                 for url in mime_data.urls()
                 if url.isLocalFile()
-                and (
-                    url.toLocalFile().lower().endswith(".txt")
-                    or url.toLocalFile().lower().endswith((".srt", ".ass", ".vtt"))
-                )
+                and self.parent_dialog.is_supported_file(url.toLocalFile())
             ]
             if file_paths:
                 self.parent_dialog.add_files_from_paths(file_paths)
@@ -207,6 +212,7 @@ class QueueManager(QDialog):
         )  # Store a deep copy of the original queue
         self.parent_gui = parent
         self.config = load_config()  # Load config for persistence
+        self._document_checked_chapters: dict[str, set[str]] = {}
 
         layout = QVBoxLayout()
         layout.setContentsMargins(15, 15, 15, 15)  # set main layout margins
@@ -223,8 +229,8 @@ class QueueManager(QDialog):
         instructions_text = """
         <h2 style="margin-top: 0; margin-bottom: 10px;">How Queue Works?</h2>
         <ul style="margin: 0; padding-left: 20px; line-height: 1.6;">
-            <li><b>Text/Subtitle files</b>: Use the '<u>Add Files</u>' button below to add .txt, .srt, .ass, or .vtt files directly.</li>
-            <li><b>Documents</b>: For PDF, EPUB, or markdown files, use the input box in the main window and click '<b>Add to Queue</b>'.</li>
+            <li><b>Batch add mixed files</b>: Use '<u>Add File(s)</u>' or drag/drop to add .txt, subtitle, PDF, EPUB, and markdown files in one operation.</li>
+            <li><b>Documents</b>: EPUB/PDF/Markdown files open a chapter/page selection dialog during batch add.</li>
             <li><b>Settings preservation</b>: Each file keeps its original settings by default.</li>
             <li><b>Override settings</b>: Enable '<b>Override item settings with current selection</b>' to apply current settings to all items.</li>
             <li><b>View configuration</b>: Hover over items to view their configuration details.</li>
@@ -238,7 +244,7 @@ class QueueManager(QDialog):
 
         # Overlay label for empty queue
         self.empty_overlay = QLabel(
-            "Drag and drop your text or subtitle files here or use the 'Add Files' button.",
+            "Drag and drop supported files here (.txt, .srt, .ass, .vtt, .epub, .pdf, .md, .markdown) or use 'Add File(s)'.",
             self.listwidget,
         )
         self.empty_overlay.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -256,9 +262,11 @@ class QueueManager(QDialog):
         button_row.setSpacing(7)  # set spacing between buttons
 
         # Add files button
-        add_files_button = QPushButton("Add Files")
+        add_files_button = QPushButton("Add File(s)")
         add_files_button.setFixedHeight(40)
-        add_files_button.setToolTip("Add more text or subtitle files to the queue.")
+        add_files_button.setToolTip(
+            "Add supported text, subtitle, and document files to the queue."
+        )
         add_files_button.clicked.connect(self.add_more_files)
         button_row.addWidget(add_files_button)
 
@@ -320,6 +328,15 @@ class QueueManager(QDialog):
         self.move_down_button.setToolTip("Move selected item(s) down by one position.")
         self.move_down_button.clicked.connect(self.move_selected_down)
         reorder_row.addWidget(self.move_down_button)
+
+        # 4. Move to Bottom button
+        self.move_bottom_button = QPushButton("Move to Bottom")
+        self.move_bottom_button.setFixedHeight(36)
+        self.move_bottom_button.setToolTip(
+            "Move selected item(s) to the end of the queue."
+        )
+        self.move_bottom_button.clicked.connect(self.move_selected_to_bottom)
+        reorder_row.addWidget(self.move_bottom_button)
 
         reorder_row.addStretch(1)
         layout.addLayout(reorder_row)
@@ -493,6 +510,7 @@ class QueueManager(QDialog):
 
         # Remove by index to ensure correct mapping
         rows = sorted([self.listwidget.row(item) for item in items], reverse=True)
+        focus_row_hint = min(rows)
         # Warn user if removing multiple files
         if len(rows) > 1:
             reply = QMessageBox.question(
@@ -509,6 +527,11 @@ class QueueManager(QDialog):
                 del self.queue[row]
         self.process_queue()
         self.update_button_states()
+        if self.listwidget.count() > 0:
+            self.listwidget.setCurrentRow(
+                min(focus_row_hint, self.listwidget.count() - 1)
+            )
+        self.listwidget.setFocus()
 
     def _get_selected_rows(self):
         return sorted(
@@ -565,9 +588,27 @@ class QueueManager(QDialog):
         self.process_queue()
         self._restore_selection(new_rows)
 
+    def move_selected_to_bottom(self):
+        rows = self._get_selected_rows()
+        if not rows or rows[-1] == len(self.queue) - 1:
+            return
+
+        selected_set = set(rows)
+        selected_items = [self.queue[row] for row in rows]
+        remaining_items = [
+            item for idx, item in enumerate(self.queue) if idx not in selected_set
+        ]
+        start_row = len(remaining_items)
+        self.queue[:] = remaining_items + selected_items
+
+        new_rows = list(range(start_row, start_row + len(rows)))
+        self.process_queue()
+        self._restore_selection(new_rows)
+
     def clear_queue(self):
         from PyQt6.QtWidgets import QMessageBox
 
+        # Intentional behavior: ask for confirmation only when clearing multiple items.
         if len(self.queue) > 1:
             reply = QMessageBox.question(
                 self,
@@ -675,90 +716,55 @@ class QueueManager(QDialog):
         return attrs
 
     def add_files_from_paths(self, file_paths):
-        import os
-
-        from PyQt6.QtWidgets import QMessageBox
-
-        from abogen.subtitle_utils import calculate_text_length
-
         current_attrs = self.get_current_attributes()
         duplicates = []
+        unsupported = []
+        cancelled_documents = []
         char_count_failures = []
+
+        duplicate_policy: dict[str, str | None] = {"remaining": None}
+        pending_items: list[Any] = []
+
         for file_path in file_paths:
-
-            class QueueItem:
-                pass
-
-            item: Any = QueueItem()
-            item.file_name = file_path
-            item.save_base_path = (
-                file_path  # For .txt files, processing and save paths are the same
-            )
-            for attr, value in current_attrs.items():
-                setattr(item, attr, value)
-            # Override subtitle_mode to "Disabled" for subtitle files
-            if file_path.lower().endswith((".srt", ".ass", ".vtt")):
-                item.subtitle_mode = "Disabled"
-            # Read file content and calculate total_char_count using calculate_text_length
-            try:
-                with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-                    file_content = f.read()
-                item.total_char_count = calculate_text_length(file_content)
-            except Exception as e:
-                item.total_char_count = 0
-                char_count_failures.append(os.path.basename(file_path) or file_path)
-                logger.warning(
-                    "Could not read file for character count; defaulting to 0: %s (%s)",
-                    file_path,
-                    e,
-                )
-            # Prevent adding duplicate items to the queue (check all attributes)
-            is_duplicate = False
-            for queued_item in self.queue:
-                if (
-                    getattr(queued_item, "file_name", None)
-                    == getattr(item, "file_name", None)
-                    and getattr(queued_item, "lang_code", None)
-                    == getattr(item, "lang_code", None)
-                    and getattr(queued_item, "speed", None)
-                    == getattr(item, "speed", None)
-                    and getattr(queued_item, "voice", None)
-                    == getattr(item, "voice", None)
-                    and getattr(queued_item, "save_option", None)
-                    == getattr(item, "save_option", None)
-                    and getattr(queued_item, "output_folder", None)
-                    == getattr(item, "output_folder", None)
-                    and getattr(queued_item, "subtitle_mode", None)
-                    == getattr(item, "subtitle_mode", None)
-                    and getattr(queued_item, "output_format", None)
-                    == getattr(item, "output_format", None)
-                    and getattr(queued_item, "total_char_count", None)
-                    == getattr(item, "total_char_count", None)
-                    and getattr(queued_item, "replace_single_newlines", True)
-                    == getattr(item, "replace_single_newlines", True)
-                    and getattr(queued_item, "use_silent_gaps", False)
-                    == getattr(item, "use_silent_gaps", False)
-                    and getattr(queued_item, "subtitle_speed_method", "tts")
-                    == getattr(item, "subtitle_speed_method", "tts")
-                    and getattr(queued_item, "save_base_path", None)
-                    == getattr(item, "save_base_path", None)
-                    and getattr(queued_item, "save_chapters_separately", None)
-                    == getattr(item, "save_chapters_separately", None)
-                    and getattr(queued_item, "merge_chapters_at_end", None)
-                    == getattr(item, "merge_chapters_at_end", None)
-                ):
-                    is_duplicate = True
-                    break
-            if is_duplicate:
-                duplicates.append(os.path.basename(file_path))
+            file_kind = self.classify_file(file_path)
+            if file_kind == "unsupported":
+                unsupported.append(os.path.basename(file_path) or file_path)
                 continue
-            self.queue.append(item)
-        if duplicates:
-            QMessageBox.warning(
-                self,
-                "Duplicate Item(s)",
-                f"Skipping {len(duplicates)} file(s) with the same attributes, already in the queue.",
-            )
+
+            item: Any | None = None
+            if file_kind == "document":
+                item = self._create_document_queue_item(file_path, current_attrs)
+                if item is None:
+                    cancelled_documents.append(os.path.basename(file_path) or file_path)
+                    continue
+            else:
+                item = self._create_text_or_subtitle_queue_item(
+                    file_path, current_attrs
+                )
+                if getattr(item, "total_char_count", 0) == 0:
+                    try:
+                        with open(file_path, "r", encoding="utf-8", errors="ignore"):
+                            pass
+                    except Exception as e:
+                        char_count_failures.append(
+                            os.path.basename(file_path) or file_path
+                        )
+                        logger.warning(
+                            "Could not read file for character count; defaulting to 0: %s (%s)",
+                            file_path,
+                            e,
+                        )
+
+            if self._is_duplicate_candidate(item, pending_items):
+                decision = self._resolve_duplicate_decision(file_path, duplicate_policy)
+                if decision == "skip":
+                    duplicates.append(os.path.basename(file_path) or file_path)
+                    continue
+
+            pending_items.append(item)
+
+        self.queue.extend(pending_items)
+
         if len(char_count_failures) >= CHAR_COUNT_FAILURE_WARNING_THRESHOLD:
             max_names_to_show = 5
             listed_names = "\n".join(char_count_failures[:max_names_to_show])
@@ -772,18 +778,228 @@ class QueueManager(QDialog):
                 "Those items were added with character count set to 0.\n\n"
                 f"Examples:\n{listed_names}",
             )
+        summary_lines = []
+        if duplicates:
+            summary_lines.append(f"Skipped duplicates: {len(duplicates)}")
+        if cancelled_documents:
+            summary_lines.append(
+                f"Cancelled document selections: {len(cancelled_documents)}"
+            )
+        if unsupported:
+            summary_lines.append(f"Unsupported files: {len(unsupported)}")
+        if summary_lines:
+            QMessageBox.information(
+                self,
+                "Batch Add Summary",
+                "\n".join(summary_lines),
+            )
         self.process_queue()
         self.update_button_states()
+
+    def _create_text_or_subtitle_queue_item(
+        self, file_path: str, current_attrs: dict[str, Any]
+    ):
+        item: Any = SimpleNamespace()
+        item.file_name = file_path
+        item.save_base_path = file_path
+        for attr, value in current_attrs.items():
+            setattr(item, attr, value)
+        if file_path.lower().endswith(tuple(SUBTITLE_EXTENSIONS)):
+            item.subtitle_mode = "Disabled"
+        try:
+            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                file_content = f.read()
+            item.total_char_count = calculate_text_length(file_content)
+        except Exception:
+            item.total_char_count = 0
+        return item
+
+    def _create_document_queue_item(
+        self, file_path: str, current_attrs: dict[str, Any]
+    ):
+        file_type = self._document_file_type(file_path)
+        checked = self._document_checked_chapters.get(file_path, set())
+        dialog = HandlerDialog(
+            file_path,
+            file_type=file_type,
+            checked_chapters=checked,
+            parent=self,
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return None
+        chapters_text, selected_identifiers = dialog.get_selected_text()
+        if not selected_identifiers:
+            QMessageBox.warning(
+                self,
+                f"{file_type.upper()} Error",
+                "No chapters/pages selected.",
+            )
+            return None
+
+        self._document_checked_chapters[file_path] = set(selected_identifiers)
+        computed_char_count = calculate_text_length(clean_text(chapters_text))
+
+        cache_dir = self._resolve_document_output_cache_dir(file_path, dialog)
+        fd, tmp_path = tempfile.mkstemp(
+            prefix=f"{os.path.splitext(os.path.basename(file_path))[0]}_",
+            suffix=".txt",
+            dir=cache_dir,
+        )
+        os.close(fd)
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            f.write(chapters_text)
+
+        item: Any = SimpleNamespace()
+        item.file_name = tmp_path
+        item.save_base_path = file_path
+        for attr, value in current_attrs.items():
+            setattr(item, attr, value)
+        item.total_char_count = computed_char_count
+        item.save_chapters_separately = dialog.get_save_chapters_separately()
+        item.merge_chapters_at_end = dialog.get_merge_chapters_at_end()
+        return item
+
+    def _resolve_document_output_cache_dir(
+        self, file_path: str, dialog: HandlerDialog
+    ) -> str:
+        from abogen.utils import get_user_cache_path
+
+        cache_dir = get_user_cache_path()
+        save_as_project = dialog.get_save_as_project()
+        if not save_as_project or self.parent_gui is None:
+            return cache_dir
+
+        parent = self.parent_gui
+        project_dir = None
+        save_option = getattr(parent, "save_option", None)
+        if save_option == "Choose output folder":
+            selected_output_folder = getattr(parent, "selected_output_folder", "")
+            if selected_output_folder and os.path.isdir(selected_output_folder):
+                project_dir = selected_output_folder
+        elif save_option == "Save to Desktop":
+            desktop_dir = os.path.join(os.path.expanduser("~"), "Desktop")
+            if os.path.isdir(desktop_dir):
+                project_dir = desktop_dir
+        else:
+            input_dir = os.path.dirname(file_path)
+            if input_dir and os.path.isdir(input_dir):
+                project_dir = input_dir
+
+        if not project_dir:
+            return cache_dir
+
+        project_name = f"{os.path.splitext(os.path.basename(file_path))[0]}_project"
+        project_dir = os.path.join(project_dir, project_name)
+        text_dir = os.path.join(project_dir, "text")
+        os.makedirs(text_dir, exist_ok=True)
+        return text_dir
+
+    def _document_file_type(self, file_path: str) -> str:
+        ext = os.path.splitext(file_path)[1].lower()
+        if ext == ".epub":
+            return "epub"
+        if ext == ".pdf":
+            return "pdf"
+        return "markdown"
+
+    def classify_file(self, file_path: str) -> str:
+        ext = os.path.splitext(file_path)[1].lower()
+        if ext in TEXT_EXTENSIONS:
+            return "text"
+        if ext in SUBTITLE_EXTENSIONS:
+            return "subtitle"
+        if ext in DOCUMENT_EXTENSIONS:
+            return "document"
+        return "unsupported"
+
+    def is_supported_file(self, file_path: str) -> bool:
+        ext = os.path.splitext(file_path)[1].lower()
+        return ext in SUPPORTED_EXTENSIONS
+
+    def _is_duplicate_candidate(self, item: Any, pending_items: list[Any]) -> bool:
+        for queued_item in self.queue:
+            if self._queue_items_equal(queued_item, item):
+                return True
+        for queued_item in pending_items:
+            if self._queue_items_equal(queued_item, item):
+                return True
+        return False
+
+    def _queue_items_equal(self, first: Any, second: Any) -> bool:
+        return (
+            getattr(first, "file_name", None) == getattr(second, "file_name", None)
+            and getattr(first, "lang_code", None) == getattr(second, "lang_code", None)
+            and getattr(first, "speed", None) == getattr(second, "speed", None)
+            and getattr(first, "voice", None) == getattr(second, "voice", None)
+            and getattr(first, "save_option", None)
+            == getattr(second, "save_option", None)
+            and getattr(first, "output_folder", None)
+            == getattr(second, "output_folder", None)
+            and getattr(first, "subtitle_mode", None)
+            == getattr(second, "subtitle_mode", None)
+            and getattr(first, "output_format", None)
+            == getattr(second, "output_format", None)
+            and getattr(first, "total_char_count", None)
+            == getattr(second, "total_char_count", None)
+            and getattr(first, "replace_single_newlines", True)
+            == getattr(second, "replace_single_newlines", True)
+            and getattr(first, "use_silent_gaps", False)
+            == getattr(second, "use_silent_gaps", False)
+            and getattr(first, "subtitle_speed_method", "tts")
+            == getattr(second, "subtitle_speed_method", "tts")
+            and getattr(first, "save_base_path", None)
+            == getattr(second, "save_base_path", None)
+            and getattr(first, "save_chapters_separately", None)
+            == getattr(second, "save_chapters_separately", None)
+            and getattr(first, "merge_chapters_at_end", None)
+            == getattr(second, "merge_chapters_at_end", None)
+        )
+
+    def _resolve_duplicate_decision(
+        self, file_path: str, policy: dict[str, str | None]
+    ) -> str:
+        if policy.get("remaining") == "skip":
+            return "skip"
+        if policy.get("remaining") == "add":
+            return "add"
+
+        duplicate_name = os.path.basename(file_path) or file_path
+        msg_box = QMessageBox(self)
+        msg_box.setIcon(QMessageBox.Icon.Question)
+        msg_box.setWindowTitle("Duplicate Item")
+        msg_box.setText(f"Duplicate queue item detected:\n{duplicate_name}")
+        skip_btn = msg_box.addButton("Skip", QMessageBox.ButtonRole.RejectRole)
+        add_btn = msg_box.addButton("Add anyway", QMessageBox.ButtonRole.AcceptRole)
+        skip_all_btn = msg_box.addButton(
+            "Skip all duplicates", QMessageBox.ButtonRole.DestructiveRole
+        )
+        add_all_btn = msg_box.addButton(
+            "Add all duplicates", QMessageBox.ButtonRole.ActionRole
+        )
+        msg_box.exec()
+        clicked = msg_box.clickedButton()
+
+        if clicked is skip_all_btn:
+            policy["remaining"] = "skip"
+            return "skip"
+        if clicked is add_all_btn:
+            policy["remaining"] = "add"
+            return "add"
+        if clicked is add_btn:
+            return "add"
+        if clicked is skip_btn:
+            return "skip"
+        return "skip"
 
     def add_more_files(self):
         from PyQt6.QtWidgets import QFileDialog
 
-        # Allow .txt, .srt, .ass, and .vtt files
+        # Allow supported text, subtitle, and document files.
         files, _ = QFileDialog.getOpenFileNames(
             self,
-            "Select text or subtitle files",
+            "Select files to add to queue",
             "",
-            "Supported Files (*.txt *.srt *.ass *.vtt)",
+            "Supported Files (*.txt *.srt *.ass *.vtt *.epub *.pdf *.md *.markdown)",
         )
         if not files:
             return
@@ -803,9 +1019,9 @@ class QueueManager(QDialog):
         if hasattr(self, "remove_button"):
             self.remove_button.setEnabled(selected_count > 0)
             if selected_count > 1:
-                self.remove_button.setText(f"Remove selected ({selected_count})")
+                self.remove_button.setText(f"Remove Selected ({selected_count})")
             else:
-                self.remove_button.setText("Remove selected")
+                self.remove_button.setText("Remove Selected")
 
         if hasattr(self, "move_top_button"):
             self.move_top_button.setEnabled(selected_count > 0 and selected_rows[0] > 0)
@@ -815,6 +1031,11 @@ class QueueManager(QDialog):
 
         if hasattr(self, "move_down_button"):
             self.move_down_button.setEnabled(
+                selected_count > 0 and selected_rows[-1] < queue_count - 1
+            )
+
+        if hasattr(self, "move_bottom_button"):
+            self.move_bottom_button.setEnabled(
                 selected_count > 0 and selected_rows[-1] < queue_count - 1
             )
 
@@ -847,6 +1068,10 @@ class QueueManager(QDialog):
             move_down_action = QAction("Move down", self)
             move_down_action.triggered.connect(self.move_selected_down)
             menu.addAction(move_down_action)
+
+            move_bottom_action = QAction("Move to bottom", self)
+            move_bottom_action.triggered.connect(self.move_selected_to_bottom)
+            menu.addAction(move_bottom_action)
 
             menu.addSeparator()
 
@@ -1054,6 +1279,10 @@ class QueueManager(QDialog):
             move_down_action.triggered.connect(self.move_selected_down)
             menu.addAction(move_down_action)
 
+            move_bottom_action = QAction("Move selected to bottom", self)
+            move_bottom_action.triggered.connect(self.move_selected_to_bottom)
+            menu.addAction(move_bottom_action)
+
             menu.addSeparator()
 
             remove_action = QAction(f"Remove selected ({len(selected_items)})", self)
@@ -1107,6 +1336,9 @@ class QueueManager(QDialog):
                 return
             if event.key() == Qt.Key.Key_Home:
                 self.move_selected_to_top()
+                return
+            if event.key() == Qt.Key.Key_End:
+                self.move_selected_to_bottom()
                 return
         else:
             super().keyPressEvent(event)
