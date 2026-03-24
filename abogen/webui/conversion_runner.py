@@ -2953,9 +2953,19 @@ def _build_ffmpeg_command(
         "pipe:0",
     ]
     if fmt == "mp3":
-        base += ["-c:a", "libmp3lame", "-qscale:a", "2"]
+        base += [
+            "-c:a",
+            "libmp3lame",
+            "-qscale:a",
+            "2",
+        ]
     elif fmt == "opus":
-        base += ["-c:a", "libopus", "-b:a", "24000"]
+        base += [
+            "-c:a",
+            "libopus",
+            "-b:a",
+            "24000",
+        ]
     elif fmt == "m4b":
         base += [
             "-c:a",
@@ -2966,7 +2976,10 @@ def _build_ffmpeg_command(
             "+faststart+use_metadata_tags",
         ]
     else:
-        base += ["-c:a", "copy"]
+        base += [
+            "-c:a",
+            "copy",
+        ]
 
     if metadata:
         base.extend(_metadata_to_ffmpeg_args(metadata))
