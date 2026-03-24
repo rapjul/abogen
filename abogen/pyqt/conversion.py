@@ -88,6 +88,10 @@ def _jpeg_quality_percent_to_ffmpeg_q(quality_percent: int) -> int:
     return max(2, min(31, mapped))
 
 
+def _freeform_atom_key(name: str) -> str:
+    return f"----:com.apple.iTunes:{name}"
+
+
 def _format_exception_with_location(exc: Exception):
     """Return (compact, verbose) exception details including source location."""
     error_detail = str(exc).strip() or type(exc).__name__
@@ -1288,6 +1292,8 @@ class ConversionThread(QThread):
                     out_dir, f"{sanitized_base_name}{suffix}"
                 )
                 merged_out_path = f"{base_filepath_no_ext}.{self.output_format}"
+                m4b_atom_metadata = {}
+                m4b_cover_for_atoms = None
                 subtitle_entries = []
                 current_time = 0.0
                 rate = 24000
@@ -1316,9 +1322,10 @@ class ConversionThread(QThread):
                     static_ffmpeg.add_paths()
                     merged_out_file = None
                     ffmpeg_proc = None
-                    metadata_options, cover_path = (
+                    metadata_options, cover_path, m4b_atom_metadata = (
                         self._extract_and_add_metadata_tags_to_ffmpeg_cmd()
                     )
+                    m4b_cover_for_atoms = cover_path
                     # Prepare ffmpeg command for m4b output
                     cmd = [
                         "ffmpeg",
@@ -2007,9 +2014,10 @@ class ConversionThread(QThread):
                         assert orig_path is not None
                         root, ext = os.path.splitext(orig_path)
                         tmp_path = root + ".tmp" + ext
-                        metadata_options, cover_path = (
+                        metadata_options, cover_path, m4b_atom_metadata = (
                             self._extract_and_add_metadata_tags_to_ffmpeg_cmd()
                         )
+                        m4b_cover_for_atoms = cover_path
                         cmd = [
                             "ffmpeg",
                             "-y",
@@ -2052,6 +2060,11 @@ class ConversionThread(QThread):
                         proc.wait()
                         os.replace(tmp_path, orig_path)
                         os.remove(chapters_info_path)
+                    self._write_m4b_mp4_atoms(
+                        merged_out_path,
+                        m4b_atom_metadata,
+                        m4b_cover_for_atoms,
+                    )
                 elif self.output_format in ["opus"]:
                     ffmpeg_proc.stdin.close()
                     ffmpeg_proc.wait()
@@ -2161,6 +2174,8 @@ class ConversionThread(QThread):
             )
             merged_out_path = f"{base_filepath_no_ext}.{self.output_format}"
             rate = 24000
+            m4b_atom_metadata = {}
+            m4b_cover_for_atoms = None
 
             # Setup audio output
             merged_out_file, ffmpeg_proc = None, None
@@ -2189,9 +2204,10 @@ class ConversionThread(QThread):
                     "pipe:0",
                 ]
                 if self.output_format == "m4b":
-                    metadata_options, cover_path = (
+                    metadata_options, cover_path, m4b_atom_metadata = (
                         self._extract_and_add_metadata_tags_to_ffmpeg_cmd()
                     )
+                    m4b_cover_for_atoms = cover_path
                     if cover_path and os.path.exists(cover_path):
                         cmd.extend(
                             [
@@ -2552,6 +2568,12 @@ class ConversionThread(QThread):
                     stdin.write(audio_buffer.astype("float32").tobytes())
                     stdin.close()
                 ffmpeg_proc.wait()
+                if self.output_format == "m4b":
+                    self._write_m4b_mp4_atoms(
+                        merged_out_path,
+                        m4b_atom_metadata,
+                        m4b_cover_for_atoms,
+                    )
 
             if subtitle_file:
                 subtitle_file.close()
@@ -2804,6 +2826,87 @@ class ConversionThread(QThread):
             self.log_updated.emit(f"Warning: Cover conversion to JPEG failed: {e}")
             return None
 
+    def _write_m4b_mp4_atoms(self, output_path, metadata_map, cover_path=None):
+        """Write MP4/iTunes atoms post-mux for better player compatibility."""
+        if not output_path:
+            return False
+
+        target = os.path.normpath(str(output_path))
+        if not os.path.exists(target):
+            self.log_updated.emit(
+                f"Warning: MP4 atom post-write skipped; output not found: {target}"
+            )
+            return False
+
+        try:
+            from mutagen.mp4 import MP4, MP4Cover  # type: ignore[import]
+        except Exception as e:
+            self.log_updated.emit(
+                f"Warning: mutagen.mp4 unavailable for MP4 atom post-write: {e}"
+            )
+            return False
+
+        try:
+            mp4 = MP4(target)
+            if mp4.tags is None:
+                mp4.add_tags()
+            tags = mp4.tags
+            if tags is None:
+                self.log_updated.emit(
+                    "Warning: MP4 atom post-write failed; could not initialize tags."
+                )
+                return False
+
+            values = dict(metadata_map or {})
+
+            def _set_text_atom(key, value):
+                text = str(value or "").strip()
+                if text:
+                    tags[key] = [text]
+
+            def _set_freeform_atom(name, value):
+                text = str(value or "").strip()
+                if text:
+                    tags[_freeform_atom_key(name)] = [text.encode("utf-8")]
+
+            _set_text_atom("©nam", values.get("title"))
+            _set_text_atom("©ART", values.get("artist"))
+            _set_text_atom("©alb", values.get("album"))
+            _set_text_atom("aART", values.get("album_artist"))
+            _set_text_atom("©day", values.get("date"))
+            _set_text_atom("©wrt", values.get("composer"))
+            _set_text_atom("©cmt", values.get("comment"))
+            _set_text_atom("©gen", values.get("genre"))
+
+            _set_freeform_atom("PUBLISHER", values.get("publisher"))
+            _set_freeform_atom("LANGUAGE", values.get("language"))
+            _set_freeform_atom("SERIES", values.get("series"))
+            _set_freeform_atom("SERIES_INDEX", values.get("series_index"))
+            _set_freeform_atom("CHAPTER_COUNT", values.get("chapter_count"))
+
+            if cover_path and os.path.exists(cover_path):
+                try:
+                    with open(cover_path, "rb") as handle:
+                        cover_bytes = handle.read()
+                    suffix = os.path.splitext(cover_path)[1].lower()
+                    image_format = (
+                        MP4Cover.FORMAT_PNG
+                        if suffix == ".png"
+                        else MP4Cover.FORMAT_JPEG
+                    )
+                    tags["covr"] = [MP4Cover(cover_bytes, imageformat=image_format)]
+                except Exception as e:
+                    self.log_updated.emit(
+                        f"Warning: Failed to write cover MP4 atom: {e}"
+                    )
+
+            mp4.save()
+            self.log_updated.emit("MP4/iTunes atom compatibility post-write completed.")
+            return True
+        except Exception as e:
+            self.log_updated.emit(f"Warning: MP4 atom post-write failed: {e}")
+            return False
+
     def _extract_and_add_metadata_tags_to_ffmpeg_cmd(self):
         """Extract metadata tags from text content and add them to ffmpeg command"""
         metadata_options = []
@@ -2823,7 +2926,7 @@ class ConversionThread(QThread):
                 self.log_updated.emit(
                     f"Warning: Could not read file for metadata extraction: {e}"
                 )
-                return [], None
+                return [], None, {}
 
         # Extract metadata tags using regex
         title_match = re.search(r"<<METADATA_TITLE:([^>]*)>>", text)
@@ -2854,38 +2957,46 @@ class ConversionThread(QThread):
             )[0]
 
         if title_match:
-            metadata_options.extend(["-metadata", f"title={title_match.group(1)}"])
+            title_value = title_match.group(1)
+            metadata_options.extend(["-metadata", f"title={title_value}"])
         else:
-            metadata_options.extend(["-metadata", f"title={filename}"])
+            title_value = filename
+            metadata_options.extend(["-metadata", f"title={title_value}"])
 
         # Add artist metadata
         if artist_match:
-            metadata_options.extend(["-metadata", f"artist={artist_match.group(1)}"])
+            artist_value = artist_match.group(1)
+            metadata_options.extend(["-metadata", f"artist={artist_value}"])
         else:
+            artist_value = "Unknown"
             metadata_options.extend(["-metadata", "artist=Unknown"])
 
         # Add album metadata
         if album_match:
-            metadata_options.extend(["-metadata", f"album={album_match.group(1)}"])
+            album_value = album_match.group(1)
+            metadata_options.extend(["-metadata", f"album={album_value}"])
         else:
-            metadata_options.extend(["-metadata", f"album={filename}"])
+            album_value = filename
+            metadata_options.extend(["-metadata", f"album={album_value}"])
 
         # Add year metadata
         if year_match:
-            metadata_options.extend(["-metadata", f"date={year_match.group(1)}"])
+            date_value = year_match.group(1)
+            metadata_options.extend(["-metadata", f"date={date_value}"])
         else:
             # Use current year if year is not specified
             import datetime
 
             current_year = datetime.datetime.now().year
-            metadata_options.extend(["-metadata", f"date={current_year}"])
+            date_value = str(current_year)
+            metadata_options.extend(["-metadata", f"date={date_value}"])
 
         # Add album artist metadata
         if album_artist_match:
-            metadata_options.extend(
-                ["-metadata", f"album_artist={album_artist_match.group(1)}"]
-            )
+            album_artist_value = album_artist_match.group(1)
+            metadata_options.extend(["-metadata", f"album_artist={album_artist_value}"])
         else:
+            album_artist_value = "Unknown"
             metadata_options.extend(["-metadata", "album_artist=Unknown"])
 
         narration_phrase = _build_narration_phrase(self.voice)
@@ -2895,29 +3006,40 @@ class ConversionThread(QThread):
 
         # Add genre metadata
         if genre_match:
-            metadata_options.extend(["-metadata", f"genre={genre_match.group(1)}"])
+            genre_value = genre_match.group(1)
+            metadata_options.extend(["-metadata", f"genre={genre_value}"])
         else:
+            genre_value = "Audiobook"
             metadata_options.extend(["-metadata", "genre=Audiobook"])
 
         # Add extended metadata fields if present
         if publisher_match:
-            metadata_options.extend(
-                ["-metadata", f"publisher={publisher_match.group(1)}"]
-            )
+            publisher_value = publisher_match.group(1)
+            metadata_options.extend(["-metadata", f"publisher={publisher_value}"])
+        else:
+            publisher_value = ""
         if language_match:
-            metadata_options.extend(
-                ["-metadata", f"language={language_match.group(1)}"]
-            )
+            language_value = language_match.group(1)
+            metadata_options.extend(["-metadata", f"language={language_value}"])
+        else:
+            language_value = ""
         if series_match:
-            metadata_options.extend(["-metadata", f"series={series_match.group(1)}"])
+            series_value = series_match.group(1)
+            metadata_options.extend(["-metadata", f"series={series_value}"])
+        else:
+            series_value = ""
         if series_index_match:
-            metadata_options.extend(
-                ["-metadata", f"series_index={series_index_match.group(1)}"]
-            )
+            series_index_value = series_index_match.group(1)
+            metadata_options.extend(["-metadata", f"series_index={series_index_value}"])
+        else:
+            series_index_value = ""
         if chapter_count_match:
+            chapter_count_value = chapter_count_match.group(1)
             metadata_options.extend(
-                ["-metadata", f"chapter_count={chapter_count_match.group(1)}"]
+                ["-metadata", f"chapter_count={chapter_count_value}"]
             )
+        else:
+            chapter_count_value = ""
 
         # Add comment metadata and append narration phrase
         existing_comment = comment_match.group(1).strip() if comment_match else ""
@@ -2930,6 +3052,22 @@ class ConversionThread(QThread):
             full_comment = narration_phrase
         metadata_options.extend(["-metadata", f"comment={full_comment}"])
 
+        atom_metadata = {
+            "title": title_value,
+            "artist": artist_value,
+            "album": album_value,
+            "date": date_value,
+            "album_artist": album_artist_value,
+            "composer": narration_phrase,
+            "genre": genre_value,
+            "publisher": publisher_value,
+            "language": language_value,
+            "series": series_value,
+            "series_index": series_index_value,
+            "chapter_count": chapter_count_value,
+            "comment": full_comment,
+        }
+
         # Validate cover image before returning
         validated_cover = self._validate_cover_image(cover_path)
         if validated_cover:
@@ -2938,7 +3076,7 @@ class ConversionThread(QThread):
             )
 
         # Add these to ffmpeg command
-        return metadata_options, validated_cover
+        return metadata_options, validated_cover, atom_metadata
 
     def _srt_time(self, t):
         """Helper function to format time for SRT files"""

@@ -155,7 +155,9 @@ def test_pyqt_extract_metadata_adds_extended_fields_and_narration_phrase() -> No
     worker.voice = "af_heart"
     setattr(worker, "log_updated", _SignalStub())
 
-    metadata_options, cover = worker._extract_and_add_metadata_tags_to_ffmpeg_cmd()
+    metadata_options, cover, atom_metadata = (
+        worker._extract_and_add_metadata_tags_to_ffmpeg_cmd()
+    )
 
     assert cover is None
     options_text = " ".join(metadata_options)
@@ -168,6 +170,18 @@ def test_pyqt_extract_metadata_adds_extended_fields_and_narration_phrase() -> No
     assert f"composer={phrase}" in options_text
     assert "comment=Example Description" in options_text
     assert phrase in options_text
+    assert atom_metadata["title"] == "Example Title"
+    assert atom_metadata["artist"] == "Example Author"
+    assert atom_metadata["album"] == "Example Album"
+    assert atom_metadata["date"] == "2026"
+    assert atom_metadata["album_artist"] == "Example Author"
+    assert atom_metadata["genre"] == "Audiobook"
+    assert atom_metadata["publisher"] == "Example Publisher"
+    assert atom_metadata["language"] == "en"
+    assert atom_metadata["series"] == "Saga"
+    assert atom_metadata["series_index"] == "2"
+    assert atom_metadata["chapter_count"] == "11"
+    assert phrase in atom_metadata["comment"]
 
 
 def test_build_narration_phrase_from_formula_uses_primary_voice() -> None:
@@ -273,6 +287,111 @@ def test_pyqt_validate_cover_converts_gif_to_jpeg() -> None:
         assert validated == jpeg_path
         joined = "\n".join(signal.messages).lower()
         assert "converted to jpeg at 75% quality" in joined
+
+
+def test_pyqt_write_m4b_mp4_atoms_writes_text_freeform_and_cover(monkeypatch) -> None:
+    worker = ConversionThread.__new__(ConversionThread)
+    signal = _SignalStub()
+    setattr(worker, "log_updated", signal)
+
+    class _FakeMP4Cover(bytes):
+        FORMAT_PNG = 14
+        FORMAT_JPEG = 13
+
+        def __new__(cls, data, imageformat=None):
+            obj = bytes.__new__(cls, data)
+            obj.imageformat = imageformat
+            return obj
+
+    class _FakeMP4:
+        instances = {}
+
+        def __init__(self, path):
+            self.path = path
+            self.tags = None
+            self.saved = False
+            _FakeMP4.instances[path] = self
+
+        def add_tags(self):
+            self.tags = {}
+
+        def save(self):
+            self.saved = True
+
+    fake_mutagen_mp4 = types.SimpleNamespace(MP4=_FakeMP4, MP4Cover=_FakeMP4Cover)
+    monkeypatch.setitem(sys.modules, "mutagen.mp4", fake_mutagen_mp4)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        output_path = os.path.join(tmp, "book.m4b")
+        cover_path = os.path.join(tmp, "cover.jpg")
+        with open(output_path, "wb") as handle:
+            handle.write(b"m4b")
+        with open(cover_path, "wb") as handle:
+            handle.write(b"jpeg-bytes")
+
+        ok = worker._write_m4b_mp4_atoms(
+            output_path,
+            {
+                "title": "Example Title",
+                "artist": "Example Author",
+                "album": "Example Album",
+                "album_artist": "Example Author",
+                "date": "2026",
+                "composer": "Narrated by Heart (af_heart) through Kokoro TTS",
+                "comment": "Example Description",
+                "genre": "Audiobook",
+                "publisher": "Example Publisher",
+                "language": "en",
+                "series": "Saga",
+                "series_index": "2",
+                "chapter_count": "11",
+            },
+            cover_path,
+        )
+
+        assert ok is True
+        instance = _FakeMP4.instances[os.path.normpath(output_path)]
+        assert instance.saved is True
+        assert instance.tags["©nam"] == ["Example Title"]
+        assert instance.tags["©ART"] == ["Example Author"]
+        assert instance.tags["©alb"] == ["Example Album"]
+        assert instance.tags["aART"] == ["Example Author"]
+        assert instance.tags["©day"] == ["2026"]
+        assert instance.tags["©wrt"] == [
+            "Narrated by Heart (af_heart) through Kokoro TTS"
+        ]
+        assert instance.tags["©cmt"] == ["Example Description"]
+        assert instance.tags["©gen"] == ["Audiobook"]
+        assert instance.tags[conversion_module._freeform_atom_key("PUBLISHER")] == [
+            b"Example Publisher"
+        ]
+        assert instance.tags[conversion_module._freeform_atom_key("LANGUAGE")] == [
+            b"en"
+        ]
+        assert instance.tags[conversion_module._freeform_atom_key("SERIES")] == [
+            b"Saga"
+        ]
+        assert instance.tags[conversion_module._freeform_atom_key("SERIES_INDEX")] == [
+            b"2"
+        ]
+        assert instance.tags[conversion_module._freeform_atom_key("CHAPTER_COUNT")] == [
+            b"11"
+        ]
+        assert instance.tags["covr"][0].imageformat == _FakeMP4Cover.FORMAT_JPEG
+        assert (
+            "compatibility post-write completed" in "\n".join(signal.messages).lower()
+        )
+
+
+def test_pyqt_write_m4b_mp4_atoms_missing_output_returns_false() -> None:
+    worker = ConversionThread.__new__(ConversionThread)
+    signal = _SignalStub()
+    setattr(worker, "log_updated", signal)
+
+    ok = worker._write_m4b_mp4_atoms("/tmp/does-not-exist.m4b", {"title": "x"})
+
+    assert ok is False
+    assert "output not found" in "\n".join(signal.messages).lower()
 
 
 def test_run_configuration_logs_queue_input_precedence(monkeypatch) -> None:
