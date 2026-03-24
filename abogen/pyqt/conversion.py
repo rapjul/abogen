@@ -4,11 +4,14 @@ import hashlib  # For generating unique cache filenames
 import logging
 import os
 import platform
+import posixpath
 import re
 import subprocess
 import threading  # for efficient waiting
 import time
 import traceback
+import xml.etree.ElementTree as ET
+import zipfile
 from typing import NamedTuple
 
 import soundfile as sf
@@ -90,6 +93,39 @@ def _jpeg_quality_percent_to_ffmpeg_q(quality_percent: int) -> int:
 
 def _freeform_atom_key(name: str) -> str:
     return f"----:com.apple.iTunes:{name}"
+
+
+def _m4b_cover_attach_args(input_index: int) -> list[str]:
+    idx = str(int(input_index))
+    return [
+        "-map",
+        "0:a",
+        "-map",
+        f"{idx}:v:0",
+        "-c:v",
+        "mjpeg",
+        "-disposition:v:0",
+        "attached_pic",
+        "-metadata:s:v:0",
+        "title=Cover Art",
+        "-metadata:s:v:0",
+        "comment=Cover (front)",
+    ]
+
+
+def _guess_image_extension(image_bytes: bytes) -> str:
+    head = bytes(image_bytes[:16]) if image_bytes else b""
+    if head.startswith(b"\x89PNG\r\n\x1a\n"):
+        return ".png"
+    if head.startswith(b"\xff\xd8\xff"):
+        return ".jpg"
+    if head.startswith(b"GIF87a") or head.startswith(b"GIF89a"):
+        return ".gif"
+    if head.startswith(b"RIFF") and b"WEBP" in head:
+        return ".webp"
+    if head.startswith(b"BM"):
+        return ".bmp"
+    return ".jpg"
 
 
 def _format_exception_with_location(exc: Exception):
@@ -1342,20 +1378,8 @@ class ConversionThread(QThread):
                         "pipe:0",
                     ]
                     if cover_path and os.path.exists(cover_path):
-                        cmd.extend(
-                            [
-                                "-i",
-                                cover_path,
-                                "-map",
-                                "0:a",
-                                "-map",
-                                "1",
-                                "-c:v",
-                                "copy",
-                                "-disposition:v",
-                                "attached_pic",
-                            ]
-                        )
+                        cmd.extend(["-i", cover_path])
+                        cmd.extend(_m4b_cover_attach_args(1))
                     cmd.extend(
                         [
                             "-c:a",
@@ -2027,20 +2051,8 @@ class ConversionThread(QThread):
                             chapters_info_path,
                         ]
                         if cover_path and os.path.exists(cover_path):
-                            cmd.extend(
-                                [
-                                    "-i",
-                                    cover_path,
-                                    "-map",
-                                    "0:a",
-                                    "-map",
-                                    "2",
-                                    "-c:v",
-                                    "copy",
-                                    "-disposition:v",
-                                    "attached_pic",
-                                ]
-                            )
+                            cmd.extend(["-i", cover_path])
+                            cmd.extend(_m4b_cover_attach_args(2))
                         else:
                             cmd.extend(["-map", "0:a"])
 
@@ -2060,11 +2072,15 @@ class ConversionThread(QThread):
                         proc.wait()
                         os.replace(tmp_path, orig_path)
                         os.remove(chapters_info_path)
-                    self._write_m4b_mp4_atoms(
+                    atom_write_ok = self._write_m4b_mp4_atoms(
                         merged_out_path,
                         m4b_atom_metadata,
                         m4b_cover_for_atoms,
                     )
+                    if not atom_write_ok:
+                        self.log_updated.emit(
+                            "Warning: M4B metadata post-write did not complete successfully."
+                        )
                 elif self.output_format in ["opus"]:
                     ffmpeg_proc.stdin.close()
                     ffmpeg_proc.wait()
@@ -2209,20 +2225,8 @@ class ConversionThread(QThread):
                     )
                     m4b_cover_for_atoms = cover_path
                     if cover_path and os.path.exists(cover_path):
-                        cmd.extend(
-                            [
-                                "-i",
-                                cover_path,
-                                "-map",
-                                "0:a",
-                                "-map",
-                                "1",
-                                "-c:v",
-                                "copy",
-                                "-disposition:v",
-                                "attached_pic",
-                            ]
-                        )
+                        cmd.extend(["-i", cover_path])
+                        cmd.extend(_m4b_cover_attach_args(1))
                     cmd.extend(
                         [
                             "-c:a",
@@ -2569,11 +2573,15 @@ class ConversionThread(QThread):
                     stdin.close()
                 ffmpeg_proc.wait()
                 if self.output_format == "m4b":
-                    self._write_m4b_mp4_atoms(
+                    atom_write_ok = self._write_m4b_mp4_atoms(
                         merged_out_path,
                         m4b_atom_metadata,
                         m4b_cover_for_atoms,
                     )
+                    if not atom_write_ok:
+                        self.log_updated.emit(
+                            "Warning: M4B metadata post-write did not complete successfully."
+                        )
 
             if subtitle_file:
                 subtitle_file.close()
@@ -2620,6 +2628,163 @@ class ConversionThread(QThread):
         """Set whether to treat timestamp text file as subtitle."""
         self._timestamp_response = treat_as_subtitle
         self._timestamp_response_event.set()
+
+    def _infer_artist_from_context(self):
+        """Best-effort artist inference from filename patterns like 'Author - Title'."""
+        state = getattr(self, "__dict__", {})
+        path_candidates = [
+            state.get("display_path"),
+            state.get("save_base_path"),
+            state.get("file_name"),
+        ]
+        for raw_path in path_candidates:
+            if not raw_path or "\n" in str(raw_path):
+                continue
+            stem = os.path.splitext(os.path.basename(str(raw_path)))[0].strip()
+            if not stem:
+                continue
+            match = re.match(r"^\s*([^\-_–—|]+?)\s*[-_–—|]\s*.+$", stem)
+            if match:
+                candidate = match.group(1).strip()
+                if candidate:
+                    return candidate
+        return ""
+
+    def _find_sidecar_cover_image(self):
+        """Find a nearby image file to use as cover when no metadata cover tag exists."""
+        state = getattr(self, "__dict__", {})
+        path_candidates = [
+            state.get("display_path"),
+            state.get("save_base_path"),
+            state.get("file_name"),
+        ]
+        dirs = []
+        stems = []
+        for raw_path in path_candidates:
+            if not raw_path or "\n" in str(raw_path):
+                continue
+            norm_path = os.path.normpath(str(raw_path))
+            parent = os.path.dirname(norm_path)
+            stem = os.path.splitext(os.path.basename(norm_path))[0]
+            if parent and os.path.isdir(parent) and parent not in dirs:
+                dirs.append(parent)
+            if stem and stem not in stems:
+                stems.append(stem)
+
+        exts = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp")
+        basename_candidates = ("cover", "folder", "front", "artwork", "thumbnail")
+
+        for directory in dirs:
+            for stem in stems:
+                for ext in exts:
+                    candidate = os.path.join(directory, f"{stem}{ext}")
+                    if os.path.isfile(candidate):
+                        return candidate
+            for base_name in basename_candidates:
+                for ext in exts:
+                    candidate = os.path.join(directory, f"{base_name}{ext}")
+                    if os.path.isfile(candidate):
+                        return candidate
+        return None
+
+    def _resolve_cover_path_with_fallbacks(self, initial_cover_path=None):
+        """Resolve a usable cover path, retrying sidecar/EPUB fallbacks when needed."""
+        if initial_cover_path:
+            validated = self._validate_cover_image(initial_cover_path)
+            if validated:
+                return validated
+            self.log_updated.emit(
+                "Warning: Metadata cover path was unusable; trying fallbacks."
+            )
+
+        guessed_cover = self._find_sidecar_cover_image()
+        if guessed_cover:
+            validated = self._validate_cover_image(guessed_cover)
+            if validated:
+                self.log_updated.emit(
+                    f"Using sidecar image for audiobook artwork: {validated}"
+                )
+                return validated
+
+        epub_cover = self._extract_cover_from_source_epub()
+        if epub_cover:
+            validated = self._validate_cover_image(epub_cover)
+            if validated:
+                self.log_updated.emit(
+                    f"Using extracted EPUB cover for audiobook artwork: {validated}"
+                )
+                return validated
+
+        return None
+
+    def _extract_cover_from_epub_path(self, epub_source):
+        """Extract cover from a specific EPUB path and persist it to cache."""
+        if not epub_source:
+            return None
+
+        norm_source = os.path.normpath(str(epub_source))
+        if not norm_source.lower().endswith(".epub") or not os.path.isfile(norm_source):
+            return None
+
+        cover_bytes = None
+
+        try:
+            import ebooklib
+            from ebooklib import epub
+
+            book = epub.read_epub(norm_source)
+            for item in book.get_items_of_type(ebooklib.ITEM_COVER):
+                cover_bytes = item.get_content()
+                if cover_bytes:
+                    break
+            if not cover_bytes:
+                for item in book.get_items_of_type(ebooklib.ITEM_IMAGE):
+                    item_name = item.get_name().lower()
+                    if "cover" in item_name or "front" in item_name:
+                        cover_bytes = item.get_content()
+                        if cover_bytes:
+                            break
+        except Exception:
+            cover_bytes = None
+
+        if not cover_bytes:
+            cover_bytes = self._extract_cover_bytes_from_epub_zip(norm_source)
+
+        if not cover_bytes:
+            return None
+
+        try:
+            cache_dir = get_user_cache_path()
+            os.makedirs(cache_dir, exist_ok=True)
+            digest_src = (
+                f"{norm_source}|{os.path.getmtime(norm_source)}|{len(cover_bytes)}"
+            )
+            digest = hashlib.sha1(digest_src.encode("utf-8")).hexdigest()[:10]
+            ext = _guess_image_extension(cover_bytes)
+            out_path = os.path.join(cache_dir, f"epub_cover_{digest}{ext}")
+            with open(out_path, "wb") as handle:
+                handle.write(cover_bytes)
+            return out_path
+        except Exception:
+            return None
+
+    def _extract_cover_from_source_epub(self):
+        """Extract cover bytes from known source EPUB paths and persist to cache."""
+        state = getattr(self, "__dict__", {})
+        path_candidates = [
+            state.get("metadata_source_epub_path"),
+            state.get("display_path"),
+            state.get("save_base_path"),
+            state.get("file_name"),
+        ]
+
+        for raw_path in path_candidates:
+            if not raw_path or "\n" in str(raw_path):
+                continue
+            extracted = self._extract_cover_from_epub_path(raw_path)
+            if extracted:
+                return extracted
+        return None
 
     def _validate_cover_image(self, cover_path):
         """
@@ -2768,12 +2933,93 @@ class ConversionThread(QThread):
             self.log_updated.emit(
                 "Warning: Cover optimization failed; using original image."
             )
-            return source
+            return cover_path
         except Exception as e:
             self.log_updated.emit(
                 f"Warning: Cover optimization failed with error: {e}. Using original image."
             )
             return cover_path
+
+    def _extract_cover_bytes_from_epub_zip(self, epub_path):
+        """Best-effort cover extraction by parsing OPF metadata/manifest from EPUB zip."""
+        try:
+            with zipfile.ZipFile(epub_path, "r") as zf:
+                names = set(zf.namelist())
+                opf_candidates = [n for n in names if n.lower().endswith(".opf")]
+                if not opf_candidates:
+                    return None
+
+                for opf_name in opf_candidates:
+                    try:
+                        root = ET.fromstring(zf.read(opf_name))
+                    except Exception:
+                        continue
+
+                    opf_dir = posixpath.dirname(opf_name)
+                    manifest_entries = []
+                    cover_id = ""
+                    cover_href = ""
+                    fallback_cover_href = ""
+                    first_image_href = ""
+
+                    for elem in root.iter():
+                        tag = elem.tag.split("}")[-1].lower()
+                        if tag == "meta":
+                            name_attr = (elem.attrib.get("name") or "").strip().lower()
+                            if name_attr == "cover" and not cover_id:
+                                cover_id = (elem.attrib.get("content") or "").strip()
+                        elif tag == "item":
+                            item_id = (elem.attrib.get("id") or "").strip()
+                            href = (elem.attrib.get("href") or "").strip()
+                            media_type = (
+                                (elem.attrib.get("media-type") or "").strip().lower()
+                            )
+                            properties = (
+                                (elem.attrib.get("properties") or "").strip().lower()
+                            )
+                            manifest_entries.append(
+                                (item_id, href, media_type, properties)
+                            )
+                            if not href:
+                                continue
+
+                            href_l = href.lower()
+                            if not first_image_href and media_type.startswith("image/"):
+                                first_image_href = href
+
+                            if not fallback_cover_href and (
+                                "cover-image" in properties
+                                or "cover" in item_id.lower()
+                                or "cover" in href_l
+                                or "front" in href_l
+                            ):
+                                fallback_cover_href = href
+
+                    if cover_id:
+                        for item_id, href, _media_type, _props in manifest_entries:
+                            if item_id == cover_id and href:
+                                cover_href = href
+                                break
+
+                    selected_href = (
+                        cover_href or fallback_cover_href or first_image_href
+                    )
+                    if not selected_href:
+                        continue
+
+                    full_path = posixpath.normpath(
+                        posixpath.join(opf_dir, selected_href)
+                    )
+                    if full_path in names:
+                        try:
+                            data = zf.read(full_path)
+                            if data:
+                                return data
+                        except Exception:
+                            pass
+            return None
+        except Exception:
+            return None
 
     def _convert_cover_to_jpeg(self, cover_path, quality_percent=75):
         """Convert a cover image to JPEG using FFmpeg with a target quality percentage."""
@@ -2783,14 +3029,13 @@ class ConversionThread(QThread):
             stem = os.path.splitext(os.path.basename(source))[0]
             cache_dir = get_user_cache_path()
             os.makedirs(cache_dir, exist_ok=True)
-            digest_src = f"{source}|{os.path.getmtime(source)}|{os.path.getsize(source)}|{quality_percent}"
-            digest = hashlib.sha1(digest_src.encode("utf-8")).hexdigest()[:10]
-            target = os.path.join(
-                cache_dir,
-                f"{stem}_m4b_cover_convert_{digest}.jpg",
+            digest_src = (
+                f"{source}|{os.path.getmtime(source)}|{os.path.getsize(source)}"
             )
-
+            digest = hashlib.sha1(digest_src.encode("utf-8")).hexdigest()[:10]
+            target = os.path.join(cache_dir, f"{stem}_m4b_cover_convert_{digest}.jpg")
             ffmpeg_q = _jpeg_quality_percent_to_ffmpeg_q(quality_percent)
+
             cmd = [
                 "ffmpeg",
                 "-y",
@@ -2858,6 +3103,7 @@ class ConversionThread(QThread):
                 return False
 
             values = dict(metadata_map or {})
+            resolved_cover_path = self._resolve_cover_path_with_fallbacks(cover_path)
 
             def _set_text_atom(key, value):
                 text = str(value or "").strip()
@@ -2876,19 +3122,28 @@ class ConversionThread(QThread):
             _set_text_atom("©day", values.get("date"))
             _set_text_atom("©wrt", values.get("composer"))
             _set_text_atom("©cmt", values.get("comment"))
-            _set_text_atom("©gen", values.get("genre"))
+            # _set_text_atom("©gen", values.get("genre"))
 
-            _set_freeform_atom("PUBLISHER", values.get("publisher"))
-            _set_freeform_atom("LANGUAGE", values.get("language"))
-            _set_freeform_atom("SERIES", values.get("series"))
-            _set_freeform_atom("SERIES_INDEX", values.get("series_index"))
-            _set_freeform_atom("CHAPTER_COUNT", values.get("chapter_count"))
+            _set_freeform_atom("Publisher", values.get("publisher"))
+            _set_freeform_atom(
+                "Language",
+                values.get(
+                    "lang",
+                    values.get(
+                        "language",
+                        "",
+                    ),
+                ),
+            )
+            _set_freeform_atom("Series", values.get("series"))
+            _set_freeform_atom("Series Index", values.get("series_index"))
+            _set_freeform_atom("Chapter Count", values.get("chapter_count"))
 
-            if cover_path and os.path.exists(cover_path):
+            if resolved_cover_path and os.path.exists(resolved_cover_path):
                 try:
-                    with open(cover_path, "rb") as handle:
+                    with open(resolved_cover_path, "rb") as handle:
                         cover_bytes = handle.read()
-                    suffix = os.path.splitext(cover_path)[1].lower()
+                    suffix = os.path.splitext(resolved_cover_path)[1].lower()
                     image_format = (
                         MP4Cover.FORMAT_PNG
                         if suffix == ".png"
@@ -2934,15 +3189,20 @@ class ConversionThread(QThread):
         album_match = re.search(r"<<METADATA_ALBUM:([^>]*)>>", text)
         year_match = re.search(r"<<METADATA_YEAR:([^>]*)>>", text)
         album_artist_match = re.search(r"<<METADATA_ALBUM_ARTIST:([^>]*)>>", text)
-        genre_match = re.search(r"<<METADATA_GENRE:([^>]*)>>", text)
         publisher_match = re.search(r"<<METADATA_PUBLISHER:([^>]*)>>", text)
         comment_match = re.search(r"<<METADATA_COMMENT:([^>]*)>>", text)
         language_match = re.search(r"<<METADATA_LANGUAGE:([^>]*)>>", text)
         series_match = re.search(r"<<METADATA_SERIES:([^>]*)>>", text)
         series_index_match = re.search(r"<<METADATA_SERIES_INDEX:([^>]*)>>", text)
         chapter_count_match = re.search(r"<<METADATA_CHAPTER_COUNT:([^>]*)>>", text)
+        source_path_match = re.search(r"<<METADATA_SOURCE_PATH:([^>]*)>>", text)
         cover_match = re.search(r"<<METADATA_COVER_PATH:([^>]*)>>", text)
         cover_path = cover_match.group(1) if cover_match else None
+        source_epub_path = (
+            source_path_match.group(1).strip() if source_path_match else ""
+        )
+        if source_epub_path:
+            self.metadata_source_epub_path = source_epub_path
 
         # Use display path or filename as fallback for title
 
@@ -2968,8 +3228,9 @@ class ConversionThread(QThread):
             artist_value = artist_match.group(1)
             metadata_options.extend(["-metadata", f"artist={artist_value}"])
         else:
-            artist_value = "Unknown"
-            metadata_options.extend(["-metadata", "artist=Unknown"])
+            inferred_artist = self._infer_artist_from_context()
+            artist_value = inferred_artist or "Unknown"
+            metadata_options.extend(["-metadata", f"artist={artist_value}"])
 
         # Add album metadata
         if album_match:
@@ -2996,8 +3257,8 @@ class ConversionThread(QThread):
             album_artist_value = album_artist_match.group(1)
             metadata_options.extend(["-metadata", f"album_artist={album_artist_value}"])
         else:
-            album_artist_value = "Unknown"
-            metadata_options.extend(["-metadata", "album_artist=Unknown"])
+            album_artist_value = artist_value or "Unknown"
+            metadata_options.extend(["-metadata", f"album_artist={album_artist_value}"])
 
         narration_phrase = _build_narration_phrase(self.voice)
 
@@ -3005,12 +3266,8 @@ class ConversionThread(QThread):
         metadata_options.extend(["-metadata", f"composer={narration_phrase}"])
 
         # Add genre metadata
-        if genre_match:
-            genre_value = genre_match.group(1)
-            metadata_options.extend(["-metadata", f"genre={genre_value}"])
-        else:
-            genre_value = "Audiobook"
-            metadata_options.extend(["-metadata", "genre=Audiobook"])
+        genre_value = "Audiobook"
+        metadata_options.extend(["-metadata", "genre=Audiobook"])
 
         # Add extended metadata fields if present
         if publisher_match:
@@ -3068,8 +3325,8 @@ class ConversionThread(QThread):
             "comment": full_comment,
         }
 
-        # Validate cover image before returning
-        validated_cover = self._validate_cover_image(cover_path)
+        # Resolve cover image before returning
+        validated_cover = self._resolve_cover_path_with_fallbacks(cover_path)
         if validated_cover:
             self.log_updated.emit(
                 f"Using cover image for audiobook artwork: {validated_cover}"

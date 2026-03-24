@@ -1262,9 +1262,42 @@ class HandlerDialog(QDialog):
 
         from abogen.utils import get_user_cache_path
 
-        metadata = self.book_metadata
+        metadata = dict(self.book_metadata or {})
         filename = os.path.splitext(os.path.basename(self.book_path))[0]
         current_year = str(datetime.datetime.now().year)
+
+        # Recover missing EPUB author/cover metadata directly from parser state when needed.
+        if self.parser.file_type == "epub":
+            epub_book = getattr(self.parser, "book", None)
+            if epub_book is not None:
+                if not metadata.get("authors") and metadata.get("author"):
+                    metadata["authors"] = [str(metadata.get("author"))]
+
+                if not metadata.get("authors"):
+                    try:
+                        author_items = epub_book.get_metadata("DC", "creator")
+                        authors = [a[0] for a in author_items or [] if a and a[0]]
+                        if authors:
+                            metadata["authors"] = authors
+                    except Exception:
+                        pass
+
+                if not metadata.get("cover_image"):
+                    try:
+                        for item in epub_book.get_items_of_type(ebooklib.ITEM_COVER):
+                            metadata["cover_image"] = item.get_content()
+                            break
+                    except Exception:
+                        pass
+
+                if not metadata.get("cover_image"):
+                    try:
+                        for item in epub_book.get_items_of_type(ebooklib.ITEM_IMAGE):
+                            if "cover" in item.get_name().lower():
+                                metadata["cover_image"] = item.get_content()
+                                break
+                    except Exception:
+                        pass
 
         # Get values with fallbacks
         title = metadata.get("title") or filename
@@ -1286,6 +1319,7 @@ class HandlerDialog(QDialog):
                 import uuid
 
                 cache_dir = get_user_cache_path()
+                os.makedirs(cache_dir, exist_ok=True)
                 cover_path = os.path.join(cache_dir, f"cover_{uuid.uuid4()}.jpg")
                 cover_path = os.path.normpath(cover_path)
                 with open(cover_path, "wb") as f:
@@ -1305,6 +1339,9 @@ class HandlerDialog(QDialog):
             "<<METADATA_GENRE:Audiobook>>",
             f"<<METADATA_CHAPTER_COUNT:{total_chapters}>>",
         ]
+
+        source_path = os.path.normpath(self.book_path)
+        metadata_tags.append(f"<<METADATA_SOURCE_PATH:{source_path}>>")
 
         if metadata.get("publisher"):
             metadata_tags.append(f"<<METADATA_PUBLISHER:{metadata.get('publisher')}>>")

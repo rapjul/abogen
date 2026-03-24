@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import os
+import shutil
 import sys
 import tempfile
 import threading
 import types
+import zipfile
 
 if "soundfile" not in sys.modules:
     soundfile_stub = types.ModuleType("soundfile")
@@ -40,6 +42,35 @@ class _NoopPipeline:
 
 class _ParserStub:
     file_type = "epub"
+
+
+class _EpubBookStub:
+    def __init__(self):
+        self._cover_bytes = b"fake-cover-bytes"
+
+    def get_metadata(self, namespace, field):
+        if namespace == "DC" and field == "creator":
+            return [("Recovered Author", {})]
+        return []
+
+    def get_items_of_type(self, item_type):
+        class _Item:
+            def __init__(self, name, data):
+                self._name = name
+                self._data = data
+
+            def get_name(self):
+                return self._name
+
+            def get_content(self):
+                return self._data
+
+        return [_Item("cover.jpg", self._cover_bytes)]
+
+
+class _ParserEpubRichStub:
+    file_type = "epub"
+    book = _EpubBookStub()
 
 
 def _make_run_worker(
@@ -129,6 +160,51 @@ def test_pyqt_format_metadata_tags_includes_extended_epub_fields() -> None:
     assert "<<METADATA_SERIES:Saga>>" in text
     assert "<<METADATA_SERIES_INDEX:2>>" in text
     assert "<<METADATA_CHAPTER_COUNT:2>>" in text
+    assert "<<METADATA_SOURCE_PATH:/tmp/example.epub>>" in text
+
+
+def test_pyqt_format_metadata_tags_recovers_author_and_cover_from_epub_parser() -> None:
+    handler = HandlerDialog.__new__(HandlerDialog)
+    setattr(handler, "book_metadata", {"title": "Example", "author": "Single Author"})
+    setattr(handler, "book_path", "/tmp/example.epub")
+    setattr(handler, "checked_chapters", [{"title": "Chapter 1"}])
+    setattr(handler, "parser", _ParserEpubRichStub())
+
+    text = handler._format_metadata_tags()
+
+    assert "<<METADATA_ARTIST:Single Author>>" in text
+    assert "<<METADATA_ALBUM_ARTIST:Single Author>>" in text
+    assert "<<METADATA_COVER_PATH:" in text
+
+
+def test_pyqt_format_metadata_tags_creates_cover_cache_dir(monkeypatch) -> None:
+    handler = HandlerDialog.__new__(HandlerDialog)
+    setattr(
+        handler,
+        "book_metadata",
+        {
+            "title": "Example",
+            "authors": ["Author One"],
+            "cover_image": b"fake-cover-bytes",
+        },
+    )
+    setattr(handler, "book_path", "/tmp/example.epub")
+    setattr(handler, "checked_chapters", [{"title": "Chapter 1"}])
+    setattr(handler, "parser", _ParserStub())
+
+    with tempfile.TemporaryDirectory() as tmp:
+        cache_dir = os.path.join(tmp, "missing-cache")
+        shutil.rmtree(cache_dir, ignore_errors=True)
+
+        import abogen.utils as utils_module
+
+        monkeypatch.setattr(utils_module, "get_user_cache_path", lambda: cache_dir)
+
+        text = handler._format_metadata_tags()
+
+        assert "<<METADATA_COVER_PATH:" in text
+        cover_path = text.split("<<METADATA_COVER_PATH:", 1)[1].split(">>", 1)[0]
+        assert os.path.isfile(cover_path)
 
 
 def test_pyqt_extract_metadata_adds_extended_fields_and_narration_phrase() -> None:
@@ -182,6 +258,174 @@ def test_pyqt_extract_metadata_adds_extended_fields_and_narration_phrase() -> No
     assert atom_metadata["series_index"] == "2"
     assert atom_metadata["chapter_count"] == "11"
     assert phrase in atom_metadata["comment"]
+
+
+def test_pyqt_extract_metadata_infers_artist_from_filename_when_missing() -> None:
+    worker = ConversionThread.__new__(ConversionThread)
+    worker.is_direct_text = True
+    worker.file_name = "<<METADATA_TITLE:Example Title>>"
+    worker.from_queue = False
+    worker.display_path = "/tmp/Example Author - Example Title.txt"
+    worker.voice = "af_heart"
+    setattr(worker, "log_updated", _SignalStub())
+
+    metadata_options, _cover, atom_metadata = (
+        worker._extract_and_add_metadata_tags_to_ffmpeg_cmd()
+    )
+
+    options_text = " ".join(metadata_options)
+    assert "artist=Example Author" in options_text
+    assert "album_artist=Example Author" in options_text
+    assert atom_metadata["artist"] == "Example Author"
+    assert atom_metadata["album_artist"] == "Example Author"
+
+
+def test_pyqt_extract_metadata_uses_sidecar_cover_when_tag_missing() -> None:
+    worker = ConversionThread.__new__(ConversionThread)
+    worker.is_direct_text = True
+    worker.file_name = "<<METADATA_TITLE:Example Title>>"
+    worker.from_queue = False
+    worker.voice = "af_heart"
+    signal = _SignalStub()
+    setattr(worker, "log_updated", signal)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        worker.display_path = os.path.join(tmp, "Example Title.txt")
+        sidecar_cover = os.path.join(tmp, "Example Title.jpg")
+        with open(sidecar_cover, "wb") as handle:
+            handle.write(b"jpeg-bytes")
+
+        _metadata_options, cover, _atom_metadata = (
+            worker._extract_and_add_metadata_tags_to_ffmpeg_cmd()
+        )
+
+        assert cover == sidecar_cover
+        assert "using sidecar image" in "\n".join(signal.messages).lower()
+
+
+def test_pyqt_extract_metadata_uses_epub_cover_when_tag_missing() -> None:
+    worker = ConversionThread.__new__(ConversionThread)
+    worker.is_direct_text = True
+    worker.file_name = "<<METADATA_TITLE:Example Title>>"
+    worker.from_queue = False
+    worker.display_path = "/tmp/example.epub"
+    worker.voice = "af_heart"
+    signal = _SignalStub()
+    setattr(worker, "log_updated", signal)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        extracted_cover = os.path.join(tmp, "extracted_cover.jpg")
+        with open(extracted_cover, "wb") as handle:
+            handle.write(b"jpeg-bytes")
+
+        setattr(worker, "_extract_cover_from_source_epub", lambda: extracted_cover)
+
+        _metadata_options, cover, _atom_metadata = (
+            worker._extract_and_add_metadata_tags_to_ffmpeg_cmd()
+        )
+
+        assert cover == extracted_cover
+        assert "extracted epub cover" in "\n".join(signal.messages).lower()
+
+
+def test_pyqt_extract_metadata_falls_back_when_metadata_cover_is_stale() -> None:
+    worker = ConversionThread.__new__(ConversionThread)
+    worker.is_direct_text = True
+    worker.from_queue = False
+    worker.voice = "af_heart"
+    signal = _SignalStub()
+    setattr(worker, "log_updated", signal)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        stale_cover = os.path.join(tmp, "missing.jpg")
+        worker.file_name = "\n".join(
+            [
+                "<<METADATA_TITLE:Example Title>>",
+                f"<<METADATA_COVER_PATH:{stale_cover}>>",
+            ]
+        )
+        worker.display_path = os.path.join(tmp, "Example Title.txt")
+        sidecar_cover = os.path.join(tmp, "Example Title.jpg")
+        with open(sidecar_cover, "wb") as handle:
+            handle.write(b"jpeg-bytes")
+
+        _metadata_options, cover, _atom_metadata = (
+            worker._extract_and_add_metadata_tags_to_ffmpeg_cmd()
+        )
+
+        assert cover == sidecar_cover
+        joined = "\n".join(signal.messages).lower()
+        assert "metadata cover path was unusable" in joined
+        assert "using sidecar image" in joined
+
+
+def test_pyqt_extract_metadata_uses_metadata_source_epub_path_fallback() -> None:
+    worker = ConversionThread.__new__(ConversionThread)
+    worker.is_direct_text = True
+    worker.from_queue = False
+    worker.voice = "af_heart"
+    signal = _SignalStub()
+    setattr(worker, "log_updated", signal)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        source_epub = os.path.join(tmp, "book.epub")
+        worker.file_name = "\n".join(
+            [
+                "<<METADATA_TITLE:Example Title>>",
+                f"<<METADATA_SOURCE_PATH:{source_epub}>>",
+            ]
+        )
+        worker.display_path = os.path.join(tmp, "Example Title.txt")
+
+        extracted_cover = os.path.join(tmp, "extracted_cover.jpg")
+        with open(extracted_cover, "wb") as handle:
+            handle.write(b"jpeg-bytes")
+
+        setattr(
+            worker,
+            "_extract_cover_from_epub_path",
+            lambda p: extracted_cover if p == source_epub else None,
+        )
+
+        _metadata_options, cover, _atom_metadata = (
+            worker._extract_and_add_metadata_tags_to_ffmpeg_cmd()
+        )
+
+        assert cover == extracted_cover
+        assert getattr(worker, "metadata_source_epub_path", "") == source_epub
+
+
+def test_pyqt_extract_cover_from_epub_path_parses_opf_cover_id(monkeypatch) -> None:
+    worker = ConversionThread.__new__(ConversionThread)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        epub_path = os.path.join(tmp, "book.epub")
+        cache_dir = os.path.join(tmp, "cache")
+        expected_cover = b"\xff\xd8\xfffake-jpeg"
+
+        opf = """<?xml version='1.0' encoding='utf-8'?>
+<package xmlns='http://www.idpf.org/2007/opf' version='2.0'>
+    <metadata>
+        <meta name='cover' content='cover-image'/>
+    </metadata>
+    <manifest>
+        <item id='cover-image' href='Images/0000.jpg' media-type='image/jpeg'/>
+    </manifest>
+</package>
+"""
+
+        with zipfile.ZipFile(epub_path, "w") as zf:
+            zf.writestr("OEBPS/content.opf", opf)
+            zf.writestr("OEBPS/Images/0000.jpg", expected_cover)
+
+        monkeypatch.setattr(conversion_module, "get_user_cache_path", lambda: cache_dir)
+
+        out_cover = worker._extract_cover_from_epub_path(epub_path)
+
+        assert out_cover is not None
+        assert os.path.isfile(out_cover)
+        with open(out_cover, "rb") as handle:
+            assert handle.read() == expected_cover
 
 
 def test_build_narration_phrase_from_formula_uses_primary_voice() -> None:
@@ -361,20 +605,20 @@ def test_pyqt_write_m4b_mp4_atoms_writes_text_freeform_and_cover(monkeypatch) ->
             "Narrated by Heart (af_heart) through Kokoro TTS"
         ]
         assert instance.tags["©cmt"] == ["Example Description"]
-        assert instance.tags["©gen"] == ["Audiobook"]
-        assert instance.tags[conversion_module._freeform_atom_key("PUBLISHER")] == [
+        assert "©gen" not in instance.tags
+        assert instance.tags[conversion_module._freeform_atom_key("Publisher")] == [
             b"Example Publisher"
         ]
-        assert instance.tags[conversion_module._freeform_atom_key("LANGUAGE")] == [
+        assert instance.tags[conversion_module._freeform_atom_key("Language")] == [
             b"en"
         ]
-        assert instance.tags[conversion_module._freeform_atom_key("SERIES")] == [
+        assert instance.tags[conversion_module._freeform_atom_key("Series")] == [
             b"Saga"
         ]
-        assert instance.tags[conversion_module._freeform_atom_key("SERIES_INDEX")] == [
+        assert instance.tags[conversion_module._freeform_atom_key("Series Index")] == [
             b"2"
         ]
-        assert instance.tags[conversion_module._freeform_atom_key("CHAPTER_COUNT")] == [
+        assert instance.tags[conversion_module._freeform_atom_key("Chapter Count")] == [
             b"11"
         ]
         assert instance.tags["covr"][0].imageformat == _FakeMP4Cover.FORMAT_JPEG
