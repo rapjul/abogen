@@ -3,6 +3,7 @@ import logging
 import os
 import platform
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -371,8 +372,14 @@ def create_process(cmd, stdin=None, text=True, capture_output=False):
             }
         )
 
-    # Print the command being executed
-    print(f"Executing: {cmd if isinstance(cmd, str) else ' '.join(cmd)}")
+    # Print a shell-ready command preview with proper quoting.
+    if isinstance(cmd, str):
+        display_cmd = cmd
+    elif platform.system() == "Windows":
+        display_cmd = subprocess.list2cmdline(cmd)
+    else:
+        display_cmd = shlex.join(cmd)
+    print(f"Executing: {display_cmd}")
 
     proc = subprocess.Popen(cmd, **kwargs)
 
