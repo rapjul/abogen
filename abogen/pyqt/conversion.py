@@ -1180,6 +1180,65 @@ class ConversionThread(QThread):
                 f"  - Silence between chapters: {self.silence_duration} seconds"
             )
 
+    def _ffmpeg_output_tail(self, proc, max_chars=3000):
+        if proc is None:
+            return ""
+        getter = getattr(proc, "_abogen_get_output_tail", None)
+        if not callable(getter):
+            return ""
+        try:
+            tail = str(getter() or "").strip()
+        except Exception:
+            return ""
+        if len(tail) > max_chars:
+            return tail[-max_chars:]
+        return tail
+
+    def _build_ffmpeg_failure_message(self, proc, context):
+        returncode = None
+        if proc is not None:
+            try:
+                returncode = proc.poll()
+            except Exception:
+                returncode = None
+            if returncode is None:
+                returncode = getattr(proc, "returncode", None)
+        code_text = "unknown" if returncode is None else str(returncode)
+        msg = f"FFmpeg exited unexpectedly while {context} (exit code: {code_text})."
+        tail = self._ffmpeg_output_tail(proc)
+        if tail:
+            msg += f"\nFFmpeg output (tail):\n{tail}"
+        return msg
+
+    def _write_to_ffmpeg(self, proc, audio_bytes, context):
+        if proc is None:
+            raise RuntimeError(f"FFmpeg process is not available while {context}.")
+        if proc.poll() is not None:
+            raise RuntimeError(self._build_ffmpeg_failure_message(proc, context))
+        stdin = proc.stdin
+        if stdin is None:
+            raise RuntimeError(f"FFmpeg stdin is unavailable while {context}.")
+        try:
+            stdin.write(audio_bytes)
+        except (BrokenPipeError, OSError, ValueError) as exc:
+            raise RuntimeError(
+                self._build_ffmpeg_failure_message(proc, context)
+                + f"\nOriginal pipe error: {exc}"
+            ) from exc
+
+    def _finalize_ffmpeg_pipe(self, proc, context):
+        if proc is None:
+            return
+        stdin = proc.stdin
+        if stdin is not None and not stdin.closed:
+            try:
+                stdin.close()
+            except Exception:
+                pass
+        returncode = proc.wait()
+        if returncode != 0:
+            raise RuntimeError(self._build_ffmpeg_failure_message(proc, context))
+
     def run(self):  # pyright: ignore[reportGeneralTypeIssues]
         _install_phonemizer_warning_filter()
         print(
@@ -1883,7 +1942,11 @@ class ConversionThread(QThread):
                                     audio_bytes = result.audio.astype(
                                         "float32"
                                     ).tobytes()
-                                ffmpeg_proc.stdin.write(audio_bytes)
+                                self._write_to_ffmpeg(
+                                    ffmpeg_proc,
+                                    audio_bytes,
+                                    "writing merged chapter audio",
+                                )
                             if chapter_out_file:
                                 chapter_out_file.write(result.audio)
                             elif chapter_ffmpeg_proc:
@@ -1895,7 +1958,11 @@ class ConversionThread(QThread):
                                     audio_bytes = result.audio.astype(
                                         "float32"
                                     ).tobytes()
-                                chapter_ffmpeg_proc.stdin.write(audio_bytes)
+                                self._write_to_ffmpeg(
+                                    chapter_ffmpeg_proc,
+                                    audio_bytes,
+                                    "writing per-chapter audio",
+                                )
                             # Subtitle logic
                             if self.subtitle_mode != "Disabled":
                                 tokens_list = getattr(result, "tokens", [])
@@ -2061,7 +2128,11 @@ class ConversionThread(QThread):
                     if merged_out_file:
                         merged_out_file.write(silence_audio)
                     elif ffmpeg_proc:
-                        ffmpeg_proc.stdin.write(silence_bytes)
+                        self._write_to_ffmpeg(
+                            ffmpeg_proc,
+                            silence_bytes,
+                            "writing merged chapter silence",
+                        )
 
                     # Update timing for the silence
                     current_time += self.silence_duration
@@ -2075,8 +2146,10 @@ class ConversionThread(QThread):
                 if chapter_out_file or chapter_ffmpeg_proc:
                     self.log_updated.emit(("\nProcessing chapter audio...", "grey"))
                 if chapter_ffmpeg_proc:
-                    chapter_ffmpeg_proc.stdin.close()
-                    chapter_ffmpeg_proc.wait()
+                    self._finalize_ffmpeg_pipe(
+                        chapter_ffmpeg_proc,
+                        f"finalizing chapter {chapter_idx} output",
+                    )
                 if chapter_out_file:
                     chapter_out_file.close()
                 # Close chapter subtitle file if open
@@ -2111,8 +2184,7 @@ class ConversionThread(QThread):
                 if self.output_format in ["wav", "mp3", "flac"]:
                     merged_out_file.close()
                 elif self.output_format == "m4b":
-                    ffmpeg_proc.stdin.close()
-                    ffmpeg_proc.wait()
+                    self._finalize_ffmpeg_pipe(ffmpeg_proc, "finalizing merged m4b")
                     # Add chapters via fast post-processing
                     if total_chapters > 1:
                         chapters_info_path = f"{base_filepath_no_ext}_chapters.txt"
@@ -2175,8 +2247,7 @@ class ConversionThread(QThread):
                             "Warning: M4B metadata post-write did not complete successfully."
                         )
                 elif self.output_format in ["opus"]:
-                    ffmpeg_proc.stdin.close()
-                    ffmpeg_proc.wait()
+                    self._finalize_ffmpeg_pipe(ffmpeg_proc, "finalizing merged opus")
                 self.progress_updated.emit(100, "00:00:00")
                 # Close merged subtitle file if open
                 if merged_subtitle_file:
@@ -2659,11 +2730,15 @@ class ConversionThread(QThread):
                 merged_out_file.write(audio_buffer)
                 merged_out_file.close()
             elif ffmpeg_proc:
-                stdin = ffmpeg_proc.stdin
-                if stdin is not None:
-                    stdin.write(audio_buffer.astype("float32").tobytes())
-                    stdin.close()
-                ffmpeg_proc.wait()
+                self._write_to_ffmpeg(
+                    ffmpeg_proc,
+                    audio_buffer.astype("float32").tobytes(),
+                    "writing subtitle-processed audio buffer",
+                )
+                self._finalize_ffmpeg_pipe(
+                    ffmpeg_proc,
+                    "finalizing subtitle-processed audio output",
+                )
                 if self.output_format == "m4b":
                     atom_write_ok = self._write_m4b_mp4_atoms(
                         merged_out_path,

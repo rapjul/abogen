@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import warnings
+from collections import deque
 from functools import lru_cache
 from threading import Thread
 from typing import Dict, Optional
@@ -476,6 +477,26 @@ def create_process(cmd, stdin=None, text=True, capture_output=False):
 
     proc = subprocess.Popen(cmd, **kwargs)
 
+    # Keep a bounded tail of process output for downstream error reporting.
+    max_tail_chars = 12000
+    output_tail: deque[str] = deque()
+    tail_size = 0
+
+    def _append_output_tail(chunk_text: str) -> None:
+        nonlocal tail_size
+        if not chunk_text:
+            return
+        output_tail.append(chunk_text)
+        tail_size += len(chunk_text)
+        while tail_size > max_tail_chars and output_tail:
+            removed = output_tail.popleft()
+            tail_size -= len(removed)
+
+    def _get_output_tail() -> str:
+        return "".join(output_tail)
+
+    setattr(proc, "_abogen_get_output_tail", _get_output_tail)
+
     # Stream output to console in real-time if not capturing
     if proc.stdout and not capture_output:
 
@@ -486,6 +507,7 @@ def create_process(cmd, stdin=None, text=True, capture_output=False):
                     char = stream.read(1)
                     if not char:
                         break
+                    _append_output_tail(char)
                     # Direct write to stdout for immediate feedback
                     sys.stdout.write(char)
                     sys.stdout.flush()
@@ -497,9 +519,9 @@ def create_process(cmd, stdin=None, text=True, capture_output=False):
                         break
                     try:
                         # Try to decode binary data for display
-                        sys.stdout.write(
-                            chunk.decode(default_encoding, errors="replace")
-                        )
+                        decoded_chunk = chunk.decode(default_encoding, errors="replace")
+                        _append_output_tail(decoded_chunk)
+                        sys.stdout.write(decoded_chunk)
                         sys.stdout.flush()
                     except Exception:
                         pass
