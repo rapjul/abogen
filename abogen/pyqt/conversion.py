@@ -860,6 +860,190 @@ class ConversionThread(QThread):
 
         return samples_processed
 
+    def _resolve_run_paths(self):
+        """Resolve input, processing, and base paths used at run startup."""
+        processing_file = self.file_name
+        if getattr(self, "from_queue", False):
+            input_file = self.save_base_path or self.file_name
+            base_path = self.save_base_path or self.file_name
+        else:
+            display_or_file = self.display_path if self.display_path else self.file_name
+            input_file = display_or_file
+            base_path = display_or_file
+        return input_file, processing_file, base_path
+
+    def _is_subtitle_input_file(self):
+        """Return True when the input file is a supported subtitle format."""
+        if self.is_direct_text or not self.file_name:
+            return False
+        return self._get_input_file_extension() in (".srt", ".ass", ".vtt")
+
+    def _get_input_file_extension(self):
+        """Return the lowercased extension for current input file, including leading dot."""
+        if not self.file_name:
+            return ""
+        return os.path.splitext(self.file_name)[1].lower()
+
+    def _is_timestamp_text_input(self):
+        """Return True when a .txt input file appears to contain timestamp cues."""
+        return (
+            (not self.is_direct_text)
+            and self._get_input_file_extension() == ".txt"
+            and detect_timestamps_in_text(self.file_name)
+        )
+
+    def _await_timestamp_processing_choice(self):
+        """Ask UI whether timestamp-text input should be processed as timed subtitles.
+
+        Returns:
+            bool | None: True/False for user choice, or None if cancelled.
+        """
+        # Signal to ask user (-1 indicates timestamp detection).
+        self.chapters_detected.emit(-1)
+
+        # Wait for user response using event with timeout for responsive cancellation.
+        while not self._timestamp_response_event.wait(timeout=_USER_RESPONSE_TIMEOUT):
+            if self.cancel_requested:
+                return None
+
+        # Check cancellation one more time after event is set.
+        if self.cancel_requested:
+            return None
+
+        use_timestamp = bool(getattr(self, "_timestamp_response", False))
+        if hasattr(self, "_timestamp_response"):
+            delattr(self, "_timestamp_response")
+        self._timestamp_response_event.clear()
+        return use_timestamp
+
+    def _resolve_chapter_output_flags(self):
+        """Return effective chapter output flags used by runtime flow."""
+        save_chapters_separately = getattr(self, "save_chapters_separately", False)
+        merge_chapters_at_end = getattr(self, "merge_chapters_at_end", True)
+        if not save_chapters_separately:
+            merge_chapters_at_end = True
+        return save_chapters_separately, merge_chapters_at_end
+
+    def _resolve_output_parent_dir(self, base_path):
+        """Resolve the output parent directory using current save settings."""
+        if self.save_option == "Save to Desktop":
+            return user_desktop_dir()
+        if self.save_option == "Save next to input file":
+            return os.path.dirname(base_path)
+        return self.output_folder or os.getcwd()
+
+    def _find_unique_output_suffix(
+        self,
+        parent_dir,
+        sanitized_base_name,
+        require_chapters_dir_free=False,
+    ):
+        """Find a unique suffix for output names, optionally checking chapter folder collisions."""
+        counter = 1
+        allowed_exts = set(SUPPORTED_SOUND_FORMATS + SUPPORTED_SUBTITLE_FORMATS)
+        while True:
+            suffix = f"_{counter}" if counter > 1 else ""
+            chapters_out_dir_candidate = os.path.join(
+                parent_dir, f"{sanitized_base_name}{suffix}_chapters"
+            )
+            # Use generator expression to avoid processing all files upfront.
+            file_parts = (os.path.splitext(fname) for fname in os.listdir(parent_dir))
+            clash = any(
+                name == f"{sanitized_base_name}{suffix}"
+                and ext[1:].lower() in allowed_exts
+                for name, ext in file_parts
+            )
+            chapters_dir_clash = require_chapters_dir_free and os.path.exists(
+                chapters_out_dir_candidate
+            )
+            if not chapters_dir_clash and not clash:
+                return suffix, chapters_out_dir_candidate
+            counter += 1
+
+    def _log_run_configuration(self, input_file, processing_file, is_subtitle_input):
+        """Emit the startup configuration section for conversion logs."""
+        # Normalize paths for consistent display (fixes Windows path separator issues)
+        input_file = os.path.normpath(input_file) if input_file else input_file
+        processing_file = (
+            os.path.normpath(processing_file) if processing_file else processing_file
+        )
+
+        self.log_updated.emit("Configuration:")
+        self.log_updated.emit(f"  - Input File: {input_file}")
+        if input_file != processing_file:
+            self.log_updated.emit(f"  - Processing File: {processing_file}")
+
+        # Use file size string passed from GUI
+        if hasattr(self, "file_size_str"):
+            self.log_updated.emit(f"  - File size: {self.file_size_str}")
+
+        self.log_updated.emit(f"  - Total characters: {int(self.total_char_count):,}")
+
+        # Audio and language settings
+        self.log_updated.emit(
+            f"  - Language: {self.lang_code} ({LANGUAGE_DESCRIPTIONS.get(self.lang_code, 'Unknown')})"
+        )
+        self.log_updated.emit(f"  - Voice: {self.voice}")
+        self.log_updated.emit(f"  - Speed: {self.speed}")
+
+        # Subtitle options
+        self.log_updated.emit(f"  - Subtitle mode: {self.subtitle_mode}")
+        self.log_updated.emit(
+            f"  - Subtitle format: {next((label for value, label in SUBTITLE_FORMATS if value == getattr(self, 'subtitle_format', 'srt')), getattr(self, 'subtitle_format', 'srt'))}"
+        )
+        self.log_updated.emit(
+            f"  - Use spaCy for sentence segmentation: {'Yes' if getattr(self, 'use_spacy_segmentation', False) else 'No'}"
+        )
+
+        # Output format and location
+        self.log_updated.emit(f"  - Output format: {self.output_format}")
+        self.log_updated.emit(f"  - Save option: {self.save_option}")
+        if self.save_option == "Choose output folder":
+            self.log_updated.emit(
+                f"  - Output folder: {self.output_folder or os.getcwd()}"
+            )
+
+        if self.replace_single_newlines:
+            self.log_updated.emit("  - Replace single newlines: Yes")
+
+        # Display subtitle-specific options if processing subtitle file
+        if is_subtitle_input:
+            if getattr(self, "use_silent_gaps", False):
+                self.log_updated.emit("- Use silent gaps: Yes")
+            speed_method = getattr(self, "subtitle_speed_method", "tts")
+            method_label = (
+                "TTS Regeneration" if speed_method == "tts" else "FFmpeg Time-stretch"
+            )
+            self.log_updated.emit(f"  - Speed adjustment method: {method_label}")
+
+        # Display save_chapters_separately flag if it's set
+        if hasattr(self, "save_chapters_separately"):
+            save_chapters_separately, merge_chapters_at_end = (
+                self._resolve_chapter_output_flags()
+            )
+            self.log_updated.emit(
+                (
+                    f"  - Save chapters separately: {'Yes' if save_chapters_separately else 'No'}"
+                )
+            )
+            # Display merge_chapters_at_end flag if save_chapters_separately is True
+            if save_chapters_separately:
+                self.log_updated.emit(
+                    f"  - Merge chapters at the end: {'Yes' if merge_chapters_at_end else 'No'}"
+                )
+                # Display the separate chapters format if it's set
+                separate_format = getattr(self, "separate_chapters_format", "wav")
+                self.log_updated.emit(
+                    f"  - Separate chapters format: {separate_format}"
+                )
+
+        # If merge_at_end is True, display the silence duration
+        _, merge_chapters_at_end = self._resolve_chapter_output_flags()
+        if merge_chapters_at_end:
+            self.log_updated.emit(
+                f"  - Silence between chapters: {self.silence_duration} seconds"
+            )
+
     def run(self):  # pyright: ignore[reportGeneralTypeIssues]
         _install_phonemizer_warning_filter()
         print(
@@ -867,108 +1051,9 @@ class ConversionThread(QThread):
         )
         try:
             hf_tracker.set_log_callback(lambda msg: self.log_updated.emit(msg))
-            # Show configuration
-            self.log_updated.emit("Configuration:")
-
-            # Determine input file and processing file
-            if getattr(self, "from_queue", False):
-                input_file = self.save_base_path or self.file_name
-                processing_file = self.file_name
-            else:
-                input_file = self.display_path if self.display_path else self.file_name
-                processing_file = self.file_name
-
-            # Normalize paths for consistent display (fixes Windows path separator issues)
-            input_file = os.path.normpath(input_file) if input_file else input_file
-            processing_file = (
-                os.path.normpath(processing_file)
-                if processing_file
-                else processing_file
-            )
-
-            self.log_updated.emit(f"- Input File: {input_file}")
-            if input_file != processing_file:
-                self.log_updated.emit(f"- Processing File: {processing_file}")
-
-            # Use file_name for logs if from_queue, otherwise use display_path if available
-            if getattr(self, "from_queue", False):
-                base_path = (
-                    self.save_base_path or self.file_name
-                )  # Use save_base_path if available
-            else:
-                base_path = self.display_path if self.display_path else self.file_name
-
-            # Use file size string passed from GUI
-            if hasattr(self, "file_size_str"):
-                self.log_updated.emit(f"- File size: {self.file_size_str}")
-
-            self.log_updated.emit(f"- Total characters: {int(self.total_char_count):,}")
-
-            self.log_updated.emit(
-                f"- Language: {self.lang_code} ({LANGUAGE_DESCRIPTIONS.get(self.lang_code, 'Unknown')})"
-            )
-            self.log_updated.emit(f"- Voice: {self.voice}")
-            self.log_updated.emit(f"- Speed: {self.speed}")
-            self.log_updated.emit(f"- Subtitle mode: {self.subtitle_mode}")
-            self.log_updated.emit(f"- Output format: {self.output_format}")
-            self.log_updated.emit(
-                f"- Subtitle format: {next((label for value, label in SUBTITLE_FORMATS if value == getattr(self, 'subtitle_format', 'srt')), getattr(self, 'subtitle_format', 'srt'))}"
-            )
-            self.log_updated.emit(
-                f"- Use spaCy for sentence segmentation: {'Yes' if getattr(self, 'use_spacy_segmentation', False) else 'No'}"
-            )
-            self.log_updated.emit(f"- Save option: {self.save_option}")
-            if self.replace_single_newlines:
-                self.log_updated.emit("- Replace single newlines: Yes")
-
-            # Check if input is a subtitle file for additional configuration
-            is_subtitle_input = False
-            if not self.is_direct_text and self.file_name:
-                file_ext = os.path.splitext(self.file_name)[1].lower()
-                if file_ext in [".srt", ".ass", ".vtt"]:
-                    is_subtitle_input = True
-
-            # Display subtitle-specific options if processing subtitle file
-            if is_subtitle_input:
-                if getattr(self, "use_silent_gaps", False):
-                    self.log_updated.emit("- Use silent gaps: Yes")
-                speed_method = getattr(self, "subtitle_speed_method", "tts")
-                method_label = (
-                    "TTS Regeneration"
-                    if speed_method == "tts"
-                    else "FFmpeg Time-stretch"
-                )
-                self.log_updated.emit(f"- Speed adjustment method: {method_label}")
-
-            # Display save_chapters_separately flag if it's set
-            if hasattr(self, "save_chapters_separately"):
-                self.log_updated.emit(
-                    (
-                        f"- Save chapters separately: {'Yes' if self.save_chapters_separately else 'No'}"
-                    )
-                )
-                # Display merge_chapters_at_end flag if save_chapters_separately is True
-                if self.save_chapters_separately:
-                    merge_at_end = getattr(self, "merge_chapters_at_end", True)
-                    self.log_updated.emit(
-                        f"- Merge chapters at the end: {'Yes' if merge_at_end else 'No'}"
-                    )
-                    # Display the separate chapters format if it's set
-                    separate_format = getattr(self, "separate_chapters_format", "wav")
-                    self.log_updated.emit(
-                        f"- Separate chapters format: {separate_format}"
-                    )
-
-            # If merge_at_end is True, display the silence duration
-            if getattr(self, "merge_chapters_at_end", True):
-                self.log_updated.emit(
-                    f"- Silence between chapters: {self.silence_duration} seconds"
-                )
-
-            if self.save_option == "Choose output folder":
-                self.log_updated.emit(
-                    f"- Output folder: {self.output_folder or os.getcwd()}"
-                )
+            input_file, processing_file, base_path = self._resolve_run_paths()
+            is_subtitle_input = self._is_subtitle_input_file()
+            self._log_run_configuration(input_file, processing_file, is_subtitle_input)
 
             self.log_updated.emit(("\nInitializing TTS pipeline...", "grey"))
 
@@ -983,44 +1068,34 @@ class ConversionThread(QThread):
 
             self._apply_device_specific_batch_defaults(device)
             if self.use_sentence_char_batching:
-                self._log_batch_sizes("- Active")
+                self._log_batch_sizes("  - Active")
 
             tts = self.KPipeline(
                 lang_code=self.lang_code, repo_id="hexgrad/Kokoro-82M", device=device
             )
+            self.log_updated.emit("\n\nUsing the Kokoro TTS pipeline.")
 
             # Check if the input is a subtitle file or timestamp text file
             is_subtitle_file = False
             is_timestamp_text = False
             if not self.is_direct_text and self.file_name:
-                file_ext = os.path.splitext(self.file_name)[1].lower()
-                if file_ext in [".srt", ".ass", ".vtt"]:
+                file_ext = self._get_input_file_extension()
+                if self._is_subtitle_input_file():
                     is_subtitle_file = True
                     self.log_updated.emit(
                         f"\nDetected subtitle file format: {file_ext}"
                     )
-                elif file_ext == ".txt" and detect_timestamps_in_text(self.file_name):
+                elif self._is_timestamp_text_input():
                     is_timestamp_text = True
                     self.log_updated.emit(
                         ("\nDetected timestamps in text file", "grey")
                     )
-                    # Signal to ask user (-1 indicates timestamp detection)
-                    self.chapters_detected.emit(-1)
-                    # Wait for user response using event with timeout for responsive cancellation
-                    while not self._timestamp_response_event.wait(
-                        timeout=_USER_RESPONSE_TIMEOUT
-                    ):
-                        if self.cancel_requested:
-                            self.conversion_finished.emit("Cancelled", None)
-                            return
-                    # Check cancellation one more time after event is set
-                    if self.cancel_requested:
+                    timestamp_choice = self._await_timestamp_processing_choice()
+                    if timestamp_choice is None:
                         self.conversion_finished.emit("Cancelled", None)
                         return
-                    if not self._timestamp_response:
+                    if not timestamp_choice:
                         is_timestamp_text = False
-                    delattr(self, "_timestamp_response")
-                    self._timestamp_response_event.clear()
 
             # Process subtitle files separately
             if is_subtitle_file or is_timestamp_text:
@@ -1167,34 +1242,21 @@ class ConversionThread(QThread):
                 self.chapter_progress_updated.emit(0, total_chapters, chapters[0][0])
 
             # If save_chapters_separately is enabled, find a unique suffix ONCE and use for both folder and merged file
-            save_chapters_separately = getattr(self, "save_chapters_separately", False)
-            merge_chapters_at_end = getattr(self, "merge_chapters_at_end", True)
-
-            # Ensure merge_chapters_at_end is True if not saving chapters separately
-            if not save_chapters_separately:
-                merge_chapters_at_end = True
+            (
+                save_chapters_separately,
+                merge_chapters_at_end,
+            ) = self._resolve_chapter_output_flags()
 
             chapters_out_dir = None
             suffix = ""
 
-            # Use file_name for logs if from_queue, otherwise use display_path if available
-            if getattr(self, "from_queue", False):
-                base_path = (
-                    self.save_base_path or self.file_name
-                )  # Use save_base_path if available
-            else:
-                base_path = self.display_path if self.display_path else self.file_name
+            _, _, base_path = self._resolve_run_paths()
 
             base_name = os.path.splitext(os.path.basename(base_path))[0]
             # Sanitize base_name for folder/file creation based on OS
             sanitized_base_name = sanitize_name_for_os(base_name, is_folder=True)
 
-            if self.save_option == "Save to Desktop":
-                parent_dir = user_desktop_dir()
-            elif self.save_option == "Save next to input file":
-                parent_dir = os.path.dirname(base_path)
-            else:
-                parent_dir = self.output_folder or os.getcwd()
+            parent_dir = self._resolve_output_parent_dir(base_path)
             # Ensure the output folder exists, error if it doesn't
             if not os.path.exists(parent_dir):
                 self.log_updated.emit(
@@ -1203,27 +1265,12 @@ class ConversionThread(QThread):
                         "red",
                     )
                 )
-            # Find a unique suffix for both folder and merged file, always
-            counter = 1
-            allowed_exts = set(SUPPORTED_SOUND_FORMATS + SUPPORTED_SUBTITLE_FORMATS)
-            while True:
-                suffix = f"_{counter}" if counter > 1 else ""
-                chapters_out_dir_candidate = os.path.join(
-                    parent_dir, f"{sanitized_base_name}{suffix}_chapters"
-                )
-                # Only check for files with allowed extensions (extension without dot, case-insensitive)
-                # Use generator expression to avoid processing all files upfront
-                file_parts = (
-                    os.path.splitext(fname) for fname in os.listdir(parent_dir)
-                )
-                clash = any(
-                    name == f"{sanitized_base_name}{suffix}"
-                    and ext[1:].lower() in allowed_exts
-                    for name, ext in file_parts
-                )
-                if not os.path.exists(chapters_out_dir_candidate) and not clash:
-                    break
-                counter += 1
+            # Find a unique suffix for both folder and merged file, always.
+            suffix, chapters_out_dir_candidate = self._find_unique_output_suffix(
+                parent_dir,
+                sanitized_base_name,
+                require_chapters_dir_free=True,
+            )
             if save_chapters_separately and total_chapters > 1:
                 separate_chapters_format = getattr(
                     self, "separate_chapters_format", "wav"
@@ -1446,6 +1493,7 @@ class ConversionThread(QThread):
 
                 # Prepare per-chapter output file if needed
                 if save_chapters_separately and total_chapters > 1:
+                    assert chapters_out_dir is not None
                     # First pass: keep alphanumeric, spaces, hyphens, and underscores
                     sanitized = re.sub(r"[^\w\s\-]", "", chapter_name)
                     # Replace multiple spaces/hyphens with single underscore
@@ -1594,12 +1642,7 @@ class ConversionThread(QThread):
                     # English uses spaCy only for subtitle generation (post-TTS)
                     # spaCy is disabled when subtitle mode is "Disabled" or "Line"
                     # spaCy is also disabled when input is a subtitle file
-                    is_subtitle_input = (
-                        not self.is_direct_text
-                        and self.file_name
-                        and os.path.splitext(self.file_name)[1].lower()
-                        in [".srt", ".ass", ".vtt"]
-                    )
+                    is_subtitle_input = self._is_subtitle_input_file()
                     use_spacy = (
                         getattr(self, "use_spacy_segmentation", False)
                         and self.subtitle_mode not in ["Disabled", "Line"]
@@ -1961,6 +2004,7 @@ class ConversionThread(QThread):
                         # Fast mux chapters into m4b (write to temp file, then replace original)
                         static_ffmpeg.add_paths()
                         orig_path = merged_out_path
+                        assert orig_path is not None
                         root, ext = os.path.splitext(orig_path)
                         tmp_path = root + ".tmp" + ext
                         metadata_options, cover_path = (
@@ -2076,7 +2120,7 @@ class ConversionThread(QThread):
             if is_timestamp_text:
                 subtitles = parse_timestamp_text_file(self.file_name)
             else:
-                file_ext = os.path.splitext(self.file_name)[1].lower()
+                file_ext = self._get_input_file_extension()
                 if file_ext == ".srt":
                     subtitles = parse_srt_file(self.file_name)
                 elif file_ext == ".vtt":
@@ -2098,15 +2142,7 @@ class ConversionThread(QThread):
             # Setup output paths
             base_name = os.path.splitext(os.path.basename(base_path))[0]
             sanitized_base_name = sanitize_name_for_os(base_name, is_folder=True)
-            parent_dir = (
-                user_desktop_dir()
-                if self.save_option == "Save to Desktop"
-                else (
-                    os.path.dirname(base_path)
-                    if self.save_option == "Save next to input file"
-                    else self.output_folder or os.getcwd()
-                )
-            )
+            parent_dir = self._resolve_output_parent_dir(base_path)
 
             if not os.path.exists(parent_dir):
                 self.log_updated.emit(
@@ -2115,19 +2151,10 @@ class ConversionThread(QThread):
                 return
 
             # Find unique filename
-            counter = 1
-            allowed_exts = set(SUPPORTED_SOUND_FORMATS + SUPPORTED_SUBTITLE_FORMATS)
-            while True:
-                suffix = f"_{counter}" if counter > 1 else ""
-                # Use generator expression to avoid processing all files upfront
-                file_parts = (os.path.splitext(f) for f in os.listdir(parent_dir))
-                if not any(
-                    name == f"{sanitized_base_name}{suffix}"
-                    and ext[1:].lower() in allowed_exts
-                    for name, ext in file_parts
-                ):
-                    break
-                counter += 1
+            suffix, _ = self._find_unique_output_suffix(
+                parent_dir,
+                sanitized_base_name,
+            )
 
             base_filepath_no_ext = os.path.join(
                 parent_dir, f"{sanitized_base_name}{suffix}"
