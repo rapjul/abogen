@@ -8,6 +8,7 @@ import re
 import subprocess
 import threading  # for efficient waiting
 import time
+import traceback
 
 import soundfile as sf
 import static_ffmpeg
@@ -20,6 +21,7 @@ from abogen.constants import (
     CHAPTER_OPTIONS_COUNTDOWN,
     COLORS,
     LANGUAGE_DESCRIPTIONS,
+    SUBTITLE_FORMATS,
     SUPPORTED_SOUND_FORMATS,
     SUPPORTED_SUBTITLE_FORMATS,
 )
@@ -77,6 +79,36 @@ def _jpeg_quality_percent_to_ffmpeg_q(quality_percent: int) -> int:
     # FFmpeg mjpeg: lower q is better. Map 1-100 roughly to q 31-2.
     mapped = int(round(31 - (clamped / 100.0) * 29))
     return max(2, min(31, mapped))
+
+
+def _format_exception_with_location(exc: Exception):
+    """Return (compact, verbose) exception details including source location."""
+    error_detail = str(exc).strip() or type(exc).__name__
+    tb_entries = traceback.extract_tb(exc.__traceback__) if exc.__traceback__ else []
+    if not tb_entries:
+        return error_detail, error_detail
+
+    last = tb_entries[-1]
+    file_name = os.path.basename(last.filename)
+    location = f"{file_name}:{last.lineno} in {last.name}"
+    code_line = (last.line or "").strip()
+
+    compact = f"{error_detail}\nLocation: {location}"
+    if code_line:
+        compact += f"\nCode: {code_line}"
+
+    tail = tb_entries[-5:]
+    trace_lines = ["Traceback (most recent calls):"]
+    for entry in tail:
+        entry_file = os.path.basename(entry.filename)
+        line_text = (entry.line or "").strip()
+        trace_line = f"  {entry_file}:{entry.lineno} in {entry.name}"
+        if line_text:
+            trace_line += f" -> {line_text}"
+        trace_lines.append(trace_line)
+
+    verbose = compact + "\n" + "\n".join(trace_lines)
+    return compact, verbose
 
 
 class _SuppressPhonemizerWordsMismatchFilter(logging.Filter):
@@ -500,9 +532,16 @@ class ConversionThread(QThread):
             self.log_updated.emit(f"- Speed: {self.speed}")
             self.log_updated.emit(f"- Subtitle mode: {self.subtitle_mode}")
             self.log_updated.emit(f"- Output format: {self.output_format}")
-            self.log_updated.emit(
-                f"- Subtitle format: {next((label for value, label in SUPPORTED_SUBTITLE_FORMATS if value == getattr(self, 'subtitle_format', 'srt')), getattr(self, 'subtitle_format', 'srt'))}"
+            subtitle_format_value = getattr(self, "subtitle_format", "srt")
+            subtitle_format_label = next(
+                (
+                    text
+                    for value, text in SUBTITLE_FORMATS
+                    if value == subtitle_format_value
+                ),
+                subtitle_format_value,
             )
+            self.log_updated.emit(f"- Subtitle format: {subtitle_format_label}")
             self.log_updated.emit(
                 f"- Use spaCy for sentence segmentation: {'Yes' if getattr(self, 'use_spacy_segmentation', False) else 'No'}"
             )
@@ -1638,10 +1677,15 @@ class ConversionThread(QThread):
                     chapter_ffmpeg_proc.wait()
             except Exception:
                 pass
-            error_detail = str(e).strip() or type(e).__name__
-            self.log_updated.emit((f"Error occurred: {error_detail}", "red"))
+            error_detail, error_verbose = _format_exception_with_location(e)
+            self.log_updated.emit((f"Error occurred: {error_verbose}", "red"))
             self.conversion_finished.emit(
-                (f"Audio generation failed: {error_detail}", "red"), None
+                (
+                    f"Audio generation failed: {error_detail}",
+                    "red",
+                    error_verbose,
+                ),
+                None,
             )
 
     def _process_subtitle_file(self, tts, base_path, is_timestamp_text=False):
@@ -2122,14 +2166,15 @@ class ConversionThread(QThread):
                     subtitle_file.close()
             except Exception:
                 pass
-            error_detail = str(e).strip() or type(e).__name__
+            error_detail, error_verbose = _format_exception_with_location(e)
             self.log_updated.emit(
-                (f"Error processing subtitle file: {error_detail}", "red")
+                (f"Error processing subtitle file: {error_verbose}", "red")
             )
             self.conversion_finished.emit(
                 (
                     f"Audio generation failed while processing subtitle file: {error_detail}",
                     "red",
+                    error_verbose,
                 ),
                 None,
             )

@@ -156,9 +156,7 @@ LOG_COLOR_MAP = {
 }
 
 # Strictly match known conversion story line formats emitted by ConversionThread.
-STORY_CHAR_PROGRESS_RE = re.compile(
-    r"^\s*\d{1,3}(?:,\d{3})*/\d{1,3}(?:,\d{3})*:\s+"
-)
+STORY_CHAR_PROGRESS_RE = re.compile(r"^\s*\d{1,3}(?:,\d{3})*/\d{1,3}(?:,\d{3})*:\s+")
 STORY_SUBTITLE_PROGRESS_RE = re.compile(
     r"^\s*\[\d+/\d+\]\s+\d{2}:\d{2}:\d{2}(?:,\d{3})?\s+-\s+(?:AUTO|\d{2}:\d{2}:\d{2}(?:,\d{3})?):\s+"
 )
@@ -2277,7 +2275,8 @@ class abogen(QWidget):
 
         # Handle both tuple and string messages
         if isinstance(message, tuple):
-            text, spec = message
+            text = message[0] if len(message) > 0 else ""
+            spec = message[1] if len(message) > 1 else None
             text_str = str(text)
         else:
             text = str(message)
@@ -2300,7 +2299,7 @@ class abogen(QWidget):
         if match:
             leading_ws = match.group(1)
             prefix = match.group(2)
-            rest = text_str[match.end():]
+            rest = text_str[match.end() :]
 
             if leading_ws:
                 fmt = cursor.charFormat()
@@ -3139,10 +3138,13 @@ class abogen(QWidget):
         # Treat explicit error/failure results as unsuccessful completion.
         message_text = ""
         message_level = ""
+        message_details = ""
         if isinstance(message, tuple) and message:
             message_text = str(message[0])
             if len(message) > 1:
                 message_level = str(message[1]).strip().lower()
+            if len(message) > 2:
+                message_details = str(message[2])
         elif isinstance(message, str):
             message_text = message
 
@@ -3184,22 +3186,26 @@ class abogen(QWidget):
                     )
                 self.current_queue_index = 0
                 if failed_item_name:
-                    QMessageBox.warning(
-                        self,
+                    self._show_error_message_box(
                         "Queue Stopped",
                         (
                             f"Queue stopped because conversion failed for '{failed_item_name}'.\n\n"
                             f"Reason:\n{failure_reason}"
                         ),
+                        icon=QMessageBox.Icon.Warning,
+                        copy_button_text="Copy Error",
+                        detailed_message=message_details,
                     )
                 if self.queue_run_active:
                     self.show_queue_summary(outcome="failed")
                 self.queue_run_active = False
             else:
-                QMessageBox.critical(
-                    self,
+                self._show_error_message_box(
                     "Conversion Failed",
                     f"Reason:\n{failure_reason}",
+                    icon=QMessageBox.Icon.Critical,
+                    copy_button_text="Copy Error",
+                    detailed_message=message_details,
                 )
             return
 
@@ -3683,15 +3689,30 @@ class abogen(QWidget):
             )
             cleanup()
 
-    def _show_error_message_box(self, title, message):
+    def _show_error_message_box(
+        self,
+        title,
+        message,
+        *,
+        icon=QMessageBox.Icon.Critical,
+        copy_button_text="Copy",
+        detailed_message="",
+    ):
         box = QMessageBox(self)
-        box.setIcon(QMessageBox.Icon.Critical)
+        box.setIcon(icon)
         box.setWindowTitle(title)
         box.setText(message)
-        copy_btn = QPushButton("Copy")
+        details_text = str(detailed_message or "").strip()
+        if details_text:
+            # This shows a collapsed "Show Details..." section in QMessageBox.
+            box.setDetailedText(details_text)
+        copy_btn = QPushButton(copy_button_text)
         box.addButton(copy_btn, QMessageBox.ButtonRole.ActionRole)
         box.addButton(QMessageBox.StandardButton.Ok)
-        copy_btn.clicked.connect(lambda: QApplication.clipboard().setText(message))
+        copy_payload = str(message)
+        if details_text:
+            copy_payload += f"\n\nDetails:\n{details_text}"
+        copy_btn.clicked.connect(lambda: QApplication.clipboard().setText(copy_payload))
         box.exec()
 
     def _show_filesystem_error_message(self, title, error, action):
