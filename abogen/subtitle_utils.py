@@ -2,7 +2,11 @@ import platform
 import re
 
 from abogen.constants import SAMPLE_VOICE_TEXTS
-from abogen.utils import detect_encoding, load_config
+from abogen.utils import (
+    _suppress_decorative_separator_lines,
+    detect_encoding,
+    load_config,
+)
 
 # Pre-compile frequently used regex patterns for better performance
 _METADATA_TAG_PATTERN = re.compile(r"<<METADATA_[^:]+:[^>]*>>")
@@ -64,6 +68,7 @@ def clean_text(text, *args, **kwargs):
     # Collapse all whitespace (excluding newlines) into single spaces per line and trim edges
     # Use pre-compiled pattern for better performance
     lines = [_WHITESPACE_PATTERN.sub(" ", line).strip() for line in text.splitlines()]
+    lines = _suppress_decorative_separator_lines(lines)
     text = "\n".join(lines)
     # Standardize paragraph breaks (multiple newlines become exactly two) and trim overall whitespace
     # Use pre-compiled pattern for better performance

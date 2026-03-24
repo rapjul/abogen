@@ -505,13 +505,13 @@ class ConversionThread(QThread):
             if total_memory_gb <= 16:
                 tuned = BatchSizeProfile(140, 320, 600)
             elif total_memory_gb <= 32:
-                tuned = BatchSizeProfile(180, 420, 760)
+                tuned = BatchSizeProfile(180, 430, 760)
             elif total_memory_gb <= 64:
-                tuned = BatchSizeProfile(230, 540, 980)
+                tuned = BatchSizeProfile(250, 580, 1000)
             else:
-                tuned = BatchSizeProfile(260, 620, 1100)
+                tuned = BatchSizeProfile(350, 720, 2000)
         elif device == "cuda":
-            tuned = BatchSizeProfile(260, 620, 1100)
+            tuned = BatchSizeProfile(120, 620, 1800)
         else:
             tuned = BatchSizeProfile(160, 360, 680)
 

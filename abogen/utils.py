@@ -14,6 +14,14 @@ from typing import Dict, Optional
 
 from dotenv import find_dotenv, load_dotenv
 
+_INLINE_WHITESPACE_RE = re.compile(r"[^\S\n]+")
+_PARAGRAPH_BREAK_RE = re.compile(r"\n{3,}")
+_SINGLE_NEWLINE_RE = re.compile(r"(?<!\n)\n(?!\n)")
+_SYMBOL_SEPARATOR_RE = re.compile(r"[#\-_=*~`^|.:+<>/\\]{3,}")
+_MOTIF_ALLOWED_RE = re.compile(r"[A-Za-z0-9#\-_=*~.:+|/\\]+")
+_MOTIF_SPLIT_RE = re.compile(r"[#\-_=*~.:+|/\\]+")
+_SEPARATOR_CHARS = set("#-_=*~`^|.:+<>/\\")
+
 
 def _load_environment() -> None:
     explicit_path = os.environ.get("ABOGEN_ENV_FILE")
@@ -301,18 +309,103 @@ _sleep_procs: Dict[str, Optional[subprocess.Popen[str]]] = {
 }  # Store sleep prevention processes
 
 
+def _is_decorative_separator_line(line: str) -> bool:
+    """Return True when a line looks like a decorative separator.
+
+    Decorative separators are marker-only lines that should not be spoken by TTS.
+
+    Examples that return True:
+    - "##########"
+    - "-----"
+    - "-X-X-X-X-X-X-X-X-X-X-"
+    - "===***==="
+
+    Examples that return False:
+    - "mother-in-law"
+    - "go-go-go-go-go"
+    - "## Chapter 4"
+    """
+    stripped = line.strip()
+    if not stripped:
+        return False
+
+    condensed = "".join(stripped.split())
+    if len(condensed) < 5:
+        return False
+
+    if _SYMBOL_SEPARATOR_RE.fullmatch(condensed):
+        return True
+
+    if not _MOTIF_ALLOWED_RE.fullmatch(condensed):
+        return False
+
+    # Only treat repeated motifs as decorative when surrounded by separators
+    # (for example, "-X-X-X-X-"). This avoids stripping normal hyphenated words.
+    if condensed[0] not in _SEPARATOR_CHARS or condensed[-1] not in _SEPARATOR_CHARS:
+        return False
+
+    tokens = [token for token in _MOTIF_SPLIT_RE.split(condensed) if token]
+    if len(tokens) < 5:
+        return False
+    if len(set(tokens)) != 1:
+        return False
+
+    token = tokens[0]
+    if len(token) > 2:
+        return False
+    return token.isalpha() or token.isdigit()
+
+
+def _suppress_decorative_separator_lines(lines: list[str]) -> list[str]:
+    """Replace decorative separator lines with empty lines.
+
+    This preserves paragraph pacing while removing spoken separator noise.
+
+    Example:
+    Input:
+    ["First paragraph.", "-X-X-X-X-X-X-X-X-X-X-", "Second paragraph."]
+
+    Output:
+    ["First paragraph.", "", "Second paragraph."]
+    """
+    result: list[str] = []
+    for line in lines:
+        if _is_decorative_separator_line(line):
+            result.append("")
+        else:
+            result.append(line)
+    return result
+
+
 def clean_text(text, *args, **kwargs):
+    """Normalize text and suppress decorative separator lines.
+
+    The function collapses inline whitespace, removes decorative separators by
+    converting them to paragraph pauses, normalizes excess blank lines, and can
+    optionally collapse single newlines based on config.
+
+    Removed as decorative separators:
+    - "##########"
+    - "-----"
+    - "-X-X-X-X-X-X-X-X-X-X-"
+
+    Preserved as normal content:
+    - "mother-in-law"
+    - "go-go-go-go-go"
+    - "## Chapter 4"
+    """
     # Load replace_single_newlines from config
     cfg = load_config()
     replace_single_newlines = cfg.get("replace_single_newlines", False)
     # Collapse all whitespace (excluding newlines) into single spaces per line and trim edges
-    lines = [re.sub(r"[^\S\n]+", " ", line).strip() for line in text.splitlines()]
+    lines = [_INLINE_WHITESPACE_RE.sub(" ", line).strip() for line in text.splitlines()]
+    lines = _suppress_decorative_separator_lines(lines)
     text = "\n".join(lines)
     # Standardize paragraph breaks (multiple newlines become exactly two) and trim overall whitespace
-    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    text = _PARAGRAPH_BREAK_RE.sub("\n\n", text).strip()
     # Optionally replace single newlines with spaces, but preserve double newlines
     if replace_single_newlines:
-        text = re.sub(r"(?<!\n)\n(?!\n)", " ", text)
+        text = _SINGLE_NEWLINE_RE.sub(" ", text)
     return text
 
 
