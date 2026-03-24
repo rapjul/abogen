@@ -1020,6 +1020,7 @@ class abogen(QWidget):
             "silence_duration", 2.0
         )  # Default silence duration
         self.selected_format = self.config.get("selected_format", "wav")
+        self.m4b_aac_mode = self.config.get("m4b_aac_mode", "aac_lc")
         self.separate_chapters_format = self.config.get(
             "separate_chapters_format", "wav"
         )  # Format for individual chapter files
@@ -2530,6 +2531,7 @@ class abogen(QWidget):
             save_base_path=save_base_path,
             save_chapters_separately=getattr(self, "save_chapters_separately", None),
             merge_chapters_at_end=getattr(self, "merge_chapters_at_end", None),
+            m4b_aac_mode=getattr(self, "m4b_aac_mode", "aac_lc"),
         )
 
         # Prevent adding duplicate items to the queue
@@ -2551,6 +2553,8 @@ class abogen(QWidget):
                 == item_queue.save_chapters_separately
                 and getattr(queued_item, "merge_chapters_at_end", None)
                 == item_queue.merge_chapters_at_end
+                and getattr(queued_item, "m4b_aac_mode", "aac_lc")
+                == item_queue.m4b_aac_mode
             ):
                 QMessageBox.warning(
                     self, "Duplicate Item", "This item is already in the queue."
@@ -2667,6 +2671,7 @@ class abogen(QWidget):
                 self.subtitle_speed_method = getattr(
                     queued_item, "subtitle_speed_method", "tts"
                 )
+                self.m4b_aac_mode = getattr(queued_item, "m4b_aac_mode", "aac_lc")
                 # Word substitution settings
                 self.word_substitutions_enabled = getattr(
                     queued_item, "word_substitutions_enabled", False
@@ -2690,6 +2695,7 @@ class abogen(QWidget):
                 self.config["selected_format"] = self.selected_format
                 self.config["use_silent_gaps"] = self.use_silent_gaps
                 self.config["subtitle_speed_method"] = self.subtitle_speed_method
+                self.config["m4b_aac_mode"] = self.m4b_aac_mode
                 # Word substitution settings
                 self.config["word_substitutions_enabled"] = (
                     self.word_substitutions_enabled
@@ -2914,6 +2920,10 @@ class abogen(QWidget):
             # Pass subtitle format setting
             self.conversion_thread.subtitle_format = self.config.get(
                 "subtitle_format", "ass_centered_narrow"
+            )
+            # Pass M4B AAC profile mode setting
+            self.conversion_thread.m4b_aac_mode = getattr(
+                self, "m4b_aac_mode", "aac_lc"
             )
             # Pass chapter count for EPUB or PDF files
             if self.selected_file_type in ["epub", "pdf", "md", "markdown"] and hasattr(

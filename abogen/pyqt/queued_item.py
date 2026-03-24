@@ -19,6 +19,7 @@ class QueuedItem:
     save_base_path: str | None = None
     save_chapters_separately: bool | None = None
     merge_chapters_at_end: bool | None = None
+    m4b_aac_mode: str = "aac_lc"
     # Word Substitution fields
     word_substitutions_enabled: bool = False
     word_substitutions_list: str = ""

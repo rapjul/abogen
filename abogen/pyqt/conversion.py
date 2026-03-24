@@ -371,6 +371,8 @@ class ConversionThread(QThread):
     MIN_TTS_BATCH_MIN_CHARS = 80
     MIN_TTS_BATCH_TARGET_CHARS = 140
     MIN_TTS_BATCH_MAX_CHARS = 220
+    M4B_AAC_MODE_QUALITY = "aac_lc"
+    M4B_AAC_MODE_COMPACT = "he_aac"
 
     def _get_split_pattern(self, lang_code, subtitle_mode):
         """
@@ -543,13 +545,13 @@ class ConversionThread(QThread):
         if device == "mps":
             total_memory_gb = self._get_total_memory_gb()
             if total_memory_gb <= 16:
-                tuned = BatchSizeProfile(140, 320, 600)
+                tuned = BatchSizeProfile(100, 320, 700)
             elif total_memory_gb <= 32:
-                tuned = BatchSizeProfile(180, 430, 760)
+                tuned = BatchSizeProfile(180, 450, 1000)
             elif total_memory_gb <= 64:
-                tuned = BatchSizeProfile(250, 580, 1000)
+                tuned = BatchSizeProfile(250, 700, 2000)
             else:
-                tuned = BatchSizeProfile(350, 720, 2000)
+                tuned = BatchSizeProfile(350, 1000, 3000)
         elif device == "cuda":
             tuned = BatchSizeProfile(120, 620, 1800)
         else:
@@ -807,6 +809,8 @@ class ConversionThread(QThread):
         self.tts_batch_target_chars = self.DEFAULT_TTS_BATCH_TARGET_CHARS
         self.tts_batch_min_chars = self.DEFAULT_TTS_BATCH_MIN_CHARS
         self.tts_batch_max_chars = self.DEFAULT_TTS_BATCH_MAX_CHARS
+        self.m4b_aac_mode = self.M4B_AAC_MODE_QUALITY
+        self._ffmpeg_audio_encoders_cache = None
         self.batch_failure_count = 0
         self.batch_shrink_failure_threshold = (
             self.DEFAULT_BATCH_SHRINK_FAILURE_THRESHOLD
@@ -822,6 +826,98 @@ class ConversionThread(QThread):
         # Set split pattern based on language and subtitle mode
         self.split_pattern = self._get_split_pattern(lang_code, subtitle_mode)
         self.voice_cache = {}  # Cache for loaded voices
+
+    def _get_m4b_aac_mode(self) -> str:
+        mode = (
+            str(getattr(self, "m4b_aac_mode", self.M4B_AAC_MODE_QUALITY) or "")
+            .strip()
+            .lower()
+        )
+        if mode in {"compact", "he", "he-aac", "he_aac", "aac_he"}:
+            return self.M4B_AAC_MODE_COMPACT
+        return self.M4B_AAC_MODE_QUALITY
+
+    def _get_available_ffmpeg_audio_encoders(self) -> set[str]:
+        cache = getattr(self, "_ffmpeg_audio_encoders_cache", None)
+        if isinstance(cache, set):
+            return cache
+
+        encoders: set[str] = set()
+        try:
+            static_ffmpeg.add_paths()
+            proc = create_process(
+                ["ffmpeg", "-hide_banner", "-encoders"],
+                capture_output=True,
+            )
+            output, _ = proc.communicate(timeout=20)
+            if proc.returncode == 0 and output:
+                for line in output.splitlines():
+                    parts = line.strip().split()
+                    if len(parts) < 2:
+                        continue
+                    flags = parts[0]
+                    encoder_name = parts[1]
+                    if len(flags) == 6 and flags[0] == "A":
+                        encoders.add(encoder_name)
+        except Exception:
+            encoders = set()
+
+        self._ffmpeg_audio_encoders_cache = encoders
+        return encoders
+
+    def _select_m4b_aac_encoder(self) -> str:
+        available = self._get_available_ffmpeg_audio_encoders()
+        if platform.system() == "Darwin":
+            preferred = ["aac_at", "libfdk_aac", "aac"]
+        else:
+            preferred = ["libfdk_aac", "aac"]
+
+        for encoder in preferred:
+            if encoder in available:
+                return encoder
+        return "aac"
+
+    def _build_m4b_aac_audio_args(self) -> list[str]:
+        mode = self._get_m4b_aac_mode()
+        encoder = self._select_m4b_aac_encoder()
+        available = self._get_available_ffmpeg_audio_encoders()
+
+        if mode == self.M4B_AAC_MODE_COMPACT:
+            bitrate = "40k"
+            profile = "aac_he"
+            mode_label = "HE-AAC"
+            # Some FFmpeg builds reject profile signaling with aac_at for HE-AAC.
+            if encoder == "aac_at":
+                if "libfdk_aac" in available:
+                    encoder = "libfdk_aac"
+                elif "aac" in available:
+                    encoder = "aac"
+        else:
+            bitrate = "64k"
+            profile = "aac_low"
+            mode_label = "AAC-LC"
+
+        args = [
+            "-c:a",
+            encoder,
+            "-b:a",
+            bitrate,
+        ]
+        profile_applied = False
+        if encoder in {"libfdk_aac", "aac"}:
+            args.extend(["-profile:a", profile])
+            profile_applied = True
+
+        self.log_updated.emit(
+            (
+                "M4B audio codec profile: "
+                f"{mode_label} ({bitrate}, mono), "
+                f"encoder: {encoder}, "
+                f"profile applied: {'yes' if profile_applied else 'no'}",
+                "grey",
+            )
+        )
+        return args
 
     def load_voice_cached(self, voice_name, tts):
         """Load voice with caching to avoid reloading same voice.
@@ -1381,11 +1477,8 @@ class ConversionThread(QThread):
                         cmd.extend(["-i", cover_path])
                         cmd.extend(_m4b_cover_attach_args(1))
                     cmd.extend(
-                        [
-                            "-c:a",
-                            "aac",
-                            "-q:a",
-                            "2",
+                        self._build_m4b_aac_audio_args()
+                        + [
                             "-movflags",
                             "+faststart+use_metadata_tags",
                         ]
@@ -2228,21 +2321,20 @@ class ConversionThread(QThread):
                         cmd.extend(["-i", cover_path])
                         cmd.extend(_m4b_cover_attach_args(1))
                     cmd.extend(
-                        [
-                            "-c:a",
-                            "aac",
-                            "-q:a",
-                            "2",
-                            "-movflags",
-                            "+faststart+use_metadata_tags",
-                        ]
+                        self._build_m4b_aac_audio_args()
+                        + ["-movflags", "+faststart+use_metadata_tags"]
                     )
                     cmd.extend(metadata_options)
                 elif self.output_format == "opus":
-                    cmd.extend(["-c:a", "libopus", "-b:a", "24000"])
+                    cmd.extend(
+                        ["-c:a", "libopus", "-b:a", "24000"],
+                    )
                 else:
                     self.log_updated.emit(
-                        (f"Unsupported output format: {self.output_format}", "red")
+                        (
+                            f"Unsupported output format: {self.output_format}",
+                            "red",
+                        )
                     )
                     return
                 cmd.append(merged_out_path)
