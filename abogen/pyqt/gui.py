@@ -1,3 +1,4 @@
+# pyright: reportAttributeAccessIssue=false, reportOptionalMemberAccess=false, reportOptionalSubscript=false
 import base64
 import hashlib  # Added for cache path generation
 import html
@@ -243,6 +244,10 @@ class InputBox(QLabel):
             self.height() - self.go_to_folder_btn.height() - margin,
         )
 
+    def _main_window(self) -> "abogen | None":
+        win = self.window()
+        return win if isinstance(win, abogen) else None
+
     def set_file_info(self, file_path):
         # get icon without resizing using custom provider
         provider = IconProvider()
@@ -253,12 +258,14 @@ class InputBox(QLabel):
         buffer = QBuffer()
         buffer.open(QIODevice.OpenModeFlag.WriteOnly)
         pixmap.save(buffer, "PNG")
-        img_data = base64.b64encode(buffer.data()).decode()
+        img_data = base64.b64encode(bytes(buffer.data())).decode()  # pyright: ignore[reportArgumentType]
 
         size_str = self._human_readable_size(os.path.getsize(file_path))
         name = os.path.basename(file_path)
         char_count = 0
-        window = self.window()
+        window = self._main_window()
+        if window is None:
+            return
         cache = getattr(window, "_char_count_cache", None)
 
         def parse_size(size_str):
@@ -385,17 +392,22 @@ class InputBox(QLabel):
         # Show textbox button in error state as well
         self.textbox_btn.show()
         # Disable add to queue button on error
-        if hasattr(self.window(), "btn_add_to_queue"):
-            self.window().btn_add_to_queue.setEnabled(False)
+        window = self._main_window()
+        if window is not None:
+            window.btn_add_to_queue.setEnabled(False)
 
     def clear_input(self):
-        self.window().selected_file = None
-        self.window().displayed_file_path = (
+        window = self._main_window()
+        if window is None:
+            return
+
+        window.selected_file = None
+        window.displayed_file_path = (
             None  # Reset the displayed file path when clearing input
         )
         # Reset book handler attributes
-        self.window().save_chapters_separately = None
-        self.window().merge_chapters_at_end = None
+        window.save_chapters_separately = None
+        window.merge_chapters_at_end = None
         self.setText(
             "Drag and drop your file here or click to browse.\n(.txt, .epub, .pdf, .md, .srt, .ass, .vtt)"
         )
@@ -411,22 +423,18 @@ class InputBox(QLabel):
         self.go_to_folder_btn.hide()
 
         # Re-enable subtitle and replace newlines controls when cleared
-        window = self.window()
-        if hasattr(window, "subtitle_combo"):
-            # Only enable if language supports it
-            current_lang = getattr(window, "selected_lang", "a")
-            window.subtitle_combo.setEnabled(
-                current_lang in SUPPORTED_LANGUAGES_FOR_SUBTITLE_GENERATION
-            )
+        # Only enable if language supports it
+        current_lang = getattr(window, "selected_lang", "a")
+        window.subtitle_combo.setEnabled(
+            current_lang in SUPPORTED_LANGUAGES_FOR_SUBTITLE_GENERATION
+        )
         if hasattr(window, "replace_newlines_combo"):
             window.replace_newlines_combo.setEnabled(True)
 
         # Disable add to queue button when input is cleared
-        if hasattr(window, "btn_add_to_queue"):
-            window.btn_add_to_queue.setEnabled(False)
+        window.btn_add_to_queue.setEnabled(False)
         # Reset the input_box_cleared_by_queue flag after setting file info
-        if hasattr(self.window(), "input_box_cleared_by_queue"):
-            self.window().input_box_cleared_by_queue = True
+        window.input_box_cleared_by_queue = True
 
     def _human_readable_size(self, size, decimal_places=2):
         for unit in ["B", "KB", "MB", "GB", "TB"]:
@@ -437,7 +445,9 @@ class InputBox(QLabel):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            self.window().open_file_dialog()
+            window = self._main_window()
+            if window is not None:
+                window.open_file_dialog()
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
@@ -491,7 +501,10 @@ class InputBox(QLabel):
                 event.ignore()
                 return
             file_path = urls[0].toLocalFile()
-            win = self.window()
+            win = self._main_window()
+            if win is None:
+                event.ignore()
+                return
             if file_path.lower().endswith(".txt"):
                 win.selected_file, win.selected_file_type = file_path, "txt"
                 win.displayed_file_path = (
@@ -536,7 +549,9 @@ class InputBox(QLabel):
             event.ignore()
 
     def on_chapters_clicked(self):
-        win = self.window()
+        win = self._main_window()
+        if win is None:
+            return
         if (
             win.selected_file_type in ["epub", "pdf", "md", "markdown"]
             and win.selected_book_path
@@ -547,10 +562,14 @@ class InputBox(QLabel):
                 self.set_file_info(win.selected_book_path)
 
     def on_textbox_clicked(self):
-        self.window().open_textbox_dialog()
+        win = self._main_window()
+        if win is not None:
+            win.open_textbox_dialog()
 
     def on_edit_clicked(self):
-        win = self.window()
+        win = self._main_window()
+        if win is None:
+            return
         # For PDFs and EPUBs, use the temporary text file
         if (
             win.selected_file_type in ["epub", "pdf", "md", "markdown"]
@@ -563,7 +582,9 @@ class InputBox(QLabel):
             win.open_textbox_dialog()
 
     def on_go_to_folder_clicked(self):
-        win = self.window()
+        win = self._main_window()
+        if win is None:
+            return
         # win.selected_file holds the path to the text that is converted.
         file_to_check = win.selected_file
 
@@ -596,11 +617,14 @@ class InputBox(QLabel):
                     is_cached_doc = True
 
         if is_cached_doc:
+            processed_path = file_to_check
+            if processed_path is None:
+                return
             menu = QMenu(self)
             act_processed = QAction("Go to processed file", self)
 
             def open_processed():
-                folder_path = os.path.dirname(file_to_check)
+                folder_path = os.path.dirname(processed_path)
                 QDesktopServices.openUrl(QUrl.fromLocalFile(folder_path))
 
             act_processed.triggered.connect(open_processed)
@@ -707,6 +731,12 @@ class TextboxDialog(QDialog):
 
         # Store the original text to detect changes
         self.original_text = ""
+        self.is_non_cache_file = False
+        self.non_cache_file_path: str | None = None
+
+    def _main_window(self) -> "abogen | None":
+        parent_window = self.parent()
+        return parent_window if isinstance(parent_window, abogen) else None
 
     def update_char_count(self):
         text = self.text_edit.toPlainText()
@@ -728,7 +758,7 @@ class TextboxDialog(QDialog):
             self.reject()
         else:
             # Check if we need to warn about overwriting a non-temporary file
-            if hasattr(self, "is_non_cache_file") and self.is_non_cache_file:
+            if self.is_non_cache_file:
                 msg_box = QMessageBox(self)
                 msg_box.setIcon(QMessageBox.Icon.Warning)
                 msg_box.setWindowTitle("File Overwrite Warning")
@@ -757,16 +787,13 @@ class TextboxDialog(QDialog):
 
             # Get default filename from original file if editing
             initial_path = ""
-            if hasattr(self, "non_cache_file_path") and self.non_cache_file_path:
+            if self.non_cache_file_path:
                 initial_path = self.non_cache_file_path
 
             # For EPUB and PDF files, use the displayed_file_path from the main window
             # This gives a better filename instead of the cache file path
-            main_window = self.parent()
-            if (
-                hasattr(main_window, "displayed_file_path")
-                and main_window.displayed_file_path
-            ):
+            main_window = self._main_window()
+            if main_window and main_window.displayed_file_path:
                 if main_window.selected_file_type in ["epub", "pdf", "md", "markdown"]:
                     # Use the base name of the displayed file but change extension to .txt
                     base_name = os.path.splitext(main_window.displayed_file_path)[0]
@@ -800,8 +827,8 @@ class TextboxDialog(QDialog):
         cursor = self.text_edit.textCursor()
         # Use the currently selected voice as the default
         try:
-            parent_window = self.parent()
-            if parent_window and hasattr(parent_window, "selected_voice"):
+            parent_window = self._main_window()
+            if parent_window:
                 default_voice = parent_window.selected_voice or "af_heart"
             else:
                 default_voice = "af_heart"
@@ -957,6 +984,15 @@ class abogen(QWidget):
         self.displayed_file_path = (
             None  # Add new variable to track the displayed file path
         )
+        self.save_chapters_separately = None
+        self.merge_chapters_at_end = None
+        self.input_box_cleared_by_queue = False
+        self.save_as_project = False
+        self.pdf_has_bookmarks = False
+        self.conversion_thread: ConversionThread | None = None
+        self.preview_thread: VoicePreviewThread | None = None
+        self.play_audio_thread: PlayAudioThread | None = None
+        self._show_update_check_result = False
         # Max log lines
         self.log_window_max_lines = self.config.get("log_window_max_lines", 2000)
         self.selected_chapters = set()
@@ -1091,7 +1127,8 @@ class abogen(QWidget):
 
     def initUI(self):
         self.setWindowTitle(f"{PROGRAM_NAME} v{VERSION}")
-        screen = QApplication.primaryScreen().availableGeometry()
+        screen_obj = QApplication.primaryScreen()
+        screen = screen_obj.availableGeometry() if screen_obj else self.geometry()
         width, height = 500, 800
         x = screen.x() + max((screen.width() - width) // 2, 0)
         # If desired height is larger than screen, fit to screen height
@@ -2065,7 +2102,6 @@ class abogen(QWidget):
                     item.setEnabled(False)
 
         # If current selection is disabled, switch to a valid one
-        current_text = self.subtitle_combo.currentText()
         current_idx = self.subtitle_combo.currentIndex()
         current_item = model.item(current_idx)
 
@@ -2722,7 +2758,7 @@ class abogen(QWidget):
             ]
             return " + ".join(filter(None, formula_components))
         else:
-            return self.selected_voice
+            return self.selected_voice or "af_heart"
 
     def get_selected_lang(self, voice_formula) -> str:
         if self.selected_profile_name:
@@ -2736,7 +2772,7 @@ class abogen(QWidget):
         if not selected_lang:
             m = re.search(r"\b([a-z])", voice_formula)
             selected_lang = m.group(1) if m else None
-        return selected_lang
+        return selected_lang or "a"
 
     def get_actual_subtitle_mode(self) -> str:
         return "Disabled" if not self.subtitle_combo.isEnabled() else self.subtitle_mode
@@ -4851,7 +4887,7 @@ Categories=AudioVideo;Audio;Utility;
             try:
                 remote_num = int("".join(remote_version.split(".")))
                 local_num = int("".join(local_version.split(".")))
-            except ValueError as ve:
+            except ValueError:
                 return
 
             if remote_num > local_num:
