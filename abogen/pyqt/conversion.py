@@ -526,7 +526,7 @@ class ConversionThread(QThread):
         ) = tuned
         self.log_updated.emit(
             (
-                f"- Device-tuned batch defaults for {device}: "
+                f"  - Device-tuned batch defaults for {device}: "
                 f"min/target/max {tuned[0]}/{tuned[1]}/{tuned[2]}",
                 "grey",
             )
