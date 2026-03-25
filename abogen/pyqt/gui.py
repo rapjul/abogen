@@ -2925,19 +2925,20 @@ class abogen(QWidget):
             self.conversion_thread.m4b_aac_mode = getattr(
                 self, "m4b_aac_mode", "aac_lc"
             )
+            # Pass chapter output flags whenever already known.
+            if getattr(self, "save_chapters_separately", None) is not None:
+                self.conversion_thread.save_chapters_separately = getattr(
+                    self, "save_chapters_separately", False
+                )
+            if getattr(self, "merge_chapters_at_end", None) is not None:
+                self.conversion_thread.merge_chapters_at_end = getattr(
+                    self, "merge_chapters_at_end", True
+                )
             # Pass chapter count for EPUB or PDF files
             if self.selected_file_type in ["epub", "pdf", "md", "markdown"] and hasattr(
                 self, "selected_chapters"
             ):
                 self.conversion_thread.chapter_count = len(self.selected_chapters)
-                # Pass save_chapters_separately flag if available
-                self.conversion_thread.save_chapters_separately = getattr(
-                    self, "save_chapters_separately", False
-                )
-                # Pass merge_chapters_at_end flag if available
-                self.conversion_thread.merge_chapters_at_end = getattr(
-                    self, "merge_chapters_at_end", True
-                )
             self.conversion_thread.progress_updated.connect(self.update_progress)
             self.conversion_thread.chapter_progress_updated.connect(
                 self.update_chapter_progress
@@ -4035,6 +4036,8 @@ class abogen(QWidget):
 
         if dialog.exec() == QDialog.DialogCode.Accepted:
             options = dialog.get_options()
+            if options.get("apply_scope") == "all":
+                self._set_queue_chapter_options_defaults(options)
             if (
                 hasattr(self, "conversion_thread")
                 and self.conversion_thread.isRunning()
@@ -4042,6 +4045,29 @@ class abogen(QWidget):
                 self.conversion_thread.set_chapter_options(options)
         else:
             self.cancel_conversion()
+
+    def _set_queue_chapter_options_defaults(self, options):
+        """Apply chapter options to queued items and future queue additions for this app session."""
+        save_chapters_separately = bool(options.get("save_chapters_separately", False))
+        merge_chapters_at_end = bool(options.get("merge_chapters_at_end", True))
+
+        self.queue_chapter_options_defaults = {
+            "save_chapters_separately": save_chapters_separately,
+            "merge_chapters_at_end": merge_chapters_at_end,
+        }
+        self.save_chapters_separately = save_chapters_separately
+        self.merge_chapters_at_end = merge_chapters_at_end
+
+        for item in getattr(self, "queued_items", []):
+            item.save_chapters_separately = save_chapters_separately
+            item.merge_chapters_at_end = merge_chapters_at_end
+
+        self.update_log(
+            (
+                "Chapter options will be applied to all queued items and future queue additions in this session.",
+                "grey",
+            )
+        )
 
     def apply_theme(self, theme):
 
