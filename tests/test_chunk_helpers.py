@@ -83,3 +83,21 @@ def test_chunk_text_display_preserves_whitespace() -> None:
     assert second_display == "Third paragraph."
     first_original = str(chunks[0].get("original_text") or "")
     assert first_original.endswith("\n\n")
+
+
+def test_chunk_text_normalized_unwraps_single_word_emphasis_only() -> None:
+    text = "Say *hello* but keep a*b and foo_bar."
+
+    chunks = chunk_text(
+        chapter_index=0,
+        chapter_title="Chapter 1",
+        text=text,
+        level="sentence",
+    )
+
+    assert len(chunks) == 1
+    normalized_value = str(chunks[0].get("normalized_text") or "")
+    assert "*hello*" not in normalized_value
+    assert "hello" in normalized_value.lower()
+    assert "*" in normalized_value
+    assert "_" in normalized_value

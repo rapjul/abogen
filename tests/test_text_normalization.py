@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from unittest.mock import patch
 
 import pytest
@@ -67,6 +68,42 @@ def test_tilde_is_removed_but_em_dash_is_preserved():
     normalized = _normalize_text("Wait ~ now — please")
     assert "~" not in normalized
     assert "—" in normalized
+
+
+def test_paired_asterisk_and_underscore_markers_are_removed_for_single_words() -> None:
+    normalized = _normalize_text(
+        "*alpha* **bravo** ***charlie*** _delta_ __echo__ ___foxtrot___"
+    )
+    folded = normalized.lower()
+    assert "*" not in normalized
+    assert "_" not in normalized
+    assert "alpha" in folded
+    assert "bravo" in folded
+    assert "charlie" in folded
+    assert "delta" in folded
+    assert "echo" in folded
+    assert "foxtrot" in folded
+
+
+def test_multi_word_emphasis_and_unmatched_markers_are_preserved() -> None:
+    normalized = _normalize_text(
+        "*two words* and *dangling and dangling* plus __mismatch_"
+    )
+    assert re.search(r"\*\s*two words\s*\*", normalized)
+    assert re.search(r"\*\s*dangling and dangling\s*\*", normalized)
+    assert "mismatch" in normalized
+    assert "_" in normalized
+
+
+def test_emphasis_removal_does_not_touch_operators_or_snake_case() -> None:
+    normalized = _normalize_text(
+        "Keep a*b and foo_bar unchanged while *focus* is unwrapped"
+    )
+    folded = normalized.lower()
+    assert "*" in normalized
+    assert "_" in normalized
+    assert "*focus*" not in normalized
+    assert "focus" in folded
 
 
 def test_normalization_preserves_spacing_around_quotes_and_hyphen():

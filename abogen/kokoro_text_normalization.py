@@ -624,6 +624,15 @@ ELLIPSIS_SUFFIXES = ("...", "…")
 _LINE_SPLIT_RE = re.compile(r"(\n+)")
 _PRE_TTS_REMOVED_CHARS = "~`|\\"
 _PRE_TTS_REMOVE_TRANSLATION_TABLE = str.maketrans("", "", _PRE_TTS_REMOVED_CHARS)
+_SINGLE_WORD_TOKEN_PATTERN = r"[^\W_]+(?:['’-][^\W_]+)*"
+_MARKDOWN_STAR_EMPHASIS_RE = re.compile(
+    rf"(?<!\w)(?P<marker>\*{{1,3}})(?P<word>{_SINGLE_WORD_TOKEN_PATTERN})(?P=marker)(?!\w)",
+    re.UNICODE,
+)
+_MARKDOWN_UNDERSCORE_EMPHASIS_RE = re.compile(
+    rf"(?<![0-9A-Za-z_])(?P<marker>_{{1,3}})(?P<word>{_SINGLE_WORD_TOKEN_PATTERN})(?P=marker)(?![0-9A-Za-z_])",
+    re.UNICODE,
+)
 
 TITLE_ABBREVIATIONS = {
     "mr": "mister",
@@ -700,6 +709,19 @@ def _cleanup_spacing(text: str) -> str:
     # Normalize multiple spaces.
     text = re.sub(r"\s{2,}", " ", text)
     return text.strip()
+
+
+def _normalize_markdown_emphasis_single_words(text: str) -> str:
+    """Remove paired markdown emphasis markers around single words only."""
+    if not text:
+        return text
+
+    def _unwrap(match: re.Match[str]) -> str:
+        return str(match.group("word"))
+
+    text = _MARKDOWN_STAR_EMPHASIS_RE.sub(_unwrap, text)
+    text = _MARKDOWN_UNDERSCORE_EMPHASIS_RE.sub(_unwrap, text)
+    return text
 
 
 _ROMAN_VALUE_MAP = {
@@ -2319,6 +2341,7 @@ def normalize_for_pipeline(
 
     mode = str(runtime_settings.get("normalization_apostrophe_mode", "spacy")).lower()
     normalized = text.translate(_PRE_TTS_REMOVE_TRANSLATION_TABLE)
+    normalized = _normalize_markdown_emphasis_single_words(normalized)
 
     # Pre-normalization that must happen before number/url parsing.
     if runtime_settings.get("normalization_numbers", True):
