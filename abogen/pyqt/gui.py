@@ -3539,7 +3539,11 @@ class abogen(QWidget):
             self._preview_cleanup()
             return
 
-        if hasattr(self, "preview_thread") and self.preview_thread.isRunning():
+        if (
+            hasattr(self, "preview_thread")
+            and self.preview_thread is not None
+            and self.preview_thread.isRunning()
+        ):
             return
 
         # Check for cache first
@@ -3663,7 +3667,11 @@ class abogen(QWidget):
 
     def _play_preview_audio(self, from_cache=True):  # from_cache default is now False
         # If preview_thread is the source, get temp_wav from it
-        if hasattr(self, "preview_thread") and not from_cache:
+        if (
+            hasattr(self, "preview_thread")
+            and self.preview_thread is not None
+            and not from_cache
+        ):
             temp_wav = self.preview_thread.temp_wav
         elif from_cache:  # This case is now handled before calling _play_preview_audio
             cached_path = self._get_preview_cache_path()
@@ -3705,6 +3713,7 @@ class abogen(QWidget):
             if (
                 not from_cache
                 and hasattr(self, "preview_thread")
+                and self.preview_thread is not None
                 and hasattr(self.preview_thread, "temp_wav")
                 and self.preview_thread.temp_wav == temp_wav
             ):

@@ -155,7 +155,10 @@ def test_show_queue_summary_renders_html_table_with_elapsed(monkeypatch) -> None
     assert "00:02:17" in html_output
     assert "Cancelled (partial)" in html_output
     assert "00:00:12 (partial)" in html_output
-    assert "Elapsed values for queued items that did not complete are partial." in html_output
+    assert (
+        "Elapsed values for queued items that did not complete are partial."
+        in html_output
+    )
 
 
 def test_show_queue_summary_marks_not_started_items(monkeypatch) -> None:
@@ -180,3 +183,17 @@ def test_show_queue_summary_marks_not_started_items(monkeypatch) -> None:
     assert html_output is not None
     assert "Not Started" in html_output
     assert "N/A (not started)" in html_output
+
+
+def test_preview_voice_handles_none_preview_thread_without_attribute_error() -> None:
+    window = gui_module.abogen.__new__(gui_module.abogen)
+    window.preview_playing = False
+    window.preview_thread = None
+
+    def _raise_sentinel():
+        raise RuntimeError("sentinel")
+
+    window._get_preview_cache_path = _raise_sentinel
+
+    with pytest.raises(RuntimeError, match="sentinel"):
+        window.preview_voice()
