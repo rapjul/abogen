@@ -3021,10 +3021,11 @@ class abogen(QWidget):
             "<th style='border:1px solid #666; text-align:left;'>Format</th>"
             "<th style='border:1px solid #666; text-align:left;'>Subtitle Mode</th>"
             "<th style='border:1px solid #666; text-align:left;'>Method</th>"
-            "<th style='border:1px solid #666; text-align:left;'>Silent Gaps</th>"
-            "<th style='border:1px solid #666; text-align:left;'>Repl. Newlines</th>"
-            "<th style='border:1px solid #666; text-align:left;'>Split Chapters</th>"
-            "<th style='border:1px solid #666; text-align:left;'>Merge End</th>"
+            # "<th style='border:1px solid #666; text-align:left;'>Silent Gaps</th>"
+            # "<th style='border:1px solid #666; text-align:left;'>Repl. Newlines</th>"
+            # "<th style='border:1px solid #666; text-align:left;'>Split Chapters</th>"
+            # "<th style='border:1px solid #666; text-align:left;'>Merge End</th>"
+            # "<th style='border:1px solid #666; text-align:left;'>Word Sub.</th>"
             "<th style='border:1px solid #666; text-align:left;'>Status</th>"
             "<th style='border:1px solid #666; text-align:left;'>Elapsed</th>"
             "</tr>"
@@ -3064,6 +3065,7 @@ class abogen(QWidget):
             eff_output = getattr(item, "output_path", "Unknown")
             eff_save_sep = getattr(item, "save_chapters_separately", None)
             eff_merge = getattr(item, "merge_chapters_at_end", None)
+            eff_word_sub = getattr(item, "word_substitutions_enabled", False)
             status_key = idx - 1
             row_status = self.queue_item_status.get(status_key, "Not Started")
             row_elapsed_seconds = self.queue_item_elapsed_seconds.get(status_key)
@@ -3099,10 +3101,11 @@ class abogen(QWidget):
                 eff_format,
                 eff_sub_mode,
                 eff_method,
-                str(eff_silent),
-                str(eff_newlines),
-                "N/A" if eff_save_sep is None else str(eff_save_sep),
-                "N/A" if eff_merge is None else str(eff_merge),
+                # str(eff_silent),
+                # str(eff_newlines),
+                # "N/A" if eff_save_sep is None else str(eff_save_sep),
+                # "N/A" if eff_merge is None else str(eff_merge),
+                # str(eff_word_sub),
                 status_text,
                 elapsed_text,
             ]
