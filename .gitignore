@@ -281,3 +281,5 @@ test_assets/
 dev_notes/
 .claude/
 .vscode/settings.json
+
+.specstory/
