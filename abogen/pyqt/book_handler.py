@@ -8,6 +8,7 @@ import re
 import ebooklib
 import fitz
 from PyQt6.QtCore import (
+    QEvent,
     QSize,
     Qt,
     QThread,
@@ -20,6 +21,7 @@ from PyQt6.QtWidgets import (
     QDialogButtonBox,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMenu,
     QPushButton,
     QSplitter,
@@ -138,7 +140,8 @@ class HandlerDialog(QDialog):
 
         # Build treeview
         self.treeWidget = QTreeWidget(self)
-        self.treeWidget.setHeaderHidden(True)
+        self.treeWidget.setHeaderHidden(False)
+        self.treeWidget.setHeaderLabels([str(book_name)])
         self.treeWidget.setSelectionMode(QTreeWidget.SelectionMode.ExtendedSelection)
         self.treeWidget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.treeWidget.customContextMenuRequested.connect(self.on_tree_context_menu)
@@ -152,8 +155,8 @@ class HandlerDialog(QDialog):
         # Also maintain refs for structure
         self.processed_nav_structure = []
 
-        # Add a placeholder "Information" item so the tree isn't empty immediately
-        info_item = QTreeWidgetItem(self.treeWidget, ["Information"])
+        # Add a placeholder "Book Metadata" item so the tree isn't empty immediately
+        info_item = QTreeWidgetItem(self.treeWidget, ["Book Metadata"])
         info_item.setData(0, Qt.ItemDataRole.UserRole, "info:bookinfo")
         info_item.setFlags(info_item.flags() & ~Qt.ItemFlag.ItemIsUserCheckable)
         font = info_item.font(0)
@@ -394,7 +397,7 @@ class HandlerDialog(QDialog):
     def _build_tree(self):
         self.treeWidget.clear()
 
-        info_item = QTreeWidgetItem(self.treeWidget, ["Information"])
+        info_item = QTreeWidgetItem(self.treeWidget, ["Book Metadata"])
         info_item.setData(0, Qt.ItemDataRole.UserRole, "info:bookinfo")
         info_item.setFlags(info_item.flags() & ~Qt.ItemFlag.ItemIsUserCheckable)
         font = info_item.font(0)
@@ -578,36 +581,33 @@ class HandlerDialog(QDialog):
         select_layout.addWidget(self.deselect_all_btn)
         buttons_layout.addLayout(select_layout)
 
-        parent_layout = QHBoxLayout()
-        self.select_parents_btn = QPushButton("Select parents", self)
-        self.select_parents_btn.clicked.connect(self.select_parent_chapters)
-        self.select_parents_btn.setToolTip(
-            "Select only top-level parent entries in the chapter tree."
-        )
-        self.deselect_parents_btn = QPushButton("Unselect parents", self)
-        self.deselect_parents_btn.clicked.connect(self.deselect_parent_chapters)
-        self.deselect_parents_btn.setToolTip(
-            "Clear selection from top-level parent entries."
-        )
-        parent_layout.addWidget(self.select_parents_btn)
-        parent_layout.addWidget(self.deselect_parents_btn)
-        buttons_layout.addLayout(parent_layout)
 
-        expand_layout = QHBoxLayout()
-        self.expand_all_btn = QPushButton("Expand All", self)
-        self.expand_all_btn.clicked.connect(self.treeWidget.expandAll)
-        self.expand_all_btn.setToolTip("Expand all items in the chapter tree.")
-        self.collapse_all_btn = QPushButton("Collapse All", self)
-        self.collapse_all_btn.clicked.connect(self.treeWidget.collapseAll)
-        self.collapse_all_btn.setToolTip("Collapse all items in the chapter tree.")
-        expand_layout.addWidget(self.expand_all_btn)
-        expand_layout.addWidget(self.collapse_all_btn)
-        buttons_layout.addLayout(expand_layout)
 
         leftLayout = QVBoxLayout()
         leftLayout.setContentsMargins(0, 0, 5, 0)
         leftLayout.addLayout(buttons_layout)
+
+        self.instructions_label = QLabel(
+            "Use <b>Y</b> or <b>]</b> to check and move next. "
+            "Use <b>N</b> or <b>[</b> to uncheck and move next.<br/>"
+            "Press <b>Space</b> to toggle checked state on highlighted items.",
+            self,
+        )
+        self.instructions_label.setWordWrap(True)
+        self.instructions_label.setStyleSheet("color: #888888; font-size: 12px; margin-bottom: 6px;")
+        leftLayout.addWidget(self.instructions_label)
+
+        self.count_label = QLabel("0 of 0 items selected", self)
+        self.count_label.setStyleSheet("font-weight: bold; font-size: 14px; margin-bottom: 4px;")
+        leftLayout.addWidget(self.count_label)
+
+        self.search_bar = QLineEdit(self)
+        self.search_bar.setPlaceholderText("Search chapters...")
+        self.search_bar.textChanged.connect(self.filter_tree)
+        leftLayout.addWidget(self.search_bar)
+
         leftLayout.addWidget(self.treeWidget)
+        self.treeWidget.installEventFilter(self)
 
         checkbox_text = (
             "Save each chapter separately"
@@ -662,7 +662,98 @@ class HandlerDialog(QDialog):
         mainLayout.addWidget(self.splitter)
         self.setLayout(mainLayout)
 
+    def _update_count_label(self):
+        if not hasattr(self, "count_label") or not self.count_label:
+            return
+
+        count = 0
+        total = 0
+        iterator = QTreeWidgetItemIterator(self.treeWidget)
+        while iterator.value():
+            item = iterator.value()
+            if item is None:
+                iterator += 1
+                continue
+            if item.flags() & Qt.ItemFlag.ItemIsUserCheckable:
+                total += 1
+                if item.checkState(0) == Qt.CheckState.Checked:
+                    count += 1
+            iterator += 1
+
+        self.count_label.setText(f"{count} of {total} items selected")
+
+    def filter_tree(self, text):
+        search_text = text.lower()
+        iterator = QTreeWidgetItemIterator(self.treeWidget)
+        while iterator.value():
+            item = iterator.value()
+            if item is None:
+                iterator += 1
+                continue
+
+            # Simple text filter
+            if search_text in item.text(0).lower():
+                item.setHidden(False)
+                # Show parents
+                parent = item.parent()
+                while parent:
+                    parent.setHidden(False)
+                    parent = parent.parent()
+            else:
+                item.setHidden(True)
+            iterator += 1
+
+    def eventFilter(self, obj, event):
+        if obj == self.treeWidget and event.type() == QEvent.Type.KeyPress:
+            key = event.key()
+
+            is_check_key = key in (
+                Qt.Key.Key_Y,
+                Qt.Key.Key_BracketRight,
+                Qt.Key.Key_Right,
+            )
+            is_uncheck_key = key in (
+                Qt.Key.Key_N,
+                Qt.Key.Key_BracketLeft,
+                Qt.Key.Key_Left,
+            )
+
+            if is_check_key or is_uncheck_key:
+                current_item = self.treeWidget.currentItem()
+                if current_item and (
+                    current_item.flags() & Qt.ItemFlag.ItemIsUserCheckable
+                ):
+                    state = (
+                        Qt.CheckState.Checked
+                        if is_check_key
+                        else Qt.CheckState.Unchecked
+                    )
+                    current_item.setCheckState(0, state)
+
+                    next_item = self.treeWidget.itemBelow(current_item)
+                    if next_item:
+                        self.treeWidget.setCurrentItem(next_item)
+                return True
+
+            if key == Qt.Key.Key_Space:
+                selected_items = self.treeWidget.selectedItems()
+                if selected_items:
+                    first_state = selected_items[0].checkState(0)
+                    new_state = (
+                        Qt.CheckState.Checked
+                        if first_state
+                        in (Qt.CheckState.Unchecked, Qt.CheckState.PartiallyChecked)
+                        else Qt.CheckState.Unchecked
+                    )
+                    for item in selected_items:
+                        if item.flags() & Qt.ItemFlag.ItemIsUserCheckable:
+                            item.setCheckState(0, new_state)
+                return True
+
+        return super().eventFilter(obj, event)
+
     def _update_checkbox_states(self):
+        self._update_count_label()
         if (
             not hasattr(self, "save_chapters_checkbox")
             or not self.save_chapters_checkbox
@@ -1003,6 +1094,8 @@ class HandlerDialog(QDialog):
                 pub_info.append(f"Year: {pub_year}")
             html_content += f"<p style='text-align: center;'>{' | '.join(pub_info)}</p>"
 
+        html_content += "<hr/>"
+        html_content += "<p style='text-align: center; color: #888888; font-style: italic;'>Note: This item just shows the book metadata and is not an actual chapter that will be included in the audio book.</p>"
         html_content += "<hr/>"
 
         description = self.book_metadata.get("description")
