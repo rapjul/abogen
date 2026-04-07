@@ -22,6 +22,7 @@ _SYMBOL_SEPARATOR_RE = re.compile(r"[#\-_=*~`^|.:+<>/\\]{3,}")
 _MOTIF_ALLOWED_RE = re.compile(r"[A-Za-z0-9#\-_=*~.:+|/\\]+")
 _MOTIF_SPLIT_RE = re.compile(r"[#\-_=*~.:+|/\\]+")
 _SEPARATOR_CHARS = set("#-_=*~`^|.:+<>/\\")
+_URL_RE = re.compile(r"https?://\S+|www\.\S+")
 
 
 def _load_environment() -> None:
@@ -398,6 +399,8 @@ def clean_text(text, *args, **kwargs):
     # Load replace_single_newlines from config
     cfg = load_config()
     replace_single_newlines = cfg.get("replace_single_newlines", False)
+    # Remove URLs
+    text = _URL_RE.sub("", text)
     # Collapse all whitespace (excluding newlines) into single spaces per line and trim edges
     lines = [_INLINE_WHITESPACE_RE.sub(" ", line).strip() for line in text.splitlines()]
     lines = _suppress_decorative_separator_lines(lines)

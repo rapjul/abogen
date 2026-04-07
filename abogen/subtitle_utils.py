@@ -35,6 +35,7 @@ _LINUX_CONTROL_CHARS_PATTERN = re.compile(
 )  # Linux: exclude \x00 for separate handling
 _MACOS_ILLEGAL_CHARS_PATTERN = re.compile(r"[:]")
 _LINUX_ILLEGAL_CHARS_PATTERN = re.compile(r"[/\x00]")
+_URL_PATTERN = re.compile(r"https?://\S+|www\.\S+")
 
 
 def clean_subtitle_text(text):
@@ -60,6 +61,8 @@ def calculate_text_length(text):
 
 
 def clean_text(text, *args, **kwargs):
+    # Remove URLs
+    text = _URL_PATTERN.sub("", text)
     # Remove metadata tags first
     text = _METADATA_TAG_PATTERN.sub("", text)
     # Load replace_single_newlines from config
