@@ -487,9 +487,12 @@ class ConversionThread(QThread):
     def _iter_tts_results_for_segments(
         self, tts, segments, loaded_voice, speed, split_pattern
     ):
+        from abogen.word_substitution import convert_roman_numerals_to_numbers
+
         for segment in segments:
+            tts_segment = convert_roman_numerals_to_numbers(segment)
             for result in tts(
-                segment,
+                tts_segment,
                 voice=loaded_voice,
                 speed=speed,
                 split_pattern=split_pattern,

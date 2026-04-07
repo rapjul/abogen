@@ -245,3 +245,67 @@ def fix_punctuation(text):
         text = text.replace(old_char, new_char)
 
     return text
+
+
+def convert_roman_numerals_to_numbers(text):
+    """
+    Convert Roman numerals accompanying typical book terms into Arabic numbers.
+    This helps TTS engines correctly read 'Chapter IV' as 'Chapter 4' instead of 'Chapter iv'.
+    """
+    roman_values = {
+        "I": 1,
+        "V": 5,
+        "X": 10,
+        "L": 50,
+        "C": 100,
+        "D": 500,
+        "M": 1000,
+    }
+
+    # Expanded list of safe prefixes commonly used with Roman numerals, including abbreviations
+    prefixes = (
+        r"chapter|ch\.?|"
+        r"part|pt\.?|"
+        r"book|bk\.?|"
+        r"volume|vol\.?|"
+        r"section|sec\.?|"
+        r"episode|ep\.?|"
+        r"tier|level|lvl\.?|act|phase|"
+        r"scene|canto|stanza|appendix|appx\.?|annex|"
+        r"article|art\.?|title|amendment|amend\.?|issue|edition|ed\.?|"
+        r"class|type|grade|stage|arc|season|szn\.?|world|zone|"
+        r"quest|war"
+    )
+    roman_regex = rf"(?i)\b(?:{prefixes})\s+([IVXLCDMivxlcdm]+)\b"
+
+    def roman_to_int(roman_str):
+        roman_str = roman_str.upper()
+        # Basic validation (prevents 'DIM', 'MIX' which are valid roman characters but often normal words,
+        # though our preceding-word check largely mitigates this)
+        if not re.fullmatch(
+            r"M{0,4}(CM|CD|D?C{0,3})(XC|XL|L?X{0,3})(IX|IV|V?I{0,3})", roman_str
+        ):
+            return None
+
+        total = 0
+        prev_value = 0
+        for char in reversed(roman_str):
+            value = roman_values[char]
+            if value < prev_value:
+                total -= value
+            else:
+                total += value
+                prev_value = value
+        return total
+
+    def replace_match(match):
+        full_match = match.group(0)
+        roman_part = match.group(1)
+
+        value = roman_to_int(roman_part)
+        if value is not None:
+            # Replace only the roman numerals part with the number
+            return full_match[: len(full_match) - len(roman_part)] + str(value)
+        return full_match
+
+    return re.sub(roman_regex, replace_match, text)
