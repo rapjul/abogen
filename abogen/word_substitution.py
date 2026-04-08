@@ -309,3 +309,241 @@ def convert_roman_numerals_to_numbers(text):
         return full_match
 
     return re.sub(roman_regex, replace_match, text)
+
+
+def expand_common_abbreviations(text):
+    """
+    Expand common abbreviations for TTS processing so they are read out correctly,
+    without changing the underlying subtitle text.
+    """
+    processed_text = text
+
+    # Handle Japan Railways specifically before general abbreviations to prevent "JR" turning into "Junior"
+    processed_text = re.sub(
+        r"\bJR\s+(East|West|Central|Hokkaido|Shikoku|Kyushu|Freight)\b",
+        r"Japan Railways \1",
+        processed_text,
+    )
+
+    abbreviations = {
+        # Titles
+        r"\bDr\.?(?!\w)": "Doctor",
+        r"\bMr\.?(?!\w)": "Mister",
+        r"\bMrs\.?(?!\w)": "Missus",
+        r"\bMs\.?(?!\w)": "Miss",
+        r"\bProf\.?(?!\w)": "Professor",
+        r"\bPres\.?(?!\w)": "President",
+        r"\bDir\.?(?!\w)": "Director",
+        r"\bHon\.?(?!\w)": "Honorable",
+        r"\bCllr\.?(?!\w)": "Councillor",
+        r"\bRev\.?(?!\w)": "Reverend",
+        r"\bSr\.?(?!\w)": "Senior",
+        r"\bJr\.?(?!\w)": "Junior",
+        r"\bAssoc\.?(?!\w)": "Associate",
+        r"\bAsst\.?(?!\w)": "Assistant",
+        # Military
+        r"\bGen\.?(?!\w)": "General",
+        r"\bAdm\.?(?!\w)": "Admiral",
+        r"\bCol\.?(?!\w)": "Colonel",
+        r"\bMaj\.?(?!\w)": "Major",
+        r"\bCapt\.?(?!\w)": "Captain",
+        r"\bCmdr\.?(?!\w)": "Commander",
+        r"\bLieut\.?(?!\w)": "Lieutenant",
+        r"\bLt\.?(?!\w)": "Lieutenant",
+        r"\bSgt\.?(?!\w)": "Sergeant",
+        r"\bCpl\.?(?!\w)": "Corporal",
+        r"\bPvt\.?(?!\w)": "Private",
+        # Government & Politics
+        r"\bGov\.?(?!\w)": "Governor",
+        r"\bSen\.?(?!\w)": "Senator",
+        r"\bRep\.?(?!\w)": "Representative",
+        r"\bSupt\.?(?!\w)": "Superintendent",
+        # Religion
+        r"\bSt\.?(?!\w)": "Saint",  # 'Street' could also be St but 'Saint' is more commonly abbreviated before names
+        # Geography
+        r"\bMt\.?(?!\w)": "Mount",
+        # Address types
+        r"\bAve\.?(?!\w)": "Avenue",
+        r"\bRd\.?(?!\w)": "Road",
+        r"\bBlvd\.?(?!\w)": "Boulevard",
+        r"\bLn\.?(?!\w)": "Lane",
+        r"\bSq\.?(?!\w)": "Square",
+        r"\bPl\.?(?!\w)": "Place",
+        r"\bCt\.?(?!\w)": "Court",
+        r"\bSte\.?(?!\w)": "Suite",
+        # Science & Math
+        r"\bFig\.?(?!\w)": "Figure",
+        r"\bEq\.?(?!\w)": "Equation",
+        r"\bApprox\.?(?!\w)": "Approximately",
+        r"\bDept\.?(?!\w)": "Department",
+        r"\bVol\.?(?!\w)": "Volume",
+        r"\bNo\.?(?!\w)": "Number",
+        # Common Latin / Academic abbreviations
+        r"\ba\.?k\.?a\.?(?!\w)": "also known as",
+        r"\bc\.?f\.?(?!\w)": "compare",
+        r"\betc\.?(?!\w)": "et cetera",
+        r"\be\.?g\.?(?!\w)": "for example,",
+        r"\bet al\.?(?!\w)": "and others",
+        r"\bi\.?e\.?(?!\w)": "that is",
+        r"\bn\.?b\.?(?!\w)": "note well",
+        r"\bv\.?i\.?z\.?(?!\w)": "namely",
+        r"\b[Vv]s?\.?(?!\w)": "versus",
+        # Business & Corporate
+        r"\bInc\.?(?!\w)": "Incorporated",
+        r"\bCorp\.?(?!\w)": "Corporation",
+        r"\bLtd\.?(?!\w)": "Limited",
+        r"\bCo\.?(?!\w)": "Company",
+        r"\bUniv\.?(?!\w)": "University",
+        r"\bInst\.?(?!\w)": "Institute",
+        r"\bAssn\.?(?!\w)": "Association",
+        r"\bBros\.?(?!\w)": "Brothers",
+        # French Titles
+        r"\bMme\.?(?!\w)": "Madame",
+        r"\bMlle\.?(?!\w)": "Mademoiselle",
+        # # Spanish Titles
+        # r"\bSr\.?(?!\w)": "Señor",
+        # r"\bSra\.?(?!\w)": "Señora",
+        # r"\bSrita\.?(?!\w)": "Señorita",
+        # Weights & Measures - Imperial
+        r"(?:\b|(?<=\d))lbs\.?(?!\w)": "pounds",
+        r"(?:\b|(?<=\d))oz\.?(?!\w)": "ounces",
+        r"(?:\b|(?<=\d))ft\.?(?!\w)": "feet",
+        r"(?:\b|(?<=\d))in\.?(?!\w)": "inches",
+        r"(?:\b|(?<=\d))mi\.?(?!\w)": "miles",
+        # Measurements - Imperial
+        r"(?:\b|(?<=\d))mph\.?(?!\w)": "miles per hour",
+        r"(?:\b|(?<=\d))kn\.?(?!\w)": "knots",
+        r"(?:\b|(?<=\d))fps\.?(?!\w)": "feet per second",
+        r"(?:\b|(?<=\d))hp\.?(?!\w)": "horsepower",
+        r"(?:\b|(?<=\d))psi\.?(?!\w)": "pounds per square inch",
+        # More Weights & Measures (Metric + Speed)
+        r"(?:\b|(?<=\d))km\.?(?!\w)": "kilometers",
+        r"(?:\b|(?<=\d))kg\.?(?!\w)": "kilograms",
+        r"(?:\b|(?<=\d))mg\.?(?!\w)": "milligrams",
+        r"(?:\b|(?<=\d))mm\.?(?!\w)": "millimeters",
+        r"(?:\b|(?<=\d))cm\.?(?!\w)": "centimeters",
+        # Measurements - Metric
+        r"(?:\b|(?<=\d))kph\.?(?!\w)": "kilometers per hour",
+        r"(?:\b|(?<=\d))kmph\.?(?!\w)": "kilometers per hour",
+        # Physics
+        r"(?:\b|(?<=\d))rpm\.?(?!\w)": "revolutions per minute",
+        r"(?:\b|(?<=\d))rps\.?(?!\w)": "revolutions per second",
+        r"(?:\b|(?<=\d))bps\.?(?!\w)": "beats per second",
+        r"(?:\b|(?<=\d))bpm\.?(?!\w)": "beats per minute",
+        r"(?:\b|(?<=\d))hz\.?(?!\w)": "hertz",
+        r"(?:\b|(?<=\d))khz\.?(?!\w)": "kilohertz",
+        r"(?:\b|(?<=\d))mhz\.?(?!\w)": "megahertz",
+        r"(?:\b|(?<=\d))ghz\.?(?!\w)": "gigahertz",
+        # Time (requires preceding digit so "I am" isn't matched)
+        r"(?<=\d)\s*a\.?m\.?(?=\s|[^\w]|$)": " A M",
+        r"(?<=\d)\s*p\.?m\.?(?=\s|[^\w]|$)": " P M",
+        # Months
+        r"\bJan\.?(?!\w)": "January",
+        r"\bFeb\.?(?!\w)": "February",
+        r"\bMar\.?(?!\w)": "March",
+        r"\bApr\.?(?!\w)": "April",
+        r"\bJun\.?(?!\w)": "June",
+        r"\bJul\.?(?!\w)": "July",
+        r"\bAug\.?(?!\w)": "August",
+        r"\bSept?\.?(?!\w)": "September",
+        r"\bOct\.?(?!\w)": "October",
+        r"\bNov\.?(?!\w)": "November",
+        r"\bDec\.?(?!\w)": "December",
+        # Days of the Week
+        r"\bMon\.?(?!\w)": "Monday",
+        r"\bTues?\.?(?!\w)": "Tuesday",
+        r"\bWed\.?(?!\w)": "Wednesday",
+        r"\bThu\.?(?!\w)": "Thursday",
+        r"\bThurs?\.?(?!\w)": "Thursday",
+        r"\bFri\.?(?!\w)": "Friday",
+        r"\bSat\.?(?!\w)": "Saturday",
+        r"\bSun\.?(?!\w)": "Sunday",
+        # Directional / Compass
+        r"\bN\.?(?!\w)": "North",
+        r"\bNW\.?(?!\w)": "Northwest",
+        r"\bNNE\.?(?!\w)": "North-Northeast",
+        r"\bNE\.?(?!\w)": "Northeast",
+        r"\bENE\.?(?!\w)": "East-Northeast",
+        r"\bE\.?(?!\w)": "East",
+        r"\bESE\.?(?!\w)": "East-Southeast",
+        r"\bSE\.?(?!\w)": "Southeast",
+        r"\bSSE\.?(?!\w)": "South-Southeast",
+        r"\bS\.?(?!\w)": "South",
+        r"\bSSW\.?(?!\w)": "South-Southwest",
+        r"\bSW\.?(?!\w)": "Southwest",
+        r"\bWSW\.?(?!\w)": "West-Southwest",
+        r"\bW\.?(?!\w)": "West",
+        r"\bWNW\.?(?!\w)": "West-Northwest",
+    }
+
+    for pattern, replacement in abbreviations.items():
+        # Negative lookbehind to prevent replacing mid-word if boundary somehow fails
+        # Use simple ignorecase RegEx replace
+        processed_text = re.sub(
+            pattern, replacement, processed_text, flags=re.IGNORECASE
+        )
+
+    case_sensitive_abbreviations = {
+        # Data transfer rates (bits)
+        r"(?:\b|(?<=\d))[Kk]bps\.?(?!\w)": "kilobits per second",
+        r"(?:\b|(?<=\d))[Mm]bps\.?(?!\w)": "megabits per second",
+        r"(?:\b|(?<=\d))[Gg]bps\.?(?!\w)": "gigabits per second",
+        r"(?:\b|(?<=\d))[Tt]bps\.?(?!\w)": "terabits per second",
+        r"(?:\b|(?<=\d))[Pp]bps\.?(?!\w)": "petabits per second",
+        r"(?:\b|(?<=\d))[Ee]bps\.?(?!\w)": "exabits per second",
+        r"(?:\b|(?<=\d))[Zz]bps\.?(?!\w)": "zettabits per second",
+        r"(?:\b|(?<=\d))[Yy]bps\.?(?!\w)": "yottabits per second",
+        r"(?:\b|(?<=\d))[Kk]b\/s\.?(?!\w)": "kilobits per second",
+        r"(?:\b|(?<=\d))[Mm]b\/s\.?(?!\w)": "megabits per second",
+        r"(?:\b|(?<=\d))[Gg]b\/s\.?(?!\w)": "gigabits per second",
+        r"(?:\b|(?<=\d))[Tt]b\/s\.?(?!\w)": "terabits per second",
+        r"(?:\b|(?<=\d))[Pp]b\/s\.?(?!\w)": "petabits per second",
+        r"(?:\b|(?<=\d))[Ee]b\/s\.?(?!\w)": "exabits per second",
+        r"(?:\b|(?<=\d))[Zz]b\/s\.?(?!\w)": "zettabits per second",
+        r"(?:\b|(?<=\d))[Yy]b\/s\.?(?!\w)": "yottabits per second",
+        # Data transfer rates (bytes)
+        r"(?:\b|(?<=\d))[Kk]Bps\.?(?!\w)": "kilobytes per second",
+        r"(?:\b|(?<=\d))[Mm]Bps\.?(?!\w)": "megabytes per second",
+        r"(?:\b|(?<=\d))[Gg]Bps\.?(?!\w)": "gigabytes per second",
+        r"(?:\b|(?<=\d))[Tt]Bps\.?(?!\w)": "terabytes per second",
+        r"(?:\b|(?<=\d))[Pp]Bps\.?(?!\w)": "petabytes per second",
+        r"(?:\b|(?<=\d))[Ee]Bps\.?(?!\w)": "exabytes per second",
+        r"(?:\b|(?<=\d))[Zz]Bps\.?(?!\w)": "zettabytes per second",
+        r"(?:\b|(?<=\d))[Yy]Bps\.?(?!\w)": "yottabytes per second",
+        r"(?:\b|(?<=\d))[Kk]B\/s\.?(?!\w)": "kilobytes per second",
+        r"(?:\b|(?<=\d))[Mm]B\/s\.?(?!\w)": "megabytes per second",
+        r"(?:\b|(?<=\d))[Gg]B\/s\.?(?!\w)": "gigabytes per second",
+        r"(?:\b|(?<=\d))[Tt]B\/s\.?(?!\w)": "terabytes per second",
+        r"(?:\b|(?<=\d))[Pp]B\/s\.?(?!\w)": "petabytes per second",
+        r"(?:\b|(?<=\d))[Ee]B\/s\.?(?!\w)": "exabytes per second",
+        r"(?:\b|(?<=\d))[Zz]B\/s\.?(?!\w)": "zettabytes per second",
+        r"(?:\b|(?<=\d))[Yy]B\/s\.?(?!\w)": "yottabytes per second",
+        # Data sizes (bytes)
+        r"(?:\b|(?<=\d))KB(?!\w)": "kilobytes",
+        r"(?:\b|(?<=\d))MB(?!\w)": "megabytes",
+        r"(?:\b|(?<=\d))GB(?!\w)": "gigabytes",
+        r"(?:\b|(?<=\d))TB(?!\w)": "terabytes",
+        r"(?:\b|(?<=\d))PB(?!\w)": "petabytes",
+        r"(?:\b|(?<=\d))EB(?!\w)": "exabytes",
+        r"(?:\b|(?<=\d))ZB(?!\w)": "zettabytes",
+        r"(?:\b|(?<=\d))YB(?!\w)": "yottabytes",
+        # Data sizes (bits)
+        r"(?:\b|(?<=\d))Kb(?!\w)": "kilobits",
+        r"(?:\b|(?<=\d))Mb(?!\w)": "megabits",
+        r"(?:\b|(?<=\d))Gb(?!\w)": "gigabits",
+        r"(?:\b|(?<=\d))Tb(?!\w)": "terabits",
+        r"(?:\b|(?<=\d))Pb(?!\w)": "petabits",
+        r"(?:\b|(?<=\d))Eb(?!\w)": "exabits",
+        r"(?:\b|(?<=\d))Zb(?!\w)": "zettabits",
+        r"(?:\b|(?<=\d))Yb(?!\w)": "yottabits",
+    }
+
+    for pattern, replacement in case_sensitive_abbreviations.items():
+        # Case-sensitive replace for specific abbreviations like Mbps vs MBps
+        processed_text = re.sub(
+            pattern,
+            replacement,
+            processed_text,
+        )
+
+    return processed_text
