@@ -79,14 +79,15 @@ def get_resource_path(package, resource):
     Returns:
         str: Path to the resource file, or None if not found
     """
-    from importlib import resources
+    from importlib.resources import files
 
-    # Try using importlib.resources first
+    # Try using the modern importlib.resources.files() API (Python 3.9+).
     try:
-        with resources.path(package, resource) as resource_path:
-            if os.path.exists(resource_path):
-                return str(resource_path)
-    except (ImportError, FileNotFoundError):
+        resource_path = files(package).joinpath(resource)
+        resource_path_str = str(resource_path)
+        if os.path.exists(resource_path_str):
+            return resource_path_str
+    except (ImportError, FileNotFoundError, TypeError):
         pass
 
     # Always try to resolve as a relative path from this file
