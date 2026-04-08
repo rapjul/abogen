@@ -264,9 +264,9 @@ def test_apply_device_specific_defaults_mps_low_memory_tier() -> None:
         worker.tts_batch_target_chars,
         worker.tts_batch_max_chars,
     ) == (
-        140,
+        100,
         320,
-        600,
+        700,
     )
 
 
@@ -284,9 +284,9 @@ def test_apply_device_specific_defaults_mps_high_memory_tier() -> None:
         worker.tts_batch_target_chars,
         worker.tts_batch_max_chars,
     ) == (
-        230,
-        540,
-        980,
+        250,
+        700,
+        2000,
     )
 
 
@@ -303,7 +303,7 @@ def test_apply_device_specific_defaults_cuda_unchanged() -> None:
         worker.tts_batch_target_chars,
         worker.tts_batch_max_chars,
     ) == (
-        260,
+        120,
         620,
-        1100,
+        1800,
     )

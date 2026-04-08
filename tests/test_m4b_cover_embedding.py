@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 from unittest.mock import MagicMock
 
-import pytest
 
 from abogen.webui.conversion_runner import _validate_cover_image
 from abogen.webui.service import Job
@@ -127,8 +126,7 @@ def test_validate_cover_image_jpeg_case_insensitive(tmp_path):
     mock_job.add_log.assert_not_called()
 
 
-@pytest.mark.asyncio
-async def test_pdf_cover_extraction():
+def test_pdf_cover_extraction():
     """Test that PDF cover extraction works and returns PNG bytes."""
     # This is a placeholder for PDF cover extraction tests.
     # Integration with fitz library would need actual PDF test files.
