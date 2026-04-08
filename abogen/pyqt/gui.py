@@ -3055,17 +3055,17 @@ class abogen(QWidget):
                 eff_speed = item.speed
                 eff_sub_mode = item.subtitle_mode
                 eff_format = item.output_format
-                eff_newlines = getattr(item, "replace_single_newlines", True)
-                eff_silent = getattr(item, "use_silent_gaps", False)
+                eff_newlines = getattr(item, "replace_single_newlines", True)  # noqa: F841
+                eff_silent = getattr(item, "use_silent_gaps", False)  # noqa: F841
                 eff_method = getattr(item, "subtitle_speed_method", "tts")
 
             # Retrieve File-Specific Data (Never Overridden)
             eff_chars = item.total_char_count
             eff_input = item.file_name
             eff_output = getattr(item, "output_path", "Unknown")
-            eff_save_sep = getattr(item, "save_chapters_separately", None)
-            eff_merge = getattr(item, "merge_chapters_at_end", None)
-            eff_word_sub = getattr(item, "word_substitutions_enabled", False)
+            eff_save_sep = getattr(item, "save_chapters_separately", None)  # noqa: F841
+            eff_merge = getattr(item, "merge_chapters_at_end", None)  # noqa: F841
+            eff_word_sub = getattr(item, "word_substitutions_enabled", False)  # noqa: F841
             status_key = idx - 1
             row_status = self.queue_item_status.get(status_key, "Not Started")
             row_elapsed_seconds = self.queue_item_elapsed_seconds.get(status_key)
