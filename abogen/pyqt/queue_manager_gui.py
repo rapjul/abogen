@@ -10,12 +10,13 @@ from types import SimpleNamespace
 from typing import Any
 
 from PyQt6.QtCore import QFileInfo, Qt
-from PyQt6.QtGui import QFontDatabase, QFontMetrics
+from PyQt6.QtGui import QFontDatabase, QFontMetrics, QKeyEvent
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
     QDialog,
     QDialogButtonBox,
+    QFileDialog,
     QFileIconProvider,
     QHBoxLayout,
     QLabel,
@@ -30,6 +31,10 @@ from PyQt6.QtWidgets import (
 
 from abogen.constants import COLORS
 from abogen.pyqt.book_handler import HandlerDialog
+from abogen.pyqt.file_dialog_paths import (
+    resolve_start_directory,
+    selected_directory_from_files,
+)
 from abogen.subtitle_utils import calculate_text_length, clean_text
 from abogen.utils import load_config, save_config
 
@@ -80,18 +85,18 @@ class ElidedLabel(QLabel):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.setTextFormat(Qt.TextFormat.PlainText)
 
-    def setText(self, text):
-        self._full_text = text
-        super().setText(text)
+    def setText(self, a0: str | None) -> None:
+        self._full_text = a0 or ""
+        super().setText(a0)
         self.update()
 
-    def resizeEvent(self, event):
+    def resizeEvent(self, a0):
         metrics = QFontMetrics(self.font())
         elided = metrics.elidedText(
             self._full_text, Qt.TextElideMode.ElideRight, self.width()
         )
         super().setText(elided)
-        super().resizeEvent(event)
+        super().resizeEvent(a0)
 
     def fullText(self):
         return self._full_text
@@ -137,11 +142,11 @@ class DroppableQueueListWidget(QListWidget):
             Qt.WidgetAttribute.WA_TransparentForMouseEvents, True
         )
 
-    def dragEnterEvent(self, event):
-        if event is None:
+    def dragEnterEvent(self, e):
+        if e is None:
             self.drag_overlay.setVisible(False)
             return
-        mime_data = event.mimeData()
+        mime_data = e.mimeData()
         if mime_data is not None and mime_data.hasUrls():
             for url in mime_data.urls():
                 file_path = url.toLocalFile().lower()
@@ -150,31 +155,31 @@ class DroppableQueueListWidget(QListWidget):
                 ):
                     self.drag_overlay.resize(self.size())
                     self.drag_overlay.setVisible(True)
-                    event.acceptProposedAction()
+                    e.acceptProposedAction()
                     return
         self.drag_overlay.setVisible(False)
-        event.ignore()
+        e.ignore()
 
-    def dragMoveEvent(self, event):
-        if event is None:
+    def dragMoveEvent(self, e):
+        if e is None:
             return
-        mime_data = event.mimeData()
+        mime_data = e.mimeData()
         if mime_data is not None and mime_data.hasUrls():
             for url in mime_data.urls():
                 file_path = url.toLocalFile().lower()
                 if url.isLocalFile() and self.parent_dialog.is_supported_file(
                     file_path
                 ):
-                    event.acceptProposedAction()
+                    e.acceptProposedAction()
                     return
-        event.ignore()
+        e.ignore()
 
-    def dragLeaveEvent(self, event):
-        if event is None:
+    def dragLeaveEvent(self, e):
+        if e is None:
             self.drag_overlay.setVisible(False)
             return
         self.drag_overlay.setVisible(False)
-        event.accept()
+        e.accept()
 
     def dropEvent(self, event):
         if event is None:
@@ -197,8 +202,8 @@ class DroppableQueueListWidget(QListWidget):
         else:
             event.ignore()
 
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
         if hasattr(self, "drag_overlay"):
             self.drag_overlay.resize(self.size())
 
@@ -212,6 +217,9 @@ class QueueManager(QDialog):
         )  # Store a deep copy of the original queue
         self.parent_gui = parent
         self.config = load_config()  # Load config for persistence
+        self.last_input_folder = getattr(
+            parent, "last_input_folder", ""
+        ) or self.config.get("last_input_folder", "")
         self._document_checked_chapters: dict[str, set[str]] = {}
 
         layout = QVBoxLayout()
@@ -991,22 +999,42 @@ class QueueManager(QDialog):
             return "skip"
         return "skip"
 
-    def add_more_files(self):
-        from PyQt6.QtWidgets import QFileDialog
+    def _set_last_input_folder(self, folder: str) -> None:
+        self.last_input_folder = folder
+        self.config["last_input_folder"] = folder
+        save_config(self.config)
 
+        if self.parent_gui is not None:
+            self.parent_gui.last_input_folder = folder
+            parent_config = getattr(self.parent_gui, "config", None)
+            if isinstance(parent_config, dict):
+                parent_config["last_input_folder"] = folder
+
+    def add_more_files(self):
         # Allow supported text, subtitle, and document files.
+        start_dir = resolve_start_directory(
+            getattr(self.parent_gui, "last_input_folder", "") or self.last_input_folder
+        )
+        if start_dir != self.last_input_folder:
+            self._set_last_input_folder(start_dir)
+
         files, _ = QFileDialog.getOpenFileNames(
             self,
             "Select files to add to queue",
-            "",
+            start_dir,
             "Supported Files (*.txt *.srt *.ass *.vtt *.epub *.pdf *.md *.markdown)",
         )
         if not files:
             return
+
+        selected_dir = selected_directory_from_files(files)
+        if selected_dir and selected_dir != self.last_input_folder:
+            self._set_last_input_folder(selected_dir)
+
         self.add_files_from_paths(files)
 
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
+    def resizeEvent(self, a0):
+        super().resizeEvent(a0)
         if hasattr(self, "empty_overlay"):
             self.empty_overlay.resize(self.listwidget.size())
 
@@ -1322,23 +1350,26 @@ class QueueManager(QDialog):
         self.queue.extend(deepcopy(self._original_queue))
         super().reject()
 
-    def keyPressEvent(self, event):
+    def keyPressEvent(self, a0: QKeyEvent | None):
         from PyQt6.QtCore import Qt
 
-        if event.key() == Qt.Key.Key_Delete:
+        if a0 is None:
+            return
+
+        if a0.key() == Qt.Key.Key_Delete:
             self.remove_item()
-        elif event.modifiers() == Qt.KeyboardModifier.AltModifier:
-            if event.key() == Qt.Key.Key_Up:
+        elif a0.modifiers() == Qt.KeyboardModifier.AltModifier:
+            if a0.key() == Qt.Key.Key_Up:
                 self.move_selected_up()
                 return
-            if event.key() == Qt.Key.Key_Down:
+            if a0.key() == Qt.Key.Key_Down:
                 self.move_selected_down()
                 return
-            if event.key() == Qt.Key.Key_Home:
+            if a0.key() == Qt.Key.Key_Home:
                 self.move_selected_to_top()
                 return
-            if event.key() == Qt.Key.Key_End:
+            if a0.key() == Qt.Key.Key_End:
                 self.move_selected_to_bottom()
                 return
         else:
-            super().keyPressEvent(event)
+            super().keyPressEvent(a0)

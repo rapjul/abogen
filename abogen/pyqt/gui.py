@@ -83,6 +83,10 @@ from abogen.pyqt.conversion import (
     TimestampDetectionDialog,
     VoicePreviewThread,
 )
+from abogen.pyqt.file_dialog_paths import (
+    resolve_start_directory,
+    selected_directory_from_files,
+)
 from abogen.pyqt.queue_manager_gui import QueueManager
 from abogen.pyqt.queued_item import QueuedItem
 from abogen.pyqt.voice_formula_gui import VoiceFormulaDialog
@@ -1678,17 +1682,7 @@ class abogen(QWidget):
         if self.is_converting:
             return
         try:
-            start_dir = os.path.expanduser(self.last_input_folder or "")
-            if start_dir and os.path.isfile(start_dir):
-                start_dir = os.path.dirname(start_dir)
-            while start_dir and not os.path.isdir(start_dir):
-                parent_dir = os.path.dirname(start_dir)
-                if parent_dir == start_dir:
-                    start_dir = ""
-                    break
-                start_dir = parent_dir
-            if not start_dir:
-                start_dir = os.path.expanduser("~")
+            start_dir = resolve_start_directory(self.last_input_folder)
             if start_dir != self.last_input_folder:
                 self.last_input_folder = start_dir
                 self.config["last_input_folder"] = start_dir
@@ -1701,7 +1695,7 @@ class abogen(QWidget):
             )
             if not file_path:
                 return
-            selected_dir = os.path.dirname(file_path)
+            selected_dir = selected_directory_from_files(file_path)
             if selected_dir and selected_dir != self.last_input_folder:
                 self.last_input_folder = selected_dir
                 self.config["last_input_folder"] = selected_dir

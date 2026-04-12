@@ -10,12 +10,15 @@ pytest.importorskip("PyQt6")
 
 queue_manager_module = importlib.import_module("abogen.pyqt.queue_manager_gui")
 QueueManager = queue_manager_module.QueueManager
+file_dialog_paths = importlib.import_module("abogen.pyqt.file_dialog_paths")
 
 
 def _build_manager(*, current_attrs: dict[str, object]):
     manager = QueueManager.__new__(QueueManager)
     manager.queue = []
     manager.parent_gui = None
+    manager.config = {"last_input_folder": ""}
+    manager.last_input_folder = ""
     manager._document_checked_chapters = {}
     manager.get_current_attributes = lambda: dict(current_attrs)
     manager.process_queue = lambda: None
@@ -175,3 +178,65 @@ def test_add_files_from_paths_duplicate_within_batch_honors_policy(
     manager.add_files_from_paths([str(text_path), str(text_path)])
 
     assert len(manager.queue) == 1
+
+
+def test_resolve_start_directory_walks_up_from_missing_path(tmp_path: Path) -> None:
+    nested_missing = tmp_path / "missing" / "deeper" / "selection.txt"
+
+    assert file_dialog_paths.resolve_start_directory(str(nested_missing)) == str(
+        tmp_path
+    )
+
+
+def test_resolve_start_directory_falls_back_to_home_for_empty_value() -> None:
+    assert file_dialog_paths.resolve_start_directory("") == str(Path.home())
+
+
+def test_add_more_files_remembers_and_syncs_last_folder(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    manager = _build_manager(current_attrs=_default_attrs())
+    parent_config: dict[str, object] = {}
+    parent_gui = SimpleNamespace(last_input_folder="", config=parent_config)
+    manager.parent_gui = parent_gui
+
+    requested_dir = tmp_path / "missing" / "nested" / "input.txt"
+    selected_dir = tmp_path / "selected"
+    selected_dir.mkdir()
+    selected_file = selected_dir / "picked.txt"
+    selected_file.write_text("picked", encoding="utf-8")
+
+    captured_dirs: list[str] = []
+
+    def fake_get_open_file_names(_parent, _title, start_dir, _filter):
+        captured_dirs.append(start_dir)
+        return ([str(selected_file)], "")
+
+    monkeypatch.setattr(
+        queue_manager_module.QFileDialog,
+        "getOpenFileNames",
+        fake_get_open_file_names,
+    )
+
+    added_files: list[list[str]] = []
+    manager.add_files_from_paths = lambda files: added_files.append(list(files))
+
+    saved_configs: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        queue_manager_module,
+        "save_config",
+        lambda config: saved_configs.append(dict(config)),
+    )
+
+    manager.last_input_folder = str(requested_dir)
+    manager.config["last_input_folder"] = str(requested_dir)
+
+    manager.add_more_files()
+
+    assert captured_dirs == [str(tmp_path)]
+    assert added_files == [[str(selected_file)]]
+    assert manager.last_input_folder == str(selected_dir)
+    assert manager.config["last_input_folder"] == str(selected_dir)
+    assert parent_gui.last_input_folder == str(selected_dir)
+    assert parent_config["last_input_folder"] == str(selected_dir)
+    assert saved_configs[-1]["last_input_folder"] == str(selected_dir)
