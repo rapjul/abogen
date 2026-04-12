@@ -87,7 +87,7 @@ from abogen.pyqt.file_dialog_paths import (
     resolve_start_directory,
     selected_directory_from_files,
 )
-from abogen.pyqt.queue_manager_gui import QueueManager
+from abogen.pyqt.queue_manager_gui import QueueManager, format_char_count
 from abogen.pyqt.queued_item import QueuedItem
 from abogen.pyqt.voice_formula_gui import VoiceFormulaDialog
 from abogen.subtitle_utils import (
@@ -3054,7 +3054,7 @@ class abogen(QWidget):
                 eff_method = getattr(item, "subtitle_speed_method", "tts")
 
             # Retrieve File-Specific Data (Never Overridden)
-            eff_chars = item.total_char_count
+            eff_chars = format_char_count(item.total_char_count)
             eff_input = item.file_name
             eff_output = getattr(item, "output_path", "Unknown")
             eff_save_sep = getattr(item, "save_chapters_separately", None)  # noqa: F841
@@ -3091,7 +3091,7 @@ class abogen(QWidget):
                 eff_lang,
                 eff_voice,
                 f"{eff_speed}",
-                f"{eff_chars}",
+                eff_chars,
                 eff_format,
                 eff_sub_mode,
                 eff_method,

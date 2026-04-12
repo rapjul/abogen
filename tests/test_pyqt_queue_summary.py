@@ -153,6 +153,7 @@ def test_show_queue_summary_renders_html_table_with_elapsed(monkeypatch) -> None
     assert "Queue cancelled" in html_output
     assert "Overall elapsed:" in html_output
     assert "00:02:17" in html_output
+    assert "1,234" in html_output
     assert "Cancelled (partial)" in html_output
     assert "00:00:12 (partial)" in html_output
     assert (
