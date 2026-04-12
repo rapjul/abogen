@@ -204,6 +204,8 @@ class SupertonicPipeline:
             chunk_to_speak = chunk
             removed: set[str] = set()
             last_exc: Exception | None = None
+            wav: Any | None = None
+            duration: Any = None
 
             # SuperTonic can raise ValueError for unsupported characters; strip and retry.
             for attempt in range(3):
@@ -252,6 +254,9 @@ class SupertonicPipeline:
                 raise last_exc
 
             if not chunk_to_speak:
+                continue
+
+            if wav is None:
                 continue
 
             audio = _ensure_float32_mono(wav)
