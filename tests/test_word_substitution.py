@@ -25,6 +25,13 @@ def test_expand_common_abbreviations_no_false_positives() -> None:
     assert expand_common_abbreviations(text) == expected
 
 
+def test_expand_common_abbreviations_ambiguous_words_require_period() -> None:
+    """Test that bare words like no and sat are not expanded, but punctuated abbreviations still are."""
+    text = "no reason sat down. No. 5 stayed on Sat. night."
+    expected = "no reason sat down. Number 5 stayed on Saturday night."
+    assert expand_common_abbreviations(text) == expected
+
+
 def test_expand_common_abbreviations_time() -> None:
     """Test time abbreviations to avoid matching the pronoun/verb 'I am'."""
     text = "I am arriving at 10am or 11:30 a.m. but not 5 p.m."
@@ -50,7 +57,28 @@ def test_expand_common_abbreviations_metric_speed() -> None:
     """Test metric and speed abbreviations."""
     text = "He was going 60mph and 100kph for 5km."
     expected = (
-        "He was going 60miles per hour and 100kilometers per hour for 5kilometers"
+        "He was going 60 miles per hour and 100 kilometers per hour for 5 kilometers"
+    )
+    assert expand_common_abbreviations(text) == expected
+
+
+def test_expand_common_abbreviations_units_require_digits() -> None:
+    """Test that weight, measure, speed, and data-size abbreviations only expand after digits."""
+    text = (
+        "lbs oz ft in mi mph kg mm cm kph kmph rpm rps bps bpm hz khz mhz ghz KB MB GB Kb Mb Gb "
+        "and 5 lbs 2 oz 3 ft 3ft 4 in 5 mi 6 mph 7 kg 8 mm 9 cm "
+        "10 kph 10kph 11 kmph "
+        "12 rpm 13 rps "
+        "14 bps 15 bpm 16Hz 17kHz 18MHz 19GHz "
+        "20KB 21MB 22GB 23Kb 24Mb 250Gb"
+    )
+    expected = (
+        "lbs oz ft in mi mph kg mm cm kph kmph rpm rps bps bpm hz khz mhz ghz KB MB GB Kb Mb Gb "
+        "and 5 pounds 2 ounces 3 feet 3 feet 4 inches 5 miles 6 miles per hour 7 kilograms 8 millimeters 9 centimeters "
+        "10 kilometers per hour 10 kilometers per hour 11 kilometers per hour "
+        "12 revolutions per minute 13 revolutions per second "
+        "14 beats per second 15 beats per minute 16 Hertz 17 kiloHertz 18 megaHertz 19 gigaHertz "
+        "20 kilobytes 21 megabytes 22 gigabytes 23 kilobits 24 megabits 250 gigabits"
     )
     assert expand_common_abbreviations(text) == expected
 
@@ -65,7 +93,7 @@ def test_expand_common_abbreviations_directional() -> None:
 def test_expand_common_abbreviations_data_sizes() -> None:
     """Test case-sensitive data size abbreviations."""
     text = "File is 5MB or 12 GB, up to 1TB. Speed is 50Mbps or 10 MBps."
-    expected = "File is 5megabytes or 12 gigabytes, up to 1terabytes. Speed is 50megabits per second or 10 megabytes per second"
+    expected = "File is 5 megabytes or 12 gigabytes, up to 1 terabytes. Speed is 50 megabits per second or 10 megabytes per second"
     assert expand_common_abbreviations(text) == expected
 
 
