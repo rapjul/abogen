@@ -5,6 +5,7 @@ import logging
 import os
 import platform
 import posixpath
+import queue
 import re
 import subprocess
 import threading  # for efficient waiting
@@ -12,7 +13,8 @@ import time
 import traceback
 import xml.etree.ElementTree as ET
 import zipfile
-from typing import NamedTuple
+from dataclasses import dataclass, field
+from typing import Any, List, NamedTuple, Optional, Tuple
 
 import soundfile as sf
 import static_ffmpeg
@@ -47,6 +49,218 @@ from abogen.utils import (
     get_user_cache_path,
 )
 from abogen.voice_formulas import extract_voice_ids, get_new_voice
+
+
+# ---------------------------------------------------------------------------
+# Async audio / subtitle writer
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _AudioWriteItem:
+    """A single write task dispatched to the background I/O thread.
+
+    All fields are pre-computed by the main (synthesis) thread so the
+    background thread never needs to touch any shared mutable state.
+
+    Attributes:
+        audio_data: Raw NumPy float32 array to write, or ``None`` for
+            subtitle-only items (rare).  When ``audio_bytes`` is also
+            provided the array form is skipped for merged/chapter file
+            handles that accept raw bytes.
+        audio_bytes: Pre-encoded ``float32`` bytes for FFmpeg pipe writes,
+            or ``None`` when writing directly to a soundfile handle.
+        merged_out_file: Open soundfile write handle for the merged output,
+            or ``None``.
+        ffmpeg_proc: FFmpeg subprocess for merged output, or ``None``.
+        chapter_out_file: Open soundfile write handle for the per-chapter
+            output, or ``None``.
+        chapter_ffmpeg_proc: FFmpeg subprocess for the per-chapter output,
+            or ``None``.
+        merged_subtitle_lines: Pre-formatted subtitle text lines to append
+            to the merged subtitle file, or ``None``.
+        chapter_subtitle_lines: Pre-formatted subtitle text lines to append
+            to the per-chapter subtitle file, or ``None``.
+        merged_subtitle_file: Open text file handle for the merged subtitle,
+            or ``None``.
+        chapter_subtitle_file: Open text file handle for the per-chapter
+            subtitle, or ``None``.
+        write_context_merged: Human-readable label for error reporting.
+        write_context_chapter: Human-readable label for error reporting.
+    """
+
+    audio_data: Any  # numpy.ndarray[float32] | None
+    audio_bytes: Optional[bytes]
+    merged_out_file: Any  # soundfile.SoundFile | None
+    ffmpeg_proc: Any  # subprocess.Popen | None
+    chapter_out_file: Any  # soundfile.SoundFile | None
+    chapter_ffmpeg_proc: Any  # subprocess.Popen | None
+    merged_subtitle_lines: Optional[List[str]]
+    chapter_subtitle_lines: Optional[List[str]]
+    merged_subtitle_file: Any  # IO[str] | None
+    chapter_subtitle_file: Any  # IO[str] | None
+    write_context_merged: str = "writing merged chapter audio"
+    write_context_chapter: str = "writing per-chapter audio"
+
+
+@dataclass
+class _FlushMarker:
+    """Sentinel queued by :meth:`_AsyncAudioWriter.flush` to synchronise the worker thread.
+
+    When the background thread dequeues a :class:`_FlushMarker` it sets the
+    associated threading event, which unblocks the caller of ``flush()``.
+
+    Attributes:
+        event: A :class:`threading.Event` that the worker sets when it reaches
+            this marker in the queue.
+    """
+
+    event: threading.Event
+
+
+class _AsyncAudioWriter:
+    """Background thread that drains :class:`_AudioWriteItem` objects.
+
+    Usage::
+
+        with _AsyncAudioWriter(write_to_ffmpeg_fn) as writer:
+            writer.submit(item)
+            # ... synthesis continues immediately ...
+        # joining here blocks until all writes are complete
+
+    Parameters:
+        write_to_ffmpeg: Callable that accepts ``(proc, audio_bytes, context)``
+            and blocks until the bytes are written to the FFmpeg pipe.
+        maxsize: Maximum number of pending write items before the producer
+            blocks (natural backpressure).  Default: 4.
+    """
+
+    _SENTINEL = object()  # poison pill to stop the worker thread
+
+    def __init__(self, write_to_ffmpeg, maxsize: int = 4) -> None:
+        """Initialise the writer but do not start the thread yet.
+
+        Parameters:
+            write_to_ffmpeg: Callable ``(proc, audio_bytes, context) -> None``
+                that writes raw PCM bytes to an FFmpeg stdin pipe.
+            maxsize: Bound on the internal queue; controls backpressure.
+        """
+        self._write_to_ffmpeg = write_to_ffmpeg
+        self._queue: queue.Queue = queue.Queue(maxsize=maxsize)
+        self._error: Optional[Exception] = None
+        self._thread: Optional[threading.Thread] = None
+
+    def flush(self) -> None:
+        """Block until the background thread has processed all queued items.
+
+        Call this before closing any file handle that the writer may still
+        be writing to — e.g. between chapters when ``chapter_out_file`` is
+        about to be closed.
+        """
+        done = threading.Event()
+
+        def _marker() -> None:
+            done.set()
+
+        # Submit a no-op callable sentinel; _run processes it like a normal item.
+        # We reuse the queue by submitting a special wrapper.
+        self._queue.put(_FlushMarker(done))
+        done.wait()
+        if self._error is not None:
+            raise self._error
+
+    def __enter__(self) -> "_AsyncAudioWriter":
+        """Start the background writer thread."""
+        self._thread = threading.Thread(
+            target=self._run, name="abogen-audio-writer", daemon=True
+        )
+        self._thread.start()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        """Signal the worker to stop and wait for it to drain.
+
+        If the background thread raised an exception it is re-raised here,
+        *unless* the caller already has an active exception (in which case
+        the write error is logged and suppressed to preserve the original).
+        """
+        self._queue.put(self._SENTINEL)
+        if self._thread is not None:
+            self._thread.join()
+        if self._error is not None and exc_type is None:
+            raise self._error
+
+    def submit(self, item: _AudioWriteItem) -> None:
+        """Enqueue a write item for the background thread.
+
+        Blocks if the queue is full (backpressure), ensuring the synthesis
+        loop never runs too far ahead of the I/O thread.
+
+        Parameters:
+            item: Fully pre-computed write task.
+        """
+        if self._error is not None:
+            # Propagate immediately rather than filling the queue.
+            raise self._error
+        self._queue.put(item)
+
+    def _run(self) -> None:
+        """Worker loop — runs on the background thread."""
+        while True:
+            item = self._queue.get()
+            if item is self._SENTINEL:
+                break
+            if isinstance(item, _FlushMarker):
+                item.event.set()
+                continue
+            try:
+                self._process(item)
+            except Exception as exc:  # noqa: BLE001
+                self._error = exc
+                # Drain the queue so the producer never deadlocks.
+                try:
+                    while True:
+                        pending = self._queue.get_nowait()
+                        if isinstance(pending, _FlushMarker):
+                            pending.event.set()
+                except queue.Empty:
+                    pass
+                break
+
+    def _process(self, item: _AudioWriteItem) -> None:
+        """Execute all writes for one :class:`_AudioWriteItem`.
+
+        Parameters:
+            item: The write task received from the queue.
+        """
+        # --- Audio writes ---
+        if item.audio_data is not None:
+            if item.merged_out_file is not None:
+                item.merged_out_file.write(item.audio_data)
+            elif item.ffmpeg_proc is not None and item.audio_bytes is not None:
+                self._write_to_ffmpeg(
+                    item.ffmpeg_proc,
+                    item.audio_bytes,
+                    item.write_context_merged,
+                )
+
+            if item.chapter_out_file is not None:
+                item.chapter_out_file.write(item.audio_data)
+            elif item.chapter_ffmpeg_proc is not None and item.audio_bytes is not None:
+                self._write_to_ffmpeg(
+                    item.chapter_ffmpeg_proc,
+                    item.audio_bytes,
+                    item.write_context_chapter,
+                )
+
+        # --- Subtitle writes ---
+        if item.merged_subtitle_lines and item.merged_subtitle_file is not None:
+            for line in item.merged_subtitle_lines:
+                item.merged_subtitle_file.write(line)
+
+        if item.chapter_subtitle_lines and item.chapter_subtitle_file is not None:
+            for line in item.chapter_subtitle_lines:
+                item.chapter_subtitle_file.write(line)
 
 
 class BatchSizeProfile(NamedTuple):
@@ -1819,534 +2033,566 @@ class ConversionThread(QThread):
                     for chapter in chapters
                 ]
                 srt_index = 1  # SRT numbering fix for chapter-only mode
-            # Instead of processing the whole text, process by chapter
-            for chapter_idx, (chapter_name, voice_segments) in enumerate(chapters, 1):
-                chapter_out_path = None
-                chapter_out_file = None
-                chapter_ffmpeg_proc = None
-                chapter_subtitle_file = None
-                chapter_subtitle_path = None
-                if total_chapters > 1:
-                    self.chapter_progress_updated.emit(
-                        chapter_idx - 1, total_chapters, chapter_name
-                    )
-                    self.log_updated.emit(
-                        (
-                            f"\nChapter {chapter_idx}/{total_chapters}: {chapter_name}",
-                            "blue",
-                        )
-                    )
-                chapter_subtitle_entries = []
-                chapter_current_time = 0.0
-                # Set chapter start time before processing
-                chapter_time = chapters_time[chapter_idx - 1]
-                if merge_chapters_at_end:
-                    chapter_time["start"] = current_time
-
-                # Prepare per-chapter output file if needed
-                if save_chapters_separately and total_chapters > 1:
-                    assert chapters_out_dir is not None
-                    # First pass: keep alphanumeric, spaces, hyphens, and underscores
-                    sanitized = re.sub(r"[^\w\s\-]", "", chapter_name)
-                    # Replace multiple spaces/hyphens with single underscore
-                    sanitized = re.sub(r"[\s\-]+", "_", sanitized).strip("_")
-                    # Apply OS-specific sanitization
-                    sanitized = sanitize_name_for_os(sanitized, is_folder=False)
-                    # Limit length (leaving room for the chapter number prefix)
-                    MAX_LEN = 80
-                    if len(sanitized) > MAX_LEN:
-                        pos = sanitized[:MAX_LEN].rfind("_")
-                        sanitized = sanitized[: pos if pos > 0 else MAX_LEN].rstrip("_")
-                    chapter_filename = f"{chapter_idx:02d}_{sanitized}"
-                    chapter_out_path = os.path.join(
-                        chapters_out_dir,
-                        f"{chapter_filename}.{separate_chapters_format}",
-                    )
-                    if separate_chapters_format in ["wav", "mp3", "flac"]:
-                        chapter_out_file = sf.SoundFile(
-                            chapter_out_path,
-                            "w",
-                            samplerate=24000,
-                            channels=1,
-                            format=separate_chapters_format,
-                        )
-                        chapter_ffmpeg_proc = None
-                    elif separate_chapters_format == "opus":
-                        static_ffmpeg.add_paths()
-                        cmd = [
-                            "ffmpeg",
-                            "-y",
-                            "-thread_queue_size",
-                            "32768",
-                            "-f",
-                            "f32le",
-                            "-ar",
-                            "24000",
-                            "-ac",
-                            "1",
-                            "-i",
-                            "pipe:0",
-                        ]
-                        cmd.extend(["-c:a", "libopus", "-b:a", "24000"])
-                        cmd.append(chapter_out_path)
-                        chapter_ffmpeg_proc = create_process(
-                            cmd, stdin=subprocess.PIPE, text=False
-                        )
-                        chapter_out_file = None
-                    else:
-                        self.log_updated.emit(
-                            (
-                                f"Unsupported chapter format: {separate_chapters_format}",
-                                "red",
-                            )
-                        )
-                        continue
-                    # Open chapter subtitle file for incremental writing if needed
+            # Instead of processing the whole text, process by chapter.
+            # All audio and subtitle file writes are dispatched to the
+            # background _AsyncAudioWriter so the GPU/MLX accelerator can
+            # immediately start synthesising the next segment.
+            with _AsyncAudioWriter(self._write_to_ffmpeg) as _audio_writer:
+                for chapter_idx, (chapter_name, voice_segments) in enumerate(chapters, 1):
+                    chapter_out_path = None
+                    chapter_out_file = None
+                    chapter_ffmpeg_proc = None
                     chapter_subtitle_file = None
-                    chapter_srt_index = (
-                        1  # Initialize SRT numbering for this chapter file
-                    )
-                    if self.subtitle_mode != "Disabled":
-                        subtitle_format = getattr(self, "subtitle_format", "srt")
-                        file_extension = "ass" if "ass" in subtitle_format else "srt"
-                        chapter_subtitle_path = os.path.join(
-                            chapters_out_dir, f"{chapter_filename}.{file_extension}"
-                        )
-                        # Ensure these variables exist even when not using ASS so
-                        # later code can safely reference them.
-                        is_centered = False
-                        is_narrow = False
-                        chapter_subtitle_margin = ""
-                        chapter_subtitle_alignment_tag = ""
-                        # Open the chapter subtitle file for writing for both SRT and ASS
-                        chapter_subtitle_file = open(
-                            chapter_subtitle_path,
-                            "w",
-                            encoding="utf-8",
-                            errors="replace",
-                        )
-                        if "ass" in subtitle_format:
-                            # Minimal ASS header
-                            chapter_subtitle_file.write("[Script Info]\n")
-                            chapter_subtitle_file.write("Title: Generated by Abogen\n")
-                            chapter_subtitle_file.write("ScriptType: v4.00+\n\n")
-
-                            # Add style definitions for karaoke highlighting
-                            if self.subtitle_mode == "Sentence + Highlighting":
-                                chapter_subtitle_file.write("[V4+ Styles]\n")
-                                chapter_subtitle_file.write(
-                                    "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n"
-                                )
-                                chapter_subtitle_file.write(
-                                    "Style: Default,Arial,24,&H00FFFFFF,&H00808080,&H00000000,&H00404040,0,0,0,0,100,100,0,0,3,2,0,5,10,10,10,1\n\n"
-                                )
-
-                            chapter_subtitle_file.write("[Events]\n")
-                            chapter_subtitle_file.write(
-                                "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
-                            )
-                            is_centered = subtitle_format in (
-                                "ass_centered_wide",
-                                "ass_centered_narrow",
-                            )
-                            is_narrow = subtitle_format in (
-                                "ass_narrow",
-                                "ass_centered_narrow",
-                            )
-                            chapter_subtitle_margin = "90" if is_narrow else ""
-                            chapter_subtitle_alignment_tag = (
-                                "{{\\an5}}" if is_centered else ""
-                            )
-                    else:
-                        chapter_subtitle_file = None
-                else:
                     chapter_subtitle_path = None
-                    chapter_subtitle_file = None
-
-                # Process each voice segment within the chapter
-                for segment_idx, (voice_name, segment_text) in enumerate(
-                    voice_segments
-                ):
-                    # Load voice for this segment (with caching)
-                    try:
-                        loaded_voice = self.load_voice_cached(voice_name, tts)
-                        if segment_idx > 0:
-                            voice_display = (
-                                voice_name
-                                if len(voice_name) < 50
-                                else voice_name[:47] + "..."
-                            )
-                            self.log_updated.emit(
-                                (f"  → Voice: {voice_display}", "grey")
-                            )
-                    except Exception:
+                    if total_chapters > 1:
+                        self.chapter_progress_updated.emit(
+                            chapter_idx - 1, total_chapters, chapter_name
+                        )
                         self.log_updated.emit(
                             (
-                                f"⚠ Voice loading error for '{voice_name}', continuing with previous",
-                                "orange",
+                                f"\nChapter {chapter_idx}/{total_chapters}: {chapter_name}",
+                                "blue",
                             )
                         )
-                        if segment_idx == 0:
-                            loaded_voice = self.load_voice_cached(self.voice, tts)
+                    chapter_subtitle_entries = []
+                    chapter_current_time = 0.0
+                    # Set chapter start time before processing
+                    chapter_time = chapters_time[chapter_idx - 1]
+                    if merge_chapters_at_end:
+                        chapter_time["start"] = current_time
 
-                    # Determine if spaCy segmentation should be used for PRE-TTS segmentation
-                    # Only non-English languages use spaCy for pre-segmentation
-                    # English uses spaCy only for subtitle generation (post-TTS)
-                    # spaCy is disabled when subtitle mode is "Disabled" or "Line"
-                    # spaCy is also disabled when input is a subtitle file
-                    is_subtitle_input = self._is_subtitle_input_file()
-                    use_spacy = (
-                        getattr(self, "use_spacy_segmentation", False)
-                        and self.subtitle_mode not in ["Disabled", "Line"]
-                        and not is_subtitle_input
-                    )
-                    spacy_sentences = None
-                    active_split_pattern = self.split_pattern
-                    spacing_pattern = r"\s*" if self.lang_code in ["z", "j"] else r"\s+"
-
-                    # Pre-load spaCy model for English if it will be needed for subtitle generation
-                    if (
-                        use_spacy
-                        and self.lang_code in ["a", "b"]
-                        and self.subtitle_mode in ["Sentence", "Sentence + Comma"]
-                    ):
-                        from abogen.spacy_utils import get_spacy_model
-
-                        nlp = get_spacy_model(
-                            self.lang_code,
-                            log_callback=lambda msg: self.log_updated.emit(msg),
+                    # Prepare per-chapter output file if needed
+                    if save_chapters_separately and total_chapters > 1:
+                        assert chapters_out_dir is not None
+                        # First pass: keep alphanumeric, spaces, hyphens, and underscores
+                        sanitized = re.sub(r"[^\w\s\-]", "", chapter_name)
+                        # Replace multiple spaces/hyphens with single underscore
+                        sanitized = re.sub(r"[\s\-]+", "_", sanitized).strip("_")
+                        # Apply OS-specific sanitization
+                        sanitized = sanitize_name_for_os(sanitized, is_folder=False)
+                        # Limit length (leaving room for the chapter number prefix)
+                        MAX_LEN = 80
+                        if len(sanitized) > MAX_LEN:
+                            pos = sanitized[:MAX_LEN].rfind("_")
+                            sanitized = sanitized[: pos if pos > 0 else MAX_LEN].rstrip("_")
+                        chapter_filename = f"{chapter_idx:02d}_{sanitized}"
+                        chapter_out_path = os.path.join(
+                            chapters_out_dir,
+                            f"{chapter_filename}.{separate_chapters_format}",
                         )
-                        if nlp:
-                            self.log_updated.emit(
-                                (
-                                    "\nUsing spaCy for sentence segmentation (only for subtitles)...",
-                                    "grey",
-                                )
+                        if separate_chapters_format in ["wav", "mp3", "flac"]:
+                            chapter_out_file = sf.SoundFile(
+                                chapter_out_path,
+                                "w",
+                                samplerate=24000,
+                                channels=1,
+                                format=separate_chapters_format,
                             )
-
-                    if use_spacy and self.lang_code not in ["a", "b"]:
-                        # Non-English: use spaCy for pre-TTS segmentation
-                        self.log_updated.emit(
-                            (
-                                "\nUsing spaCy for sentence segmentation (pre-TTS)...",
-                                "grey",
+                            chapter_ffmpeg_proc = None
+                        elif separate_chapters_format == "opus":
+                            static_ffmpeg.add_paths()
+                            cmd = [
+                                "ffmpeg",
+                                "-y",
+                                "-thread_queue_size",
+                                "32768",
+                                "-f",
+                                "f32le",
+                                "-ar",
+                                "24000",
+                                "-ac",
+                                "1",
+                                "-i",
+                                "pipe:0",
+                            ]
+                            cmd.extend(["-c:a", "libopus", "-b:a", "24000"])
+                            cmd.append(chapter_out_path)
+                            chapter_ffmpeg_proc = create_process(
+                                cmd, stdin=subprocess.PIPE, text=False
                             )
-                        )
-                        from abogen.spacy_utils import segment_sentences
-
-                        spacy_sentences = segment_sentences(
-                            segment_text,
-                            self.lang_code,
-                            log_callback=lambda msg: self.log_updated.emit(msg),
-                        )
-                        if spacy_sentences:
-                            self.log_updated.emit(
-                                (
-                                    f"\nspaCy: Text segmented into {len(spacy_sentences)} sentences...",
-                                    "grey",
-                                )
-                            )
-                            # For Sentence + Comma mode, still split on commas within spaCy sentences
-                            if self.subtitle_mode == "Sentence + Comma":
-                                active_split_pattern = r"(?<=[{}]){}|\n+".format(
-                                    self.PUNCTUATION_COMMAS, spacing_pattern
-                                )
-                            else:
-                                active_split_pattern = (
-                                    "\n"  # Use newline splitting for Sentence mode
-                                )
+                            chapter_out_file = None
                         else:
                             self.log_updated.emit(
-                                ("\nspaCy: Fallback to default segmentation...", "grey")
+                                (
+                                    f"Unsupported chapter format: {separate_chapters_format}",
+                                    "red",
+                                )
                             )
+                            continue
+                        # Open chapter subtitle file for incremental writing if needed
+                        chapter_subtitle_file = None
+                        chapter_srt_index = (
+                            1  # Initialize SRT numbering for this chapter file
+                        )
+                        if self.subtitle_mode != "Disabled":
+                            subtitle_format = getattr(self, "subtitle_format", "srt")
+                            file_extension = "ass" if "ass" in subtitle_format else "srt"
+                            chapter_subtitle_path = os.path.join(
+                                chapters_out_dir, f"{chapter_filename}.{file_extension}"
+                            )
+                            # Ensure these variables exist even when not using ASS so
+                            # later code can safely reference them.
+                            is_centered = False
+                            is_narrow = False
+                            chapter_subtitle_margin = ""
+                            chapter_subtitle_alignment_tag = ""
+                            # Open the chapter subtitle file for writing for both SRT and ASS
+                            chapter_subtitle_file = open(
+                                chapter_subtitle_path,
+                                "w",
+                                encoding="utf-8",
+                                errors="replace",
+                            )
+                            if "ass" in subtitle_format:
+                                # Minimal ASS header
+                                chapter_subtitle_file.write("[Script Info]\n")
+                                chapter_subtitle_file.write("Title: Generated by Abogen\n")
+                                chapter_subtitle_file.write("ScriptType: v4.00+\n\n")
 
-                    # Process text - either as spaCy sentences or as single text
-                    text_segments = (
-                        spacy_sentences if spacy_sentences else [segment_text]
-                    )
+                                # Add style definitions for karaoke highlighting
+                                if self.subtitle_mode == "Sentence + Highlighting":
+                                    chapter_subtitle_file.write("[V4+ Styles]\n")
+                                    chapter_subtitle_file.write(
+                                        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n"
+                                    )
+                                    chapter_subtitle_file.write(
+                                        "Style: Default,Arial,24,&H00FFFFFF,&H00808080,&H00000000,&H00404040,0,0,0,0,100,100,0,0,3,2,0,5,10,10,10,1\n\n"
+                                    )
 
-                    # Print active split pattern used by the TTS engine once for this batch
-                    try:
-                        print(f"Using split pattern: {active_split_pattern!r}")
-                    except Exception:
-                        # Print must never break processing
-                        print("Using split pattern: (unprintable)")
+                                chapter_subtitle_file.write("[Events]\n")
+                                chapter_subtitle_file.write(
+                                    "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+                                )
+                                is_centered = subtitle_format in (
+                                    "ass_centered_wide",
+                                    "ass_centered_narrow",
+                                )
+                                is_narrow = subtitle_format in (
+                                    "ass_narrow",
+                                    "ass_centered_narrow",
+                                )
+                                chapter_subtitle_margin = "90" if is_narrow else ""
+                                chapter_subtitle_alignment_tag = (
+                                    "{{\\an5}}" if is_centered else ""
+                                )
+                        else:
+                            chapter_subtitle_file = None
+                    else:
+                        chapter_subtitle_path = None
+                        chapter_subtitle_file = None
 
-                    for text_segment in text_segments:
-                        for result in self._iter_tts_results_with_safe_fallback(
-                            tts,
-                            text_segment,
-                            loaded_voice,
-                            self.speed,
-                            active_split_pattern,
-                        ):
-                            # Print the result for debugging
-                            # print(f"Result: {result}")
-                            if self.cancel_requested:
-                                if chapter_out_file:
-                                    chapter_out_file.close()
-                                if merged_out_file:
-                                    merged_out_file.close()
-                                self.conversion_finished.emit("Cancelled", None)
-                                return
-                            current_segment += 1
-                            grapheme_len = len(result.graphemes)
-                            self.processed_char_count += grapheme_len
-                            # Log progress with both character counts and the graphemes content
+                    # Process each voice segment within the chapter
+                    for segment_idx, (voice_name, segment_text) in enumerate(
+                        voice_segments
+                    ):
+                        # Load voice for this segment (with caching)
+                        try:
+                            loaded_voice = self.load_voice_cached(voice_name, tts)
+                            if segment_idx > 0:
+                                voice_display = (
+                                    voice_name
+                                    if len(voice_name) < 50
+                                    else voice_name[:47] + "..."
+                                )
+                                self.log_updated.emit(
+                                    (f"  → Voice: {voice_display}", "grey")
+                                )
+                        except Exception:
                             self.log_updated.emit(
-                                f"\n{self.processed_char_count:,}/{self.total_char_count:,}: {result.graphemes}"
+                                (
+                                    f"⚠ Voice loading error for '{voice_name}', continuing with previous",
+                                    "orange",
+                                )
                             )
+                            if segment_idx == 0:
+                                loaded_voice = self.load_voice_cached(self.voice, tts)
 
-                            chunk_dur = len(result.audio) / rate
-                            chunk_start = current_time
-                            # Write audio directly to merged file ONLY if merging
-                            if merge_chapters_at_end and merged_out_file:
-                                merged_out_file.write(result.audio)
-                            elif merge_chapters_at_end and ffmpeg_proc:
-                                if hasattr(result.audio, "numpy"):
-                                    audio_bytes = (
-                                        result.audio.numpy().astype("float32").tobytes()
+                        # Determine if spaCy segmentation should be used for PRE-TTS segmentation
+                        # Only non-English languages use spaCy for pre-segmentation
+                        # English uses spaCy only for subtitle generation (post-TTS)
+                        # spaCy is disabled when subtitle mode is "Disabled" or "Line"
+                        # spaCy is also disabled when input is a subtitle file
+                        is_subtitle_input = self._is_subtitle_input_file()
+                        use_spacy = (
+                            getattr(self, "use_spacy_segmentation", False)
+                            and self.subtitle_mode not in ["Disabled", "Line"]
+                            and not is_subtitle_input
+                        )
+                        spacy_sentences = None
+                        active_split_pattern = self.split_pattern
+                        spacing_pattern = r"\s*" if self.lang_code in ["z", "j"] else r"\s+"
+
+                        # Pre-load spaCy model for English if it will be needed for subtitle generation
+                        if (
+                            use_spacy
+                            and self.lang_code in ["a", "b"]
+                            and self.subtitle_mode in ["Sentence", "Sentence + Comma"]
+                        ):
+                            from abogen.spacy_utils import get_spacy_model
+
+                            nlp = get_spacy_model(
+                                self.lang_code,
+                                log_callback=lambda msg: self.log_updated.emit(msg),
+                            )
+                            if nlp:
+                                self.log_updated.emit(
+                                    (
+                                        "\nUsing spaCy for sentence segmentation (only for subtitles)...",
+                                        "grey",
+                                    )
+                                )
+
+                        if use_spacy and self.lang_code not in ["a", "b"]:
+                            # Non-English: use spaCy for pre-TTS segmentation
+                            self.log_updated.emit(
+                                (
+                                    "\nUsing spaCy for sentence segmentation (pre-TTS)...",
+                                    "grey",
+                                )
+                            )
+                            from abogen.spacy_utils import segment_sentences
+
+                            spacy_sentences = segment_sentences(
+                                segment_text,
+                                self.lang_code,
+                                log_callback=lambda msg: self.log_updated.emit(msg),
+                            )
+                            if spacy_sentences:
+                                self.log_updated.emit(
+                                    (
+                                        f"\nspaCy: Text segmented into {len(spacy_sentences)} sentences...",
+                                        "grey",
+                                    )
+                                )
+                                # For Sentence + Comma mode, still split on commas within spaCy sentences
+                                if self.subtitle_mode == "Sentence + Comma":
+                                    active_split_pattern = r"(?<=[{}]){}|\n+".format(
+                                        self.PUNCTUATION_COMMAS, spacing_pattern
                                     )
                                 else:
-                                    audio_bytes = result.audio.astype(
-                                        "float32"
-                                    ).tobytes()
-                                self._write_to_ffmpeg(
-                                    ffmpeg_proc,
-                                    audio_bytes,
-                                    "writing merged chapter audio",
+                                    active_split_pattern = (
+                                        "\n"  # Use newline splitting for Sentence mode
+                                    )
+                            else:
+                                self.log_updated.emit(
+                                    ("\nspaCy: Fallback to default segmentation...", "grey")
                                 )
-                            if chapter_out_file:
-                                chapter_out_file.write(result.audio)
-                            elif chapter_ffmpeg_proc:
-                                if hasattr(result.audio, "numpy"):
+
+                        # Process text - either as spaCy sentences or as single text
+                        text_segments = (
+                            spacy_sentences if spacy_sentences else [segment_text]
+                        )
+
+                        # Print active split pattern used by the TTS engine once for this batch
+                        try:
+                            print(f"Using split pattern: {active_split_pattern!r}")
+                        except Exception:
+                            # Print must never break processing
+                            print("Using split pattern: (unprintable)")
+
+                        for text_segment in text_segments:
+                            for result in self._iter_tts_results_with_safe_fallback(
+                                tts,
+                                text_segment,
+                                loaded_voice,
+                                self.speed,
+                                active_split_pattern,
+                            ):
+                                if self.cancel_requested:
+                                    if chapter_out_file:
+                                        chapter_out_file.close()
+                                    if merged_out_file:
+                                        merged_out_file.close()
+                                    self.conversion_finished.emit("Cancelled", None)
+                                    return
+                                current_segment += 1
+                                grapheme_len = len(result.graphemes)
+                                self.processed_char_count += grapheme_len
+                                # Log progress with both character counts and
+                                # the graphemes content.
+                                self.log_updated.emit(
+                                    f"\n{self.processed_char_count:,}/{self.total_char_count:,}: {result.graphemes}"
+                                )
+
+                                chunk_dur = len(result.audio) / rate
+                                chunk_start = current_time
+
+                                # Pre-encode audio to bytes once (used for any
+                                # FFmpeg pipe path; None if not needed).
+                                audio_bytes: Optional[bytes] = None
+                                needs_bytes = (
+                                    (merge_chapters_at_end and ffmpeg_proc is not None)
+                                    or chapter_ffmpeg_proc is not None
+                                )
+                                if needs_bytes:
+                                    raw = result.audio
                                     audio_bytes = (
-                                        result.audio.numpy().astype("float32").tobytes()
+                                        raw.numpy().astype("float32").tobytes()
+                                        if hasattr(raw, "numpy")
+                                        else raw.astype("float32").tobytes()
                                     )
-                                else:
-                                    audio_bytes = result.audio.astype(
-                                        "float32"
-                                    ).tobytes()
-                                self._write_to_ffmpeg(
-                                    chapter_ffmpeg_proc,
-                                    audio_bytes,
-                                    "writing per-chapter audio",
-                                )
-                            # Subtitle logic
-                            if self.subtitle_mode != "Disabled":
-                                tokens_list = getattr(result, "tokens", [])
 
-                                # Fallback for languages without token support (non-English)
-                                # Create a single token representing the entire segment duration
-                                if not tokens_list and result.graphemes:
+                                # --- Build subtitle lines on the main thread so
+                                # ordering and index state stay correct. ---
+                                merged_sub_lines: Optional[List[str]] = None
+                                chapter_sub_lines: Optional[List[str]] = None
 
-                                    class FakeToken:
-                                        def __init__(self, text, start, end):
-                                            self.text = text
-                                            self.start_ts = start
-                                            self.end_ts = end
-                                            self.whitespace = ""
+                                if self.subtitle_mode != "Disabled":
+                                    tokens_list = getattr(result, "tokens", [])
 
-                                    tokens_list = [
-                                        FakeToken(result.graphemes, 0, chunk_dur)
-                                    ]
+                                    # Fallback for languages without token support
+                                    # (non-English): treat the whole segment as one
+                                    # token spanning the full chunk duration.
+                                    if not tokens_list and result.graphemes:
 
-                                tokens_with_timestamps = []
-                                chapter_tokens_with_timestamps = []
+                                        class FakeToken:
+                                            """Single-token stand-in for non-phonemized languages."""
 
-                                # Process every token, regardless of text or timestamps
-                                for tok in tokens_list:
-                                    tokens_with_timestamps.append(
-                                        {
-                                            "start": chunk_start + (tok.start_ts or 0),
-                                            "end": chunk_start + (tok.end_ts or 0),
-                                            "text": tok.text,
-                                            "whitespace": tok.whitespace,
-                                        }
-                                    )
-                                    if chapter_out_file or chapter_ffmpeg_proc:
-                                        chapter_tokens_with_timestamps.append(
+                                            def __init__(self, text: str, start: float, end: float) -> None:
+                                                """Initialise with text and timestamps.
+
+                                                Parameters:
+                                                    text: The grapheme string.
+                                                    start: Start timestamp in seconds.
+                                                    end: End timestamp in seconds.
+                                                """
+                                                self.text = text
+                                                self.start_ts = start
+                                                self.end_ts = end
+                                                self.whitespace = ""
+
+                                        tokens_list = [
+                                            FakeToken(result.graphemes, 0, chunk_dur)
+                                        ]
+
+                                    tokens_with_timestamps = []
+                                    chapter_tokens_with_timestamps = []
+
+                                    for tok in tokens_list:
+                                        tokens_with_timestamps.append(
                                             {
-                                                "start": chapter_current_time
-                                                + (tok.start_ts or 0),
-                                                "end": chapter_current_time
-                                                + (tok.end_ts or 0),
+                                                "start": chunk_start + (tok.start_ts or 0),
+                                                "end": chunk_start + (tok.end_ts or 0),
                                                 "text": tok.text,
                                                 "whitespace": tok.whitespace,
                                             }
                                         )
-                                # Process tokens according to subtitle mode
-                                # Global subtitle processing ONLY if merging
-                                if merge_chapters_at_end:
-                                    # Incremental subtitle writing for merged output
-                                    new_entries = []
-                                    self._process_subtitle_tokens(
-                                        tokens_with_timestamps,
-                                        new_entries,
-                                        self.max_subtitle_words,
-                                        fallback_end_time=chunk_start + chunk_dur,
-                                    )
-                                    if merged_subtitle_file:
+                                        if chapter_out_file or chapter_ffmpeg_proc:
+                                            chapter_tokens_with_timestamps.append(
+                                                {
+                                                    "start": chapter_current_time
+                                                    + (tok.start_ts or 0),
+                                                    "end": chapter_current_time
+                                                    + (tok.end_ts or 0),
+                                                    "text": tok.text,
+                                                    "whitespace": tok.whitespace,
+                                                }
+                                            )
+
+                                    # --- Merged subtitle lines ---
+                                    if merge_chapters_at_end and merged_subtitle_file:
+                                        new_entries: List[Tuple[float, float, str]] = []
+                                        self._process_subtitle_tokens(
+                                            tokens_with_timestamps,
+                                            new_entries,
+                                            self.max_subtitle_words,
+                                            fallback_end_time=chunk_start + chunk_dur,
+                                        )
                                         subtitle_format = getattr(
                                             self, "subtitle_format", "srt"
                                         )
+                                        sub_lines: List[str] = []
                                         if "ass" in subtitle_format:
                                             for start, end, text in new_entries:
                                                 start_time = self._ass_time(start)
                                                 end_time = self._ass_time(end)
-                                                # Use karaoke effect for highlighting mode
                                                 effect = (
                                                     "karaoke"
                                                     if self.subtitle_mode
                                                     == "Sentence + Highlighting"
                                                     else ""
                                                 )
-                                                merged_subtitle_file.write(
+                                                sub_lines.append(
                                                     f"Dialogue: 0,{start_time},{end_time},Default,,{merged_subtitle_margin},{merged_subtitle_margin},0,{effect},{merged_subtitle_alignment_tag}{text}\n"
                                                 )
                                         else:
                                             for entry in new_entries:
                                                 start, end, text = entry
-                                                merged_subtitle_file.write(
+                                                sub_lines.append(
                                                     f"{merged_srt_index}\n{self._srt_time(start)} --> {self._srt_time(end)}\n{text}\n\n"
                                                 )
                                                 merged_srt_index += 1
-                                # Per-chapter subtitle processing for both file and ffmpeg_proc
-                                if chapter_out_file or chapter_ffmpeg_proc:
-                                    new_chapter_entries = []
-                                    self._process_subtitle_tokens(
-                                        chapter_tokens_with_timestamps,
-                                        new_chapter_entries,
-                                        self.max_subtitle_words,
-                                        fallback_end_time=chapter_current_time
-                                        + chunk_dur,
-                                    )
-                                    if chapter_subtitle_file:
+                                        merged_sub_lines = sub_lines or None
+
+                                    # --- Per-chapter subtitle lines ---
+                                    if (
+                                        chapter_subtitle_file
+                                        and (chapter_out_file or chapter_ffmpeg_proc)
+                                    ):
+                                        new_chapter_entries: List[Tuple[float, float, str]] = []
+                                        self._process_subtitle_tokens(
+                                            chapter_tokens_with_timestamps,
+                                            new_chapter_entries,
+                                            self.max_subtitle_words,
+                                            fallback_end_time=chapter_current_time
+                                            + chunk_dur,
+                                        )
                                         subtitle_format = getattr(
                                             self, "subtitle_format", "srt"
                                         )
+                                        ch_lines: List[str] = []
                                         if "ass" in subtitle_format:
                                             for start, end, text in new_chapter_entries:
                                                 start_time = self._ass_time(start)
                                                 end_time = self._ass_time(end)
-                                                # Use karaoke effect for highlighting mode
                                                 effect = (
                                                     "karaoke"
                                                     if self.subtitle_mode
                                                     == "Sentence + Highlighting"
                                                     else ""
                                                 )
-                                                chapter_subtitle_file.write(
+                                                ch_lines.append(
                                                     f"Dialogue: 0,{start_time},{end_time},Default,,{chapter_subtitle_margin},{chapter_subtitle_margin},0,{effect},{chapter_subtitle_alignment_tag}{text}\n"
                                                 )
                                         else:
                                             for entry in new_chapter_entries:
                                                 start, end, text = entry
-                                                chapter_subtitle_file.write(
+                                                ch_lines.append(
                                                     f"{chapter_srt_index}\n{self._srt_time(start)} --> {self._srt_time(end)}\n{text}\n\n"
                                                 )
                                                 chapter_srt_index += 1
-                            if merge_chapters_at_end:
-                                current_time += chunk_dur
-                                if chapter_out_file or chapter_ffmpeg_proc:
-                                    chapter_current_time += chunk_dur
-                            else:
-                                if chapter_out_file or chapter_ffmpeg_proc:
-                                    chapter_current_time += chunk_dur
-                            # Calculate percentage based on characters processed
-                            percent = min(
-                                int(
-                                    self.processed_char_count
-                                    / self.total_char_count
-                                    * 100
-                                ),
-                                99,
-                            )
+                                        chapter_sub_lines = ch_lines or None
 
-                            # Calculate ETR based on characters processed
-                            etr_str = "Processing..."
-                            chars_done = self.processed_char_count
-                            elapsed = time.time() - self.etr_start_time
+                                # --- Advance time accumulators (must happen on
+                                # main thread before the next result's chunk_start
+                                # is calculated). ---
+                                if merge_chapters_at_end:
+                                    current_time += chunk_dur
+                                    if chapter_out_file or chapter_ffmpeg_proc:
+                                        chapter_current_time += chunk_dur
+                                else:
+                                    if chapter_out_file or chapter_ffmpeg_proc:
+                                        chapter_current_time += chunk_dur
 
-                            # Calculate ETR if enough data is available
-                            if (
-                                chars_done > 0 and elapsed > 0.5
-                            ):  # Check elapsed > 0.5 to avoid instability
-                                avg_time_per_char = elapsed / chars_done
-                                remaining = (
-                                    self.total_char_count - self.processed_char_count
+                                # --- Dispatch write item to background thread. ---
+                                _audio_writer.submit(
+                                    _AudioWriteItem(
+                                        audio_data=result.audio,
+                                        audio_bytes=audio_bytes,
+                                        merged_out_file=merged_out_file
+                                        if merge_chapters_at_end
+                                        else None,
+                                        ffmpeg_proc=ffmpeg_proc
+                                        if merge_chapters_at_end
+                                        else None,
+                                        chapter_out_file=chapter_out_file,
+                                        chapter_ffmpeg_proc=chapter_ffmpeg_proc,
+                                        merged_subtitle_lines=merged_sub_lines,
+                                        chapter_subtitle_lines=chapter_sub_lines,
+                                        merged_subtitle_file=merged_subtitle_file,
+                                        chapter_subtitle_file=chapter_subtitle_file,
+                                    )
                                 )
-                                if remaining > 0:
-                                    secs = avg_time_per_char * remaining
-                                    h = int(secs // 3600)
-                                    m = int((secs % 3600) // 60)
-                                    s = int(secs % 60)
-                                    etr_str = f"{h:02d}:{m:02d}:{s:02d}"
 
-                            # Update progress more frequently (after each result)
-                            self.progress_updated.emit(percent, etr_str)
+                                # --- Update progress UI (main thread only). ---
+                                percent = min(
+                                    int(
+                                        self.processed_char_count
+                                        / self.total_char_count
+                                        * 100
+                                    ),
+                                    99,
+                                )
+                                etr_str = "Processing..."
+                                chars_done = self.processed_char_count
+                                elapsed = time.time() - self.etr_start_time
+                                if chars_done > 0 and elapsed > 0.5:
+                                    avg_time_per_char = elapsed / chars_done
+                                    remaining = (
+                                        self.total_char_count - self.processed_char_count
+                                    )
+                                    if remaining > 0:
+                                        secs = avg_time_per_char * remaining
+                                        h = int(secs // 3600)
+                                        m = int((secs % 3600) // 60)
+                                        s = int(secs % 60)
+                                        etr_str = f"{h:02d}:{m:02d}:{s:02d}"
+                                self.progress_updated.emit(percent, etr_str)
 
-                # Add silence between chapters for merged output (except after the last chapter)
-                if merge_chapters_at_end and chapter_idx < total_chapters:
-                    silence_samples = int(
-                        self.silence_duration * 24000
-                    )  # Silence duration at 24,000 Hz
-                    silence_audio = self.np.zeros(silence_samples, dtype="float32")
-                    silence_bytes = silence_audio.tobytes()
+                    # Add silence between chapters for merged output (except after the last chapter)
+                    if merge_chapters_at_end and chapter_idx < total_chapters:
+                        silence_samples = int(
+                            self.silence_duration * 24000
+                        )  # Silence duration at 24,000 Hz
+                        silence_audio = self.np.zeros(silence_samples, dtype="float32")
+                        silence_bytes = silence_audio.tobytes()
 
-                    if merged_out_file:
-                        merged_out_file.write(silence_audio)
-                    elif ffmpeg_proc:
-                        self._write_to_ffmpeg(
-                            ffmpeg_proc,
-                            silence_bytes,
-                            "writing merged chapter silence",
+                        # Submit silence to the background writer so I/O stays
+                        # overlapped with any remaining synthesis work.
+                        _audio_writer.submit(
+                            _AudioWriteItem(
+                                audio_data=silence_audio,
+                                audio_bytes=silence_bytes,
+                                merged_out_file=merged_out_file,
+                                ffmpeg_proc=ffmpeg_proc,
+                                chapter_out_file=None,
+                                chapter_ffmpeg_proc=None,
+                                merged_subtitle_lines=None,
+                                chapter_subtitle_lines=None,
+                                merged_subtitle_file=None,
+                                chapter_subtitle_file=None,
+                                write_context_merged="writing merged chapter silence",
+                                write_context_chapter="",
+                            )
                         )
 
-                    # Update timing for the silence
-                    current_time += self.silence_duration
+                        # Update timing for the silence
+                        current_time += self.silence_duration
+                        if chapter_out_file or chapter_ffmpeg_proc:
+                            chapter_current_time += self.silence_duration
+
+                    # Flush the writer before closing chapter file handles so the
+                    # background thread finishes all writes first.
+                    _audio_writer.flush()
+                    # Set chapter end time after processing
+                    if merge_chapters_at_end:
+                        chapter_time["end"] = current_time
+                    # Finalize chapter file for ffmpeg formats
                     if chapter_out_file or chapter_ffmpeg_proc:
-                        chapter_current_time += self.silence_duration
-
-                # Set chapter end time after processing
-                if merge_chapters_at_end:
-                    chapter_time["end"] = current_time
-                # Finalize chapter file for ffmpeg formats
-                if chapter_out_file or chapter_ffmpeg_proc:
-                    self.log_updated.emit(("\nProcessing chapter audio...", "grey"))
-                if chapter_ffmpeg_proc:
-                    self._finalize_ffmpeg_pipe(
-                        chapter_ffmpeg_proc,
-                        f"finalizing chapter {chapter_idx} output",
-                    )
-                if chapter_out_file:
-                    chapter_out_file.close()
-                # Close chapter subtitle file if open
-                if chapter_subtitle_file:
-                    chapter_subtitle_file.close()
-                if (
-                    save_chapters_separately
-                    and total_chapters > 1
-                    and self.subtitle_mode != "Disabled"
-                    and chapter_subtitle_path
-                ):
-                    self.log_updated.emit(
-                        (
-                            f"\nChapter {chapter_idx} saved to: {chapter_out_path}\n\nChapter subtitle saved to: {chapter_subtitle_path}",
-                            "green",
+                        self.log_updated.emit(("\nProcessing chapter audio...", "grey"))
+                    if chapter_ffmpeg_proc:
+                        self._finalize_ffmpeg_pipe(
+                            chapter_ffmpeg_proc,
+                            f"finalizing chapter {chapter_idx} output",
                         )
-                    )
-                elif chapter_out_path:
-                    self.log_updated.emit(
-                        (
-                            f"\nChapter {chapter_idx} saved to: {chapter_out_path}",
-                            "green",
+                    if chapter_out_file:
+                        chapter_out_file.close()
+                    # Close chapter subtitle file if open
+                    if chapter_subtitle_file:
+                        chapter_subtitle_file.close()
+                    if (
+                        save_chapters_separately
+                        and total_chapters > 1
+                        and self.subtitle_mode != "Disabled"
+                        and chapter_subtitle_path
+                    ):
+                        self.log_updated.emit(
+                            (
+                                f"\nChapter {chapter_idx} saved to: {chapter_out_path}\n\nChapter subtitle saved to: {chapter_subtitle_path}",
+                                "green",
+                            )
                         )
-                    )
-                if total_chapters > 1:
-                    self.chapter_progress_updated.emit(
-                        chapter_idx, total_chapters, chapter_name
-                    )
+                    elif chapter_out_path:
+                        self.log_updated.emit(
+                            (
+                                f"\nChapter {chapter_idx} saved to: {chapter_out_path}",
+                                "green",
+                            )
+                        )
+                    if total_chapters > 1:
+                        self.chapter_progress_updated.emit(
+                            chapter_idx, total_chapters, chapter_name
+                        )
             # Finalize merged output file ONLY if merging
             if merge_chapters_at_end:
                 self.log_updated.emit(("\nFinalizing audio. Please wait...", "grey"))
