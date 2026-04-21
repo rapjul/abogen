@@ -286,7 +286,7 @@ def test_apply_device_specific_defaults_mps_high_memory_tier() -> None:
     ) == (
         250,
         700,
-        2000,
+        1200,
     )
 
 
@@ -305,5 +305,5 @@ def test_apply_device_specific_defaults_cuda_unchanged() -> None:
     ) == (
         120,
         620,
-        1800,
+        1400,
     )
