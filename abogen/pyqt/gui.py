@@ -1036,6 +1036,10 @@ class abogen(QWidget):
         self.use_silent_gaps = self.config.get("use_silent_gaps", True)
         self.subtitle_speed_method = self.config.get("subtitle_speed_method", "tts")
         self.use_spacy_segmentation = self.config.get("use_spacy_segmentation", True)
+        # MLX backend settings (Apple Silicon only)
+        from abogen.tts_mlx import is_mlx_available, recommended_quantization
+        self.use_mlx_backend = self.config.get("use_mlx_backend", is_mlx_available())
+        self.mlx_quantization = self.config.get("mlx_quantization", recommended_quantization().name)
         # Word substitution settings
         self.word_substitutions_enabled = self.config.get(
             "word_substitutions_enabled", False
@@ -2892,6 +2896,9 @@ class abogen(QWidget):
             self.conversion_thread.subtitle_speed_method = self.subtitle_speed_method
             # Pass use_spacy_segmentation setting
             self.conversion_thread.use_spacy_segmentation = self.use_spacy_segmentation
+            # Pass MLX backend settings
+            self.conversion_thread.use_mlx_backend = self.use_mlx_backend
+            self.conversion_thread.mlx_quantization = self.mlx_quantization
             # Pass word substitution settings
             self.conversion_thread.word_substitutions_enabled = (
                 self.word_substitutions_enabled
@@ -4414,8 +4421,56 @@ class abogen(QWidget):
         )
         menu.addAction(spacy_action)
 
-        # Add separator
-        menu.addSeparator()
+        # -- MLX Apple Silicon acceleration settings --------------------------
+        try:
+            from abogen.tts_mlx import is_mlx_available, MLXQuantization
+
+            mlx_available = is_mlx_available()
+        except ImportError:
+            mlx_available = False
+
+        if mlx_available:
+            menu.addSeparator()
+
+            # MLX enable/disable toggle
+            mlx_action = QAction("Use MLX acceleration (Apple Silicon)", self)
+            mlx_action.setCheckable(True)
+            mlx_action.setChecked(self.use_mlx_backend)
+            mlx_action.setToolTip(
+                "Use the MLX framework for faster TTS on Apple Silicon.\n"
+                "Falls back to PyTorch if MLX is unavailable."
+            )
+            mlx_action.triggered.connect(
+                lambda checked: self._toggle_mlx_backend(checked)
+            )
+            menu.addAction(mlx_action)
+
+            # MLX quantization submenu
+            mlx_quant_menu = menu.addMenu("MLX model quantization")
+            mlx_quant_menu.setToolTip(
+                "Select the quantization level for the MLX Kokoro model.\n"
+                "Lower precision = faster inference but slightly lower quality."
+            )
+            mlx_quant_group = QActionGroup(self)
+            mlx_quant_group.setExclusive(True)
+
+            for quant in MLXQuantization:
+                label = f"{quant.display_label}\n  Speed: {quant.speed_description}  |  Quality: {quant.quality_description}"
+                action = QAction(quant.display_label, mlx_quant_menu)
+                action.setCheckable(True)
+                action.setChecked(self.mlx_quantization == quant.name)
+                action.setToolTip(
+                    f"Speed: {quant.speed_description}\n"
+                    f"Quality: {quant.quality_description}"
+                )
+                action.triggered.connect(
+                    lambda checked, q=quant: self._set_mlx_quantization(q)
+                )
+                mlx_quant_group.addAction(action)
+                mlx_quant_menu.addAction(action)
+
+            # Enable/disable quantization menu based on MLX toggle
+            mlx_quant_menu.setEnabled(self.use_mlx_backend)
 
         # Add "Pre-download models and voices for offline use" option
         predownload_action = QAction(
@@ -4504,6 +4559,26 @@ class abogen(QWidget):
     def toggle_spacy_segmentation(self, enabled):
         self.use_spacy_segmentation = enabled
         self.config["use_spacy_segmentation"] = enabled
+        save_config(self.config)
+
+    def _toggle_mlx_backend(self, enabled: bool) -> None:
+        """Toggle the MLX Apple Silicon TTS backend on or off.
+
+        Parameters:
+            enabled: Whether to enable MLX acceleration.
+        """
+        self.use_mlx_backend = enabled
+        self.config["use_mlx_backend"] = enabled
+        save_config(self.config)
+
+    def _set_mlx_quantization(self, quantization) -> None:
+        """Set the MLX Kokoro model quantization level.
+
+        Parameters:
+            quantization: An :class:`MLXQuantization` enum member.
+        """
+        self.mlx_quantization = quantization.name
+        self.config["mlx_quantization"] = quantization.name
         save_config(self.config)
 
     def restart_app(self):

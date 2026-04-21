@@ -89,6 +89,23 @@ uv tool install --python 3.13 abogen --with "kokoro @ git+https://github.com/hex
 uv tool install --python 3.12 abogen --with "kokoro @ git+https://github.com/hexgrad/kokoro.git,numpy<2"
 ```
 
+> [!TIP]
+> **Apple Silicon (M1/M2/M3/M4) users:** Enable faster native inference with the MLX backend. Install the optional `mlx-audio` package:
+> ```bash
+> # If installed via uv:
+> uv tool install --python 3.13 abogen[mlx] --with "kokoro @ git+https://github.com/hexgrad/kokoro.git,numpy<2"
+>
+> # If already installed, add the optional dependency:
+> pip install mlx-audio
+> ```
+> Then enable **Use MLX acceleration (Apple Silicon)** in Settings and choose a quantization level:
+> | Level | Speed vs BF16 | Quality |
+> |-------|---------------|---------|
+> | BF16 (full) | Baseline | Full quality — no degradation |
+> | 8-bit | ~1.2× faster | Minimal loss — virtually indistinguishable |
+> | 6-bit | ~1.3× faster | Very slight loss — barely perceptible |
+> | 4-bit | ~1.5× faster | Slight loss — minor artifacts possible |
+
 <details>
 <summary><b>Alternative: Install using pip (click to expand)</b></summary>
 
@@ -251,6 +268,8 @@ Here’s Abogen in action: in this demo, it processes ∼3,000 characters of tex
 | **Use silent gaps between subtitles** | Prevents unnecessary audio speed-up by letting speech continue into the silent gaps between subtitle etries. In short, it ignores the end times in subtitle entries and uses the silent space until the beginning of the next subtitle entry. When disabled, it speeds up the audio to fit the exact time interval specified in the subtitle. (for subtitle files). |
 | **Subtitle speed adjustment method** | Choose how to speed up audio when needed: `TTS Regeneration (better quality)` re-generates the audio at a faster speed, while `FFmpeg Time-stretch (better speed)` quickly speeds up the generated audio. (for subtitle files). |
 | **Use spaCy for sentence segmentation** | When this option is enabled, Abogen uses [spaCy](https://spacy.io/) to detect sentence boundaries more accurately, instead of using punctuation marks (like periods, question marks, etc.) to split sentences, which could incorrectly cut off phrases like "Mr." or "Dr.". With spaCy, sentences are divided more accurately. For non-English text, spaCy runs **before** audio generation to create sentence chunks. For English text, spaCy runs **during** subtitle generation to improve timing and readability. spaCy is only used when subtitle mode is `Sentence` or `Sentence + Comma`. If you prefer the old punctuation splitting method, you can turn this option off. |
+| **Use MLX acceleration (Apple Silicon)** | *(macOS ARM64 with `mlx-audio` installed only)* Switch the TTS backend from PyTorch to Apple's [MLX](https://github.com/ml-explore/mlx) framework for faster native inference on M-series chips. Falls back to PyTorch automatically if MLX is unavailable. |
+| **MLX model quantization** | *(Available only when MLX acceleration is enabled)* Select the weight precision for the MLX Kokoro model. Lower precision = smaller memory footprint and faster inference at a slight quality trade-off. Options: **BF16** (full quality, baseline speed), **8-bit** (~1.2× faster, minimal loss), **6-bit** (~1.3× faster, very slight loss), **4-bit** (~1.5× faster, slight loss). |
 | **Pre-download models and voices for offline use** | Opens a window that displays the available models and voices. Click `Download all` button to download all required models and voices, allowing you to use Abogen completely offline without any internet connection. |
 | **Disable Kokoro's internet access** | Prevents Kokoro from downloading models or voices from HuggingFace Hub, useful for offline use. |
 | **Check for updates at startup** | Automatically checks for updates when the program starts. |

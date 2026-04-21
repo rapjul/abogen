@@ -485,11 +485,32 @@ class ConversionThread(QThread):
         return [batch for batch in batches if batch]
 
     def _iter_tts_results_for_segments(
-        self, tts, segments, loaded_voice, speed, split_pattern
+        self,
+        tts,
+        segments,
+        loaded_voice,
+        speed,
+        split_pattern,
     ):
-        from abogen.word_substitution import convert_roman_numerals_to_numbers, expand_common_abbreviations
+        """Yield TTS results for each text segment.
+
+        Parameters:
+            tts: The TTS pipeline callable.
+            segments: List of text segments to synthesize.
+            loaded_voice: Pre-loaded voice tensor or identifier.
+            speed: Speech speed multiplier.
+            split_pattern: Regex pattern for sub-splitting within segments.
+        """
+        from abogen.word_substitution import (
+            convert_roman_numerals_to_numbers,
+            expand_common_abbreviations,
+        )
 
         for segment in segments:
+            # Skip empty or whitespace-only segments to avoid unnecessary
+            # TTS calls and Python loop overhead.
+            if not segment or not segment.strip():
+                continue
             tts_segment = convert_roman_numerals_to_numbers(segment)
             tts_segment = expand_common_abbreviations(tts_segment)
             for result in tts(
@@ -548,16 +569,22 @@ class ConversionThread(QThread):
 
         if device == "mps":
             total_memory_gb = self._get_total_memory_gb()
+            # Kokoro's quality sweet spot is ~100-250 tokens (~400-1000 chars).
+            # Chunks beyond ~250 tokens exhibit diminishing prosody quality and
+            # non-linear latency scaling. max_chars is capped accordingly.
+            # Source: NimbleEdge Kokoro optimization analysis & community benchmarks.
             if total_memory_gb <= 16:
                 tuned = BatchSizeProfile(100, 320, 700)
             elif total_memory_gb <= 32:
                 tuned = BatchSizeProfile(180, 450, 1000)
             elif total_memory_gb <= 64:
-                tuned = BatchSizeProfile(250, 700, 2000)
+                tuned = BatchSizeProfile(250, 700, 1200)
             else:
-                tuned = BatchSizeProfile(350, 1000, 3000)
+                tuned = BatchSizeProfile(350, 1000, 1400)
         elif device == "cuda":
-            tuned = BatchSizeProfile(120, 620, 1800)
+            # Same sweet-spot ceiling applies; CUDA benefits from larger
+            # target batches but should not exceed ~1400 chars max.
+            tuned = BatchSizeProfile(120, 620, 1400)
         else:
             tuned = BatchSizeProfile(160, 360, 680)
 
@@ -566,6 +593,13 @@ class ConversionThread(QThread):
             self.tts_batch_target_chars,
             self.tts_batch_max_chars,
         ) = tuned
+        # Store device-tuned originals as ceilings for the grow-back mechanism.
+        # These are the maximum values that batch sizes can recover to after
+        # being shrunk due to transient memory pressure.
+        self._device_tuned_min_chars = tuned[0]
+        self._device_tuned_target_chars = tuned[1]
+        self._device_tuned_max_chars = tuned[2]
+        self.batch_consecutive_successes = 0
         self.log_updated.emit(
             (
                 f"  - Device-tuned batch defaults for {device}: "
@@ -703,6 +737,84 @@ class ConversionThread(QThread):
         self._log_batch_sizes("- Active")
         return True
 
+    # Number of consecutive successful batches before attempting to grow back.
+    DEFAULT_BATCH_GROW_SUCCESS_THRESHOLD = 10
+    # Factor by which batch sizes grow back (inverse of shrink).
+    DEFAULT_BATCH_GROW_FACTOR = 1.15
+
+    def _auto_grow_batch_sizes_if_eligible(self):
+        """Gradually restore batch sizes toward device-tuned defaults after sustained success.
+
+        Called after each successful batch synthesis. Once the consecutive
+        success count reaches the threshold, batch sizes are nudged upward
+        (capped at the stored device-tuned originals so they never exceed
+        the Kokoro quality sweet spot).
+        """
+        success_count = int(getattr(self, "batch_consecutive_successes", 0)) + 1
+        self.batch_consecutive_successes = success_count
+
+        threshold = max(
+            1,
+            int(
+                getattr(
+                    self,
+                    "batch_grow_success_threshold",
+                    self.DEFAULT_BATCH_GROW_SUCCESS_THRESHOLD,
+                )
+            ),
+        )
+        if success_count < threshold:
+            return False
+
+        # Retrieve the original device-tuned ceilings (set during init).
+        orig_min = int(getattr(self, "_device_tuned_min_chars", 0))
+        orig_target = int(getattr(self, "_device_tuned_target_chars", 0))
+        orig_max = int(getattr(self, "_device_tuned_max_chars", 0))
+        if not orig_min or not orig_target or not orig_max:
+            return False  # No originals stored; can't grow back.
+
+        cur_min = int(getattr(self, "tts_batch_min_chars", orig_min))
+        cur_target = int(getattr(self, "tts_batch_target_chars", orig_target))
+        cur_max = int(getattr(self, "tts_batch_max_chars", orig_max))
+
+        # Already at or above device-tuned originals; nothing to grow.
+        if cur_min >= orig_min and cur_target >= orig_target and cur_max >= orig_max:
+            self.batch_consecutive_successes = 0
+            return False
+
+        grow_factor = float(
+            getattr(self, "batch_grow_factor", self.DEFAULT_BATCH_GROW_FACTOR)
+        )
+        grow_factor = max(1.01, min(grow_factor, 2.0))
+
+        new_min = min(orig_min, int(cur_min * grow_factor))
+        new_target = min(orig_target, int(cur_target * grow_factor))
+        new_max = min(orig_max, int(cur_max * grow_factor))
+
+        if new_target < new_min:
+            new_target = new_min
+        if new_max < new_target:
+            new_max = new_target
+
+        changed = (new_min, new_target, new_max) != (cur_min, cur_target, cur_max)
+        self.batch_consecutive_successes = 0
+
+        if not changed:
+            return False
+
+        self.tts_batch_min_chars = new_min
+        self.tts_batch_target_chars = new_target
+        self.tts_batch_max_chars = new_max
+        self.log_updated.emit(
+            (
+                "✓ Batch sizes recovered after sustained success: "
+                f"min {cur_min}→{new_min}, target {cur_target}→{new_target}, max {cur_max}→{new_max}",
+                "green",
+            )
+        )
+        self._log_batch_sizes("- Active")
+        return True
+
     def _iter_tts_results_with_safe_fallback(
         self,
         tts,
@@ -737,12 +849,17 @@ class ConversionThread(QThread):
                 self.batch_failure_count = 0
                 if int(getattr(self, "batch_shrink_cooldown_remaining", 0)) > 0:
                     self.batch_shrink_cooldown_remaining -= 1
+                # After a successful batch, try to grow sizes back toward
+                # device-tuned defaults (only if they were previously shrunk).
+                self._auto_grow_batch_sizes_if_eligible()
             except Exception as exc:
                 eligible_for_shrink = self._is_batch_shrink_eligible_exception(exc)
                 if eligible_for_shrink:
                     self._auto_shrink_batch_sizes_if_needed()
                 else:
                     self.batch_failure_count = 0
+                # Reset consecutive success counter on any failure.
+                self.batch_consecutive_successes = 0
                 self.log_updated.emit(
                     (
                         "⚠ Sentence-batch synth failed, retrying with safer split mode...",
@@ -1269,10 +1386,58 @@ class ConversionThread(QThread):
             if self.use_sentence_char_batching:
                 self._log_batch_sizes("  - Active")
 
-            tts = self.KPipeline(
-                lang_code=self.lang_code, repo_id="hexgrad/Kokoro-82M", device=device
-            )
-            self.log_updated.emit("\n\nUsing the Kokoro TTS pipeline.")
+            # Try MLX backend first if the user opted in and it's available.
+            from abogen.tts_mlx import is_mlx_available
+            use_mlx = getattr(self, "use_mlx_backend", is_mlx_available())
+            tts = None
+            if use_mlx:
+                try:
+                    from abogen.tts_mlx import is_mlx_available, MLXKokoroPipeline, MLXQuantization
+
+                    if is_mlx_available():
+                        from abogen.tts_mlx import recommended_quantization
+                        mlx_quant_name = getattr(
+                            self, "mlx_quantization", recommended_quantization().name
+                        )
+                        try:
+                            mlx_quant = MLXQuantization[mlx_quant_name]
+                        except KeyError:
+                            mlx_quant = MLXQuantization.BF16
+                        tts = MLXKokoroPipeline(
+                            lang_code=self.lang_code,
+                            quantization=mlx_quant,
+                        )
+                        self.log_updated.emit(
+                            (
+                                f"\n\nUsing MLX Kokoro pipeline ({mlx_quant.display_label}).",
+                                "green",
+                            )
+                        )
+                    else:
+                        self.log_updated.emit(
+                            (
+                                "MLX backend requested but not available — "
+                                "falling back to PyTorch KPipeline.",
+                                "orange",
+                            )
+                        )
+                except Exception as mlx_exc:
+                    self.log_updated.emit(
+                        (
+                            f"MLX backend failed to initialise: {mlx_exc} — "
+                            "falling back to PyTorch KPipeline.",
+                            "orange",
+                        )
+                    )
+
+            # Fall back to the standard PyTorch KPipeline.
+            if tts is None:
+                tts = self.KPipeline(
+                    lang_code=self.lang_code,
+                    repo_id="hexgrad/Kokoro-82M",
+                    device=device,
+                )
+                self.log_updated.emit("\n\nUsing the Kokoro TTS pipeline.")
 
             # Check if the input is a subtitle file or timestamp text file
             is_subtitle_file = False
