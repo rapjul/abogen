@@ -1601,29 +1601,36 @@ class abogen(QWidget):
         )
         container_layout.addWidget(self.controls_widget)
         # Overall progress section (current item and queue position)
-        self.overall_progress_label = QLabel("Overall progress", self)
+        self.overall_progress_label = QLabel("<b>Overall Progress</b>", self)
+        self.overall_progress_label.setStyleSheet("font-size: 14px; margin-bottom: -2px; margin-top: 5px;")
         self.overall_progress_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.overall_progress_label.hide()
         container_layout.addWidget(self.overall_progress_label)
 
         # Main progress bar (still used for single conversion and queue item progress)
         self.progress_bar = QProgressBar(self)
+        self.progress_bar.setFixedHeight(22)  # Make it slightly cleaner
         self.progress_bar.setValue(0)
         self.progress_bar.hide()
         container_layout.addWidget(self.progress_bar)
 
         # Chapter progress section
-        self.chapter_progress_label = QLabel("Chapter progress", self)
+        self.chapter_progress_label = QLabel("<b>Chapter Progress</b>", self)
+        self.chapter_progress_label.setStyleSheet("font-size: 14px; margin-bottom: -2px; margin-top: 15px;") # larger top margin for separation
         self.chapter_progress_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.chapter_progress_label.hide()
         container_layout.addWidget(self.chapter_progress_label)
+        
         self.chapter_progress_bar = QProgressBar(self)
+        self.chapter_progress_bar.setFixedHeight(22)
         self.chapter_progress_bar.setMinimum(0)
         self.chapter_progress_bar.setMaximum(1)
         self.chapter_progress_bar.setValue(0)
         self.chapter_progress_bar.hide()
         container_layout.addWidget(self.chapter_progress_bar)
+        
         self.current_chapter_label = QLabel("", self)
+        self.current_chapter_label.setStyleSheet("font-style: italic; color: #777; margin-top: 2px;")
         self.current_chapter_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.current_chapter_label.hide()
         container_layout.addWidget(self.current_chapter_label)
@@ -2393,8 +2400,9 @@ class abogen(QWidget):
         ):
             N = self.current_queue_index + 1
             M = len(self.queued_items)
-            percent = value if value is not None else self.progress_bar.value()
-            return f"{percent}% ({N}/{M})"
+            current_value = value if value is not None else 0
+            overall_percent = int(((N - 1) * 100 + current_value) / M)
+            return f"{overall_percent}% ({N}/{M})"
         else:
             percent = value if value is not None else self.progress_bar.value()
             return f"{percent}%"
@@ -2403,7 +2411,7 @@ class abogen(QWidget):
         # Ensure progress doesn't exceed 99%
         if value >= 100:
             value = 99
-        self.progress_bar.setValue(value)
+        
         # Show queue progress if in queue mode
         if (
             hasattr(self, "queued_items")
@@ -2412,8 +2420,11 @@ class abogen(QWidget):
         ):
             N = self.current_queue_index + 1
             M = len(self.queued_items)
-            self.progress_bar.setFormat(f"{value}% ({N}/{M})")
+            overall_percent = int(((N - 1) * 100 + value) / M)
+            self.progress_bar.setValue(overall_percent)
+            self.progress_bar.setFormat(f"{overall_percent}% ({N}/{M})")
         else:
+            self.progress_bar.setValue(value)
             self.progress_bar.setFormat(f"{value}%")
         self.etr_label.setText(
             f"Estimated time remaining: {etr_str}"
@@ -2620,8 +2631,9 @@ class abogen(QWidget):
         self.queue_cancel_summary_shown = False
         # Set progress bar to 0% (1/M) immediately
         if self.queued_items:
+            overall_percent = self._get_queue_progress_format(0)
             self.progress_bar.setValue(0)
-            self.progress_bar.setFormat(f"0% (1/{len(self.queued_items)})")
+            self.progress_bar.setFormat(overall_percent)
             self.progress_bar.show()
         self.start_next_queued_item()
 
@@ -2816,7 +2828,9 @@ class abogen(QWidget):
         ):
             N = self.current_queue_index + 1
             M = len(self.queued_items)
-            self.progress_bar.setFormat(f"0% ({N}/{M})")
+            overall_percent = int(((N - 1) * 100) / M)
+            self.progress_bar.setValue(overall_percent)
+            self.progress_bar.setFormat(f"{self._get_queue_progress_format(0)}")
         else:
             self.progress_bar.setFormat("%p%")  # Reset format initially
         self.etr_label.hide()  # Hide ETR label initially
