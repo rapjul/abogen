@@ -92,6 +92,8 @@ rocm = [
   "torch; sys_platform == 'linux'",
   "pytorch-triton-rocm; sys_platform == 'linux'"
 ]
+# Apple Silicon acceleration via MLX       # uv tool install abogen[mlx]
+mlx = ["mlx-audio; sys_platform == 'darwin'"]
 
 [dependency-groups]
 dev = [
