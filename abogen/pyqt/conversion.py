@@ -1052,14 +1052,35 @@ class ConversionThread(QThread):
             text_segment
         ]
         for batched_segment in batched_segments:
+            # Pre-apply word substitutions so we can track progress against the text tts actually sees
+            from abogen.word_substitution import (
+                convert_roman_numerals_to_numbers,
+                expand_common_abbreviations,
+            )
+
+            tts_segment = convert_roman_numerals_to_numbers(batched_segment)
+            tts_segment = expand_common_abbreviations(tts_segment)
+
+            remaining_text = tts_segment
+            batch_yield_count = 0
+
             try:
-                yield from self._iter_tts_results_for_segments(
-                    tts,
-                    [batched_segment],
-                    loaded_voice,
-                    speed,
-                    None,
-                )
+                # We iterate manually to track progress and avoid duplication on fallback
+                for result in tts(
+                    remaining_text,
+                    voice=loaded_voice,
+                    speed=speed,
+                    split_pattern=None,
+                ):
+                    yield result
+                    batch_yield_count += 1
+                    # Track progress: remove the graphemes of this result from remaining_text
+                    if hasattr(result, "graphemes") and result.graphemes:
+                        # Find the first occurrence and slice
+                        idx = remaining_text.find(result.graphemes)
+                        if idx != -1:
+                            remaining_text = remaining_text[idx + len(result.graphemes) :].strip()
+
                 self.batch_failure_count = 0
                 if int(getattr(self, "batch_shrink_cooldown_remaining", 0)) > 0:
                     self.batch_shrink_cooldown_remaining -= 1
@@ -1074,20 +1095,33 @@ class ConversionThread(QThread):
                     self.batch_failure_count = 0
                 # Reset consecutive success counter on any failure.
                 self.batch_consecutive_successes = 0
-                self.log_updated.emit(
-                    (
-                        "⚠ Sentence-batch synth failed, retrying with safer split mode...",
-                        "orange",
+
+                if batch_yield_count > 0:
+                    self.log_updated.emit(
+                        (
+                            f"⚠ Batch failed after {batch_yield_count} results. Resuming remaining text...",
+                            "orange",
+                        )
                     )
-                )
-                print(f"Sentence-batch fallback triggered: {type(exc).__name__}: {exc}")
-                yield from self._iter_tts_results_for_segments(
-                    tts,
-                    [batched_segment],
-                    loaded_voice,
-                    speed,
-                    active_split_pattern,
-                )
+                    print(f"Partial batch fallback: {type(exc).__name__}: {exc}")
+                else:
+                    self.log_updated.emit(
+                        (
+                            "⚠ Sentence-batch synth failed, retrying with safer split mode...",
+                            "orange",
+                        )
+                    )
+                    print(f"Full batch fallback: {type(exc).__name__}: {exc}")
+
+                if remaining_text.strip():
+                    # Retry only the remaining text with granular splitting
+                    yield from self._iter_tts_results_for_segments(
+                        tts,
+                        [remaining_text],
+                        loaded_voice,
+                        speed,
+                        active_split_pattern,
+                    )
 
     def __init__(
         self,
@@ -1651,6 +1685,17 @@ class ConversionThread(QThread):
                     repo_id="hexgrad/Kokoro-82M",
                     device=device,
                 )
+                # Apply FP16 optimization if on GPU
+                if device in ("cuda", "mps") and hasattr(tts, "model"):
+                    try:
+                        tts.model = tts.model.half()
+                        self.log_updated.emit(
+                            ("  - Using FP16 inference for faster synthesis.", "grey")
+                        )
+                    except Exception as e:
+                        self.log_updated.emit(
+                            (f"  - Failed to enable FP16: {e}", "orange")
+                        )
                 self.log_updated.emit("\n\nUsing the Kokoro TTS pipeline.")
 
             # Check if the input is a subtitle file or timestamp text file

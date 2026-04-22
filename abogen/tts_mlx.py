@@ -16,7 +16,10 @@ import logging
 import platform
 import sys
 from dataclasses import dataclass
-from typing import Any, Iterator, Optional
+from typing import Any, Iterator, List, Optional
+from types import SimpleNamespace
+import numpy as np
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -254,10 +257,6 @@ class MLXKokoroPipeline:
             :class:`MLXSegmentResult` instances with ``.audio`` (NumPy
             float32) and ``.graphemes`` (str) attributes.
         """
-        import re
-        import numpy as np
-
-        # Determine voice name — warn if a blending formula is detected.
         voice_name: str
         if isinstance(voice, str):
             voice_name = voice
@@ -290,6 +289,10 @@ class MLXKokoroPipeline:
             text_segments = [text.strip()] if text.strip() else []
 
         for segment_text in text_segments:
+            chunk_audios = []
+            chunk_tokens = []
+            current_offset = 0.0
+
             for result in self._model.generate(
                 text=segment_text,
                 voice=voice_name,
@@ -302,12 +305,30 @@ class MLXKokoroPipeline:
                 raw_audio = getattr(result, "audio", None)
                 if raw_audio is None:
                     continue
+
                 audio_np = np.array(raw_audio, copy=False).astype(np.float32)
-                # Assign the known segment text
-                graphemes = segment_text
+                chunk_audios.append(audio_np)
+
+                # Collect and shift tokens for accurate subtitle alignment
                 tokens = getattr(result, "tokens", None)
+                if tokens:
+                    for t in tokens:
+                        # We need to shift start/end times by the cumulative duration of previous chunks
+                        from types import SimpleNamespace
+
+                        t_new = SimpleNamespace(
+                            text=getattr(t, "text", ""),
+                            start=getattr(t, "start", 0.0) + current_offset,
+                            end=getattr(t, "end", 0.0) + current_offset,
+                        )
+                        chunk_tokens.append(t_new)
+
+                # Update offset based on audio duration (assuming 24kHz Kokoro)
+                current_offset += len(audio_np) / 24000.0
+
+            if chunk_audios:
                 yield MLXSegmentResult(
-                    graphemes=graphemes,
-                    audio=audio_np,
-                    tokens=tokens,
+                    graphemes=segment_text,
+                    audio=np.concatenate(chunk_audios),
+                    tokens=chunk_tokens if chunk_tokens else None,
                 )
