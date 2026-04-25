@@ -10,6 +10,8 @@ import sys
 import tempfile
 import threading
 import time
+import gc
+import psutil
 
 from PyQt6.QtCore import (
     QBuffer,
@@ -1106,8 +1108,12 @@ class abogen(QWidget):
         self.fix_nonstandard_punctuation = self.config.get(
             "fix_nonstandard_punctuation", False
         )
+        self.tts_model_cache_mode = self.config.get("tts_model_cache_mode", "auto")
         self._pending_close_event = None
         self.gpu_ok = False  # Initialize GPU availability status
+        self.active_tts_model = None
+        self.active_tts_config = {}
+        self.queue_baseline_rss = 0
 
         # Create thread-safe logging mechanism
         self.log_signal = ThreadSafeLogSignal()
@@ -2924,6 +2930,11 @@ class abogen(QWidget):
         self.btn_cancel.show()
         QApplication.processEvents()
         self.btn_cancel.setEnabled(False)
+
+        # Record memory baseline if starting a new queue
+        if from_queue and self.current_queue_index == 0:
+            self.queue_baseline_rss = self._get_process_rss()
+
         self.start_time = time.time()
         self.finish_widget.hide()
         speed = self.speed_slider.value() / 100.0
@@ -2974,6 +2985,8 @@ class abogen(QWidget):
                 use_gpu=self.gpu_ok,
                 from_queue=from_queue,
                 save_base_path=self.displayed_file_path,  # Pass the save base path (original file for EPUB)
+                shared_model=self.active_tts_model,
+                shared_model_config=self.active_tts_config,
             )  # Use gpu_ok status
             # Pass the displayed file path to the log_updated signal handler in ConversionThread
             self.conversion_thread.display_path = display_path
@@ -3045,6 +3058,7 @@ class abogen(QWidget):
             self.conversion_thread.conversion_finished.connect(
                 self.on_conversion_finished
             )
+            self.conversion_thread.model_created.connect(self.on_model_created)
 
             # Connect chapters_detected signal
             self.conversion_thread.chapters_detected.connect(
@@ -3418,12 +3432,106 @@ class abogen(QWidget):
             if self.queued_items:
                 self.show_queue_summary(outcome="completed")
         else:
-            # More items in queue: clear log and reload for next item
+            # More items in queue: clear log and potentially reload/reuse model
             self._clear_log_display_and_buffer()
+
+            # Decide whether to keep the model based on settings and system state
+            should_cache = self.should_cache_model()
+            
+            # Safety Check: Even if we want to cache, check for significant memory growth
+            current_rss = self._get_process_rss()
+            over_limit = False
+            if self.queue_baseline_rss > 0:
+                growth_mb = (current_rss - self.queue_baseline_rss) / (1024 * 1024)
+                if growth_mb > 300:
+                    self.update_log(
+                        (
+                            f"⚠ Significant memory growth detected ({growth_mb:.1f}MB). "
+                            "Forcing model reload for the next item to ensure stability.",
+                            "orange",
+                        )
+                    )
+                    over_limit = True
+
+            if not should_cache or over_limit:
+                self.purge_tts_model()
+            
             QApplication.processEvents()
+
+        # Final cleanup if the queue is finished or it was a single job
+        is_last_item = (
+            not self.queued_items
+            or self.current_queue_index + 1 >= len(self.queued_items)
+        )
+        if is_last_item or message == "Cancelled":
+            self.purge_tts_model()
 
         # Start new queued item, if we're using a queued conversion
         self.queue_item_conversion_finished()
+
+    def on_model_created(self, model, config):
+        """Store the newly created TTS model for persistence during the session."""
+        self.active_tts_model = model
+        self.active_tts_config = config
+
+    def _get_process_rss(self):
+        """Get current process Resident Set Size (RSS) in bytes."""
+        try:
+            process = psutil.Process(os.getpid())
+            return process.memory_info().rss
+        except Exception:
+            return 0
+
+    def should_cache_model(self):
+        """Determine if the model should be kept in memory between queue items."""
+        mode = self.tts_model_cache_mode
+        if mode == "on":
+            return True
+        if mode == "off":
+            return False
+            
+        # "auto" mode logic:
+        # 1. Check system RAM. If < 16GB, be conservative.
+        try:
+            total_ram_gb = psutil.virtual_memory().total / (1024**3)
+            if total_ram_gb < 15.5:  # ~16GB allowing for reporting differences
+                return False
+                
+            # 2. Check available memory. If < 2GB free, don't cache.
+            available_ram_gb = psutil.virtual_memory().available / (1024**3)
+            if available_ram_gb < 2.0:
+                return False
+        except Exception:
+            # Fallback if psutil fails
+            return False
+            
+        return True
+
+    def set_model_cache_mode(self, mode):
+        """Set the TTS model caching mode and save to config."""
+        self.tts_model_cache_mode = mode
+        self.config["tts_model_cache_mode"] = mode
+        save_config(self.config)
+        self.update_log((f"  - TTS model caching set to: {mode}", "grey"))
+        if mode == "off":
+            self.purge_tts_model()
+
+    def purge_tts_model(self):
+        """Purge the cached TTS model from memory."""
+        if self.active_tts_model is not None:
+            self.active_tts_model = None
+            self.active_tts_config = {}
+            gc.collect()
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                elif hasattr(torch, "backends") and hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                    # No explicit empty_cache for MPS, but GC handles it
+                    pass
+            except ImportError:
+                pass
+            self.update_log(("  - TTS model released from memory.", "grey"))
 
     def reset_ui(self):
         try:
@@ -4377,6 +4485,29 @@ class abogen(QWidget):
             theme_menu.addAction(theme_action)
 
         menu.addMenu(theme_menu)
+
+        # TTS Model Caching menu
+        cache_menu = QMenu("TTS model caching", self)
+        cache_menu.setToolTip("Control whether the TTS model stays in memory between queue items. Auto mode adapts to your system RAM. A safety check will force a reload if the program's memory grows more than 300MB.")
+        
+        cache_group = QActionGroup(self)
+        cache_group.setExclusive(True)
+        
+        cache_options = [
+            ("auto", "Auto (recommended)"),
+            ("on", "On"),
+            ("off", "Off"),
+        ]
+        
+        for value, text in cache_options:
+            action = QAction(text, self)
+            action.setCheckable(True)
+            action.setChecked(self.tts_model_cache_mode == value)
+            action.triggered.connect(lambda checked, v=value: self.set_model_cache_mode(v))
+            cache_group.addAction(action)
+            cache_menu.addAction(action)
+            
+        menu.addMenu(cache_menu)
 
         # Add separate chapters format option
         separate_chapters_format_menu = QMenu("Separate chapters audio format", self)

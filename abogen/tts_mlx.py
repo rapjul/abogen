@@ -16,8 +16,7 @@ import logging
 import platform
 import sys
 from dataclasses import dataclass
-from typing import Any, Iterator, List, Optional
-from types import SimpleNamespace
+from typing import Any, Iterator, Optional
 import numpy as np
 import re
 
@@ -215,6 +214,7 @@ class MLXKokoroPipeline:
         self,
         lang_code: str = "a",
         quantization: MLXQuantization = MLXQuantization.BF16,
+        model: Optional[Any] = None,
     ) -> None:
         if not is_mlx_available():
             raise RuntimeError(
@@ -222,16 +222,20 @@ class MLXKokoroPipeline:
                 "the mlx-audio package installed (pip install mlx-audio)."
             )
 
-        from mlx_audio.tts.utils import load_model
+        if model is not None:
+            self._model = model
+        else:
+            from mlx_audio.tts.utils import load_model
+            self._model = load_model(quantization.model_path)
 
-        self._model = load_model(quantization.model_path)
         self._lang_code = lang_code
         self._quantization = quantization
         logger.info(
-            "MLX Kokoro pipeline initialised: lang=%s, quant=%s, model=%s",
+            "MLX Kokoro pipeline initialised: lang=%s, quant=%s, model=%s (reused=%s)",
             lang_code,
             quantization.name,
             quantization.model_path,
+            model is not None,
         )
 
     def __call__(

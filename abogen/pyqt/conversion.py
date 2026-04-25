@@ -569,6 +569,7 @@ class ConversionThread(QThread):
     conversion_finished = pyqtSignal(object, object)  # Pass output path as second arg
     log_updated = pyqtSignal(object)  # Updated signal for log updates
     chapters_detected = pyqtSignal(int)  # Signal for chapter detection
+    model_created = pyqtSignal(object, dict)  # (model_instance, config_dict)
 
     # Punctuation constants for unified handling across languages
     PUNCTUATION_SENTENCE = ".!?।。！？"
@@ -1141,8 +1142,12 @@ class ConversionThread(QThread):
         use_gpu=True,
         from_queue=False,
         save_base_path=None,
+        shared_model=None,
+        shared_model_config=None,
     ):  # Add use_gpu parameter
         super().__init__()
+        self.shared_model = shared_model
+        self.shared_model_config = shared_model_config or {}
         self._chapter_options_event = threading.Event()
         self._timestamp_response_event = threading.Event()
         self.np = np_module
@@ -1651,6 +1656,7 @@ class ConversionThread(QThread):
                     if is_mlx_available():
                         from abogen.tts_mlx import recommended_quantization
 
+                        # --- PERSISTENCE: Reuse shared model if available ---
                         mlx_quant_name = getattr(
                             self, "mlx_quantization", recommended_quantization().name
                         )
@@ -1658,10 +1664,36 @@ class ConversionThread(QThread):
                             mlx_quant = MLXQuantization[mlx_quant_name]
                         except KeyError:
                             mlx_quant = MLXQuantization.BF16
+
+                        mlx_model = None
+                        if (
+                            self.shared_model
+                            and self.use_mlx_backend
+                            and self.shared_model_config.get("backend") == "mlx"
+                            and self.shared_model_config.get("quantization")
+                            == mlx_quant_name
+                        ):
+                            mlx_model = self.shared_model
+                            self.log_updated.emit(
+                                ("  - Reusing existing MLX model from memory.", "grey")
+                            )
+                        else:
+                            self.log_updated.emit("Initialising MLX Kokoro pipeline...")
+                            # If we have an incompatible shared model, it will be replaced
+                            from mlx_audio.tts.utils import load_model
+
+                            mlx_model = load_model(mlx_quant.model_path)
+                            self.model_created.emit(
+                                mlx_model,
+                                {"backend": "mlx", "quantization": mlx_quant_name},
+                            )
+
                         tts = MLXKokoroPipeline(
                             lang_code=self.lang_code,
                             quantization=mlx_quant,
+                            model=mlx_model,
                         )
+
                         self.log_updated.emit(
                             (
                                 f"\n\nUsing MLX Kokoro pipeline ({mlx_quant.display_label}).",
@@ -1687,22 +1719,40 @@ class ConversionThread(QThread):
 
             # Fall back to the standard PyTorch KPipeline.
             if tts is None:
+                # --- PERSISTENCE: Reuse shared PyTorch model if available ---
+                shared_kmodel = None
+                if (
+                    self.shared_model
+                    and not self.use_mlx_backend
+                    and self.shared_model_config.get("backend") == "pytorch"
+                ):
+                    shared_kmodel = self.shared_model
+                    self.log_updated.emit(
+                        ("  - Reusing existing PyTorch model from memory.", "grey")
+                    )
+
                 tts = self.KPipeline(
                     lang_code=self.lang_code,
                     repo_id="hexgrad/Kokoro-82M",
                     device=device,
+                    model=shared_kmodel or True,
                 )
-                # Apply FP16 optimization if on GPU
-                if device in ("cuda", "mps") and hasattr(tts, "model"):
-                    try:
-                        tts.model = tts.model.half()
-                        self.log_updated.emit(
-                            ("  - Using FP16 inference for faster synthesis.", "grey")
-                        )
-                    except Exception as e:
-                        self.log_updated.emit(
-                            (f"  - Failed to enable FP16: {e}", "orange")
-                        )
+
+                # If a new model was created, emit it for the GUI to cache
+                if shared_kmodel is None and hasattr(tts, "model") and tts.model:
+                    # Apply FP16 optimization if on GPU
+                    if device in ("cuda", "mps"):
+                        try:
+                            tts.model = tts.model.half()
+                            self.log_updated.emit(
+                                (
+                                    "  - Using FP16 inference for faster synthesis.",
+                                    "grey",
+                                )
+                            )
+                        except Exception:
+                            pass
+                    self.model_created.emit(tts.model, {"backend": "pytorch"})
                 self.log_updated.emit("\n\nUsing the Kokoro TTS pipeline.")
 
             # Check if the input is a subtitle file or timestamp text file
