@@ -24,20 +24,6 @@ from PyQt6.QtCore import (
     QTimer,
     QUrl,
     pyqtSignal,
-)
-from PyQt6.QtGui import (
-    QAction,
-    QActionGroup,
-    QColor,
-    QDesktopServices,
-    QIcon,
-    QMovie,
-    QPainter,
-    QPalette,
-    QPixmap,
-    QPolygon,
-    QTextCursor,
-)
 from PyQt6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -61,6 +47,20 @@ from PyQt6.QtWidgets import (
     QTextEdit,
     QVBoxLayout,
     QWidget,
+)
+from PyQt6.QtGui import (
+    QAction,
+    QActionGroup,
+    QColor,
+    QDesktopServices,
+    QFontMetrics,
+    QIcon,
+    QMovie,
+    QPainter,
+    QPalette,
+    QPixmap,
+    QPolygon,
+    QTextCursor,
 )
 
 import abogen.hf_tracker as hf_tracker
@@ -105,6 +105,54 @@ from abogen.utils import (
     save_config,
 )
 from abogen.voice_profiles import load_profiles
+
+logger = logging.getLogger(__name__)
+
+
+class ElidedLabel(QLabel):
+    """A QLabel that elides text that is too wide for its current size."""
+
+    def __init__(self, text="", parent=None):
+        super().__init__(text, parent)
+        self._full_text = text
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.setMinimumWidth(1)  # Allow it to be smaller than its text hint
+
+    def setText(self, text):
+        """Set the full text and update the elided display."""
+        self._full_text = text or ""
+        self._update_elided_text()
+
+    def resizeEvent(self, event):
+        """Handle resize events by re-eliding the text."""
+        super().resizeEvent(event)
+        self._update_elided_text()
+
+    def _update_elided_text(self):
+        """Calculate and set the elided version of the full text."""
+        # If the widget isn't yet laid out or visible, we might not have a valid width.
+        # But elidedText will handle small widths gracefully.
+        metrics = QFontMetrics(self.font())
+        elided = metrics.elidedText(
+            self._full_text, Qt.TextElideMode.ElideRight, self.width()
+        )
+        super().setText(elided)
+        # Show full text as tooltip if it's elided
+        if elided != self._full_text:
+            self.setToolTip(self._full_text)
+        else:
+            self.setToolTip("")
+
+    def fullText(self):
+        """Return the original non-elided text."""
+        return self._full_text
+
+    def sizeHint(self):
+        """Return a small width hint to prevent the label from widening its parent window."""
+        hint = super().sizeHint()
+        hint.setWidth(10)  # Allow the layout to shrink this label
+        return hint
+
 
 # Import ctypes for Windows-specific taskbar icon
 if platform.system() == "Windows":
@@ -1549,7 +1597,7 @@ class abogen(QWidget):
         save_path_row.setContentsMargins(0, 0, 0, 0)
         selected_folder_label = QLabel("Selected folder:", self.save_path_row_widget)
         save_path_row.addWidget(selected_folder_label)
-        self.save_path_label = QLabel("", self.save_path_row_widget)
+        self.save_path_label = ElidedLabel("", self.save_path_row_widget)
         self.save_path_label.setStyleSheet(f"QLabel {{ color: {COLORS['GREEN']}; }}")
         self.save_path_label.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
@@ -1620,7 +1668,7 @@ class abogen(QWidget):
         self.chapter_progress_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.chapter_progress_label.hide()
         container_layout.addWidget(self.chapter_progress_label)
-        
+
         self.chapter_progress_bar = QProgressBar(self)
         self.chapter_progress_bar.setFixedHeight(22)
         self.chapter_progress_bar.setMinimum(0)
@@ -1628,8 +1676,8 @@ class abogen(QWidget):
         self.chapter_progress_bar.setValue(0)
         self.chapter_progress_bar.hide()
         container_layout.addWidget(self.chapter_progress_bar)
-        
-        self.current_chapter_label = QLabel("", self)
+
+        self.current_chapter_label = ElidedLabel("", self)
         self.current_chapter_label.setStyleSheet("font-style: italic; color: #777; margin-top: 2px;")
         self.current_chapter_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.current_chapter_label.hide()
@@ -2411,7 +2459,7 @@ class abogen(QWidget):
         # Ensure progress doesn't exceed 99%
         if value >= 100:
             value = 99
-        
+
         # Show queue progress if in queue mode
         if (
             hasattr(self, "queued_items")

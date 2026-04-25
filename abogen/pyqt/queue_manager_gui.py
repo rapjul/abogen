@@ -85,21 +85,32 @@ class ElidedLabel(QLabel):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.setTextFormat(Qt.TextFormat.PlainText)
 
-    def setText(self, a0: str | None) -> None:
-        self._full_text = a0 or ""
-        super().setText(a0)
-        self.update()
-
-    def resizeEvent(self, a0):
+    def _update_elided_text(self):
         metrics = QFontMetrics(self.font())
         elided = metrics.elidedText(
             self._full_text, Qt.TextElideMode.ElideRight, self.width()
         )
         super().setText(elided)
+        if elided != self._full_text:
+            self.setToolTip(self._full_text)
+        else:
+            self.setToolTip("")
+
+    def setText(self, a0: str | None) -> None:
+        self._full_text = a0 or ""
+        self._update_elided_text()
+
+    def resizeEvent(self, a0):
         super().resizeEvent(a0)
+        self._update_elided_text()
 
     def fullText(self):
         return self._full_text
+
+    def sizeHint(self):
+        hint = super().sizeHint()
+        hint.setWidth(10)
+        return hint
 
 
 class QueueListItemWidget(QWidget):
