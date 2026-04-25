@@ -2,6 +2,7 @@
 import base64
 import hashlib  # Added for cache path generation
 import html
+import logging
 import os
 import platform
 import re
@@ -24,6 +25,21 @@ from PyQt6.QtCore import (
     QTimer,
     QUrl,
     pyqtSignal,
+)
+from PyQt6.QtGui import (
+    QAction,
+    QActionGroup,
+    QColor,
+    QDesktopServices,
+    QFontMetrics,
+    QIcon,
+    QMovie,
+    QPainter,
+    QPalette,
+    QPixmap,
+    QPolygon,
+    QTextCursor,
+)
 from PyQt6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -47,20 +63,6 @@ from PyQt6.QtWidgets import (
     QTextEdit,
     QVBoxLayout,
     QWidget,
-)
-from PyQt6.QtGui import (
-    QAction,
-    QActionGroup,
-    QColor,
-    QDesktopServices,
-    QFontMetrics,
-    QIcon,
-    QMovie,
-    QPainter,
-    QPalette,
-    QPixmap,
-    QPolygon,
-    QTextCursor,
 )
 
 import abogen.hf_tracker as hf_tracker
@@ -1086,8 +1088,11 @@ class abogen(QWidget):
         self.use_spacy_segmentation = self.config.get("use_spacy_segmentation", True)
         # MLX backend settings (Apple Silicon only)
         from abogen.tts_mlx import is_mlx_available, recommended_quantization
+
         self.use_mlx_backend = self.config.get("use_mlx_backend", is_mlx_available())
-        self.mlx_quantization = self.config.get("mlx_quantization", recommended_quantization().name)
+        self.mlx_quantization = self.config.get(
+            "mlx_quantization", recommended_quantization().name
+        )
         # Word substitution settings
         self.word_substitutions_enabled = self.config.get(
             "word_substitutions_enabled", False
@@ -1650,7 +1655,9 @@ class abogen(QWidget):
         container_layout.addWidget(self.controls_widget)
         # Overall progress section (current item and queue position)
         self.overall_progress_label = QLabel("<b>Overall Progress</b>", self)
-        self.overall_progress_label.setStyleSheet("font-size: 14px; margin-bottom: -2px; margin-top: 5px;")
+        self.overall_progress_label.setStyleSheet(
+            "font-size: 14px; margin-bottom: -2px; margin-top: 5px;"
+        )
         self.overall_progress_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.overall_progress_label.hide()
         container_layout.addWidget(self.overall_progress_label)
@@ -1662,9 +1669,21 @@ class abogen(QWidget):
         self.progress_bar.hide()
         container_layout.addWidget(self.progress_bar)
 
+        # First separator
+        self.conversion_sep1 = QFrame(self)
+        self.conversion_sep1.setFrameShape(QFrame.Shape.HLine)
+        self.conversion_sep1.setFrameShadow(QFrame.Shadow.Sunken)
+        self.conversion_sep1.setStyleSheet(
+            "background-color: #333; margin-top: 15px; margin-bottom: 5px;"
+        )
+        self.conversion_sep1.hide()
+        container_layout.addWidget(self.conversion_sep1)
+
         # Chapter progress section
         self.chapter_progress_label = QLabel("<b>Chapter Progress</b>", self)
-        self.chapter_progress_label.setStyleSheet("font-size: 14px; margin-bottom: -2px; margin-top: 15px;") # larger top margin for separation
+        self.chapter_progress_label.setStyleSheet(
+            "font-size: 14px; margin-bottom: -2px; margin-top: 5px;"
+        )  # reduced top margin since we have a separator
         self.chapter_progress_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.chapter_progress_label.hide()
         container_layout.addWidget(self.chapter_progress_label)
@@ -1677,8 +1696,20 @@ class abogen(QWidget):
         self.chapter_progress_bar.hide()
         container_layout.addWidget(self.chapter_progress_bar)
 
+        # Second separator
+        self.conversion_sep2 = QFrame(self)
+        self.conversion_sep2.setFrameShape(QFrame.Shape.HLine)
+        self.conversion_sep2.setFrameShadow(QFrame.Shadow.Sunken)
+        self.conversion_sep2.setStyleSheet(
+            "background-color: #333; margin-top: 15px; margin-bottom: 10px;"
+        )
+        self.conversion_sep2.hide()
+        container_layout.addWidget(self.conversion_sep2)
+
         self.current_chapter_label = ElidedLabel("", self)
-        self.current_chapter_label.setStyleSheet("font-style: italic; color: #777; margin-top: 2px;")
+        self.current_chapter_label.setStyleSheet(
+            "font-style: italic; color: #777; margin-top: 2px;"
+        )
         self.current_chapter_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.current_chapter_label.hide()
         container_layout.addWidget(self.current_chapter_label)
@@ -2494,6 +2525,7 @@ class abogen(QWidget):
         if total <= 1:
             self.chapter_progress_label.hide()
             self.chapter_progress_bar.hide()
+            self.conversion_sep2.hide()
             self.current_chapter_label.hide()
             return
 
@@ -2510,6 +2542,7 @@ class abogen(QWidget):
             self.current_chapter_label.setText(f"Current chapter: {safe_chapter_name}")
         self.chapter_progress_label.show()
         self.chapter_progress_bar.show()
+        self.conversion_sep2.show()
         self.current_chapter_label.show()
 
     def enable_disable_queue_buttons(self):
@@ -2862,9 +2895,11 @@ class abogen(QWidget):
         self.convert_input_box_to_log()
         self.overall_progress_label.show()
         self.progress_bar.setValue(0)
+        self.conversion_sep1.show()
         self.chapter_progress_label.hide()
         self.chapter_progress_bar.setValue(0)
         self.chapter_progress_bar.hide()
+        self.conversion_sep2.hide()
         self.current_chapter_label.clear()
         self.current_chapter_label.hide()
         # Show queue progress if in queue mode
@@ -3217,8 +3252,10 @@ class abogen(QWidget):
             self.elapsed_label.hide()  # Hide elapsed label
             self.overall_progress_label.hide()
             self.progress_bar.hide()
+            self.conversion_sep1.hide()
             self.chapter_progress_label.hide()
             self.chapter_progress_bar.hide()
+            self.conversion_sep2.hide()
             self.current_chapter_label.hide()
             self.btn_cancel.hide()
             self.is_converting = False
@@ -3280,8 +3317,10 @@ class abogen(QWidget):
             self.elapsed_label.hide()
             self.overall_progress_label.hide()
             self.progress_bar.hide()
+            self.conversion_sep1.hide()
             self.chapter_progress_label.hide()
             self.chapter_progress_bar.hide()
+            self.conversion_sep2.hide()
             self.current_chapter_label.hide()
             self.btn_cancel.hide()
             self.is_converting = False
@@ -3335,8 +3374,10 @@ class abogen(QWidget):
         self.progress_bar.setValue(100)
         self.overall_progress_label.hide()
         self.progress_bar.hide()
+        self.conversion_sep1.hide()
         self.chapter_progress_bar.hide()
         self.chapter_progress_label.hide()
+        self.conversion_sep2.hide()
         self.current_chapter_label.hide()
         self.btn_cancel.hide()
         self.is_converting = False
@@ -3391,9 +3432,11 @@ class abogen(QWidget):
             self.overall_progress_label.hide()
             self.progress_bar.setValue(0)
             self.progress_bar.hide()
+            self.conversion_sep1.hide()
             self.chapter_progress_label.hide()
             self.chapter_progress_bar.setValue(0)
             self.chapter_progress_bar.hide()
+            self.conversion_sep2.hide()
             self.current_chapter_label.hide()
             self.selected_file = self.selected_file_type = self.selected_book_path = (
                 None
@@ -3429,8 +3472,10 @@ class abogen(QWidget):
         self.elapsed_label.hide()
         self.overall_progress_label.hide()
         self.progress_bar.hide()
+        self.conversion_sep1.hide()
         self.chapter_progress_label.hide()
         self.chapter_progress_bar.hide()
+        self.conversion_sep2.hide()
         self.current_chapter_label.hide()
         self.restore_input_box()
         self._clear_log_display_and_buffer()
@@ -3907,8 +3952,10 @@ class abogen(QWidget):
             self.etr_label.hide()  # Hide ETR label
             self.elapsed_label.hide()  # Hide elapsed label
             self.progress_bar.hide()
+            self.conversion_sep1.hide()
             self.chapter_progress_label.hide()
             self.chapter_progress_bar.hide()
+            self.conversion_sep2.hide()
             self.btn_cancel.hide()
             self.controls_widget.show()
             self.queue_row_widget.show()  # Show queue row on cancel
@@ -4485,7 +4532,7 @@ class abogen(QWidget):
 
         # -- MLX Apple Silicon acceleration settings --------------------------
         try:
-            from abogen.tts_mlx import is_mlx_available, MLXQuantization
+            from abogen.tts_mlx import MLXQuantization, is_mlx_available
 
             mlx_available = is_mlx_available()
         except ImportError:
