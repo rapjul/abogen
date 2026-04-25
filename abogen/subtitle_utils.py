@@ -60,6 +60,82 @@ def calculate_text_length(text):
     return char_count
 
 
+def deduplicate_chapter_title(
+    text: str, chapter_title: str, force_remove: bool = False
+) -> str:
+    """
+    Deduplicate the chapter title if it appears at the very beginning of the text.
+
+    Args:
+        text: The chapter text
+        chapter_title: The chapter title from navigation/metadata
+        force_remove: If True, always remove the title if it matches the first paragraph.
+                     If False, only remove it if it appears to be a duplicate (i.e.,
+                     it also appears in or starts the second paragraph).
+
+    Returns:
+        Deduplicated text
+    """
+    if not text or not chapter_title:
+        return text
+
+    text_stripped = text.strip()
+    title_stripped = chapter_title.strip()
+
+    if not text_stripped or not title_stripped:
+        return text
+
+    # Standardize for comparison: lowercase and strip trailing punctuation
+    def standardize(s):
+        s = s.lower().strip()
+        # Remove trailing punctuation often found in headers
+        return re.sub(r"[.!?:;]+$", "", s).strip()
+
+    std_title = standardize(title_stripped)
+
+    # Check if the first paragraph matches the title
+    paragraphs = text_stripped.split("\n\n")
+    if not paragraphs:
+        return text
+
+    first_para = paragraphs[0].strip()
+    if standardize(first_para) != std_title:
+        # First paragraph is not the title, check first line as fallback
+        lines = text_stripped.splitlines()
+        if not lines:
+            return text
+        first_line = lines[0].strip()
+        if standardize(first_line) != std_title:
+            return text
+
+        # First line matches. Now decide if we should remove it.
+        if force_remove:
+            return "\n".join(lines[1:]).strip()
+
+        # Smarter check: is the title repeated in the next line(s)?
+        if len(lines) > 1:
+            next_line = lines[1].strip()
+            if standardize(next_line) == std_title or standardize(next_line).startswith(
+                std_title
+            ):
+                return "\n".join(lines[1:]).strip()
+        return text
+
+    # First paragraph matches. Now decide if we should remove it.
+    if force_remove:
+        return "\n\n".join(paragraphs[1:]).strip()
+
+    # Smarter check: is the title repeated in the second paragraph?
+    if len(paragraphs) > 1:
+        second_para = paragraphs[1].strip()
+        if standardize(second_para) == std_title or standardize(second_para).startswith(
+            std_title
+        ):
+            return "\n\n".join(paragraphs[1:]).strip()
+
+    return text
+
+
 def clean_text(text, *args, **kwargs):
     # Remove URLs
     text = _URL_PATTERN.sub("", text)
@@ -76,6 +152,27 @@ def clean_text(text, *args, **kwargs):
     # Standardize paragraph breaks (multiple newlines become exactly two) and trim overall whitespace
     # Use pre-compiled pattern for better performance
     text = _MULTIPLE_NEWLINES_PATTERN.sub("\n\n", text).strip()
+
+    # Ensure paragraphs end with terminal punctuation to trigger TTS pauses
+    paragraphs = text.split("\n\n")
+    processed_paragraphs = []
+    for p in paragraphs:
+        p_stripped = p.strip()
+        if not p_stripped:
+            processed_paragraphs.append(p)
+            continue
+
+        if not re.search(r'[.!?:;]["\'' "’" "”)]*$", p_stripped):
+            # Ensure it ends with word character (possibly followed by quotes) before adding period
+            if re.search(r'\w["\'' "’" "”)]*$", p_stripped):
+                m = re.search(r'(["\'' "’" "”)]+)$", p_stripped)
+                if m:
+                    p = p_stripped[: -len(m.group(1))] + "." + m.group(1)
+                else:
+                    p = p_stripped + "."
+        processed_paragraphs.append(p)
+    text = "\n\n".join(processed_paragraphs)
+
     # Optionally replace single newlines with spaces, but preserve double newlines
     if replace_single_newlines:
         # Use pre-compiled pattern for better performance

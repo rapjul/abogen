@@ -90,6 +90,13 @@ def test_expand_common_abbreviations_directional() -> None:
     assert expand_common_abbreviations(text) == expected
 
 
+def test_expand_common_abbreviations_directional_case_sensitive() -> None:
+    """Test compass directions do not incorrectly expand lowercase normal text like it's."""
+    text = "it's going south or s. for some reason, maybe n.w. too. Only N. or NW should match."
+    expected = "it's going south or s. for some reason, maybe n.w. too. Only North or Northwest should match."
+    assert expand_common_abbreviations(text) == expected
+
+
 def test_expand_common_abbreviations_data_sizes() -> None:
     """Test case-sensitive data size abbreviations."""
     text = "File is 5MB or 12 GB, up to 1TB. Speed is 50Mbps or 10 MBps."

@@ -184,7 +184,7 @@ class TestBookParser(unittest.TestCase):
         parser_pdf.process_content()
         chapters = parser_pdf.get_chapters()
         self.assertEqual(len(chapters), 2)
-        self.assertEqual(chapters[0], ("page_1", "Page 1 - Page 1 content"))
+        self.assertEqual(chapters[0], ("page_1", "Page 1 - Page 1 content."))
         
         # MD
         parser_md = get_book_parser(self.sample_md_path)

@@ -25,7 +25,7 @@ def test_clean_text_removes_symbol_separator_lines() -> None:
     ):
         cleaned = clean_text(source)
 
-    assert cleaned == "Alpha\n\nBeta"
+    assert cleaned == "Alpha.\n\nBeta."
 
 
 def test_clean_text_removes_equals_symbol_separator_lines() -> None:
@@ -36,7 +36,7 @@ def test_clean_text_removes_equals_symbol_separator_lines() -> None:
     ):
         cleaned = clean_text(source)
 
-    assert cleaned == "Alpha\n\nBeta"
+    assert cleaned == "Alpha.\n\nBeta."
 
 
 def test_clean_text_preserves_headings_and_list_items() -> None:
@@ -47,7 +47,7 @@ def test_clean_text_preserves_headings_and_list_items() -> None:
     ):
         cleaned = clean_text(source)
 
-    assert cleaned == source
+    assert cleaned == f"{source}."
 
 
 def test_clean_text_preserves_hyphenated_words() -> None:
@@ -58,7 +58,7 @@ def test_clean_text_preserves_hyphenated_words() -> None:
     ):
         cleaned = clean_text(source)
 
-    assert cleaned == source
+    assert cleaned == f"{source}."
 
 
 def test_clean_text_preserves_repeated_hyphenated_words() -> None:
@@ -69,7 +69,7 @@ def test_clean_text_preserves_repeated_hyphenated_words() -> None:
     ):
         cleaned = clean_text(source)
 
-    assert cleaned == source
+    assert cleaned == f"{source}."
 
 
 def test_clean_text_removes_lowercase_letter_motif_with_equals() -> None:
@@ -80,7 +80,7 @@ def test_clean_text_removes_lowercase_letter_motif_with_equals() -> None:
     ):
         cleaned = clean_text(source)
 
-    assert cleaned == "Lead in\n\nLead out"
+    assert cleaned == "Lead in.\n\nLead out."
 
 
 def test_clean_text_removes_lowercase_letter_motif_with_asterisks() -> None:
@@ -91,7 +91,7 @@ def test_clean_text_removes_lowercase_letter_motif_with_asterisks() -> None:
     ):
         cleaned = clean_text(source)
 
-    assert cleaned == "Lead in\n\nLead out"
+    assert cleaned == "Lead in.\n\nLead out."
 
 
 def test_clean_text_removes_mixed_case_motif_with_equals() -> None:
@@ -102,7 +102,7 @@ def test_clean_text_removes_mixed_case_motif_with_equals() -> None:
     ):
         cleaned = clean_text(source)
 
-    assert cleaned == "Lead in\n\nLead out"
+    assert cleaned == "Lead in.\n\nLead out."
 
 
 def test_clean_text_preserves_unframed_letter_equals_text() -> None:
@@ -113,7 +113,7 @@ def test_clean_text_preserves_unframed_letter_equals_text() -> None:
     ):
         cleaned = clean_text(source)
 
-    assert cleaned == source
+    assert cleaned == f"{source}."
 
 
 def test_subtitle_clean_text_applies_same_separator_suppression() -> None:
@@ -125,4 +125,4 @@ def test_subtitle_clean_text_applies_same_separator_suppression() -> None:
     ):
         cleaned = clean_subtitle_text(source)
 
-    assert cleaned == "Lead in\n\nLead out"
+    assert cleaned == "Lead in.\n\nLead out."

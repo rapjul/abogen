@@ -15,7 +15,11 @@ from bs4 import BeautifulSoup
 from bs4.element import NavigableString
 from ebooklib import epub
 
-from abogen.subtitle_utils import calculate_text_length, clean_text
+from abogen.subtitle_utils import (
+    calculate_text_length,
+    clean_text,
+    deduplicate_chapter_title,
+)
 from abogen.utils import detect_encoding
 
 # Pre-compile frequently used regex patterns
@@ -100,6 +104,7 @@ class BaseBookParser(ABC):
         for chapter_id, chapter_name in chapters:
             text = self.content_texts.get(chapter_id, "")
             if text:
+                text = deduplicate_chapter_title(text, chapter_name)
                 full_text.append(f"\n<<CHAPTER_MARKER:{chapter_name}>>\n")
                 full_text.append(text)
 
@@ -145,13 +150,15 @@ class PdfParser(BaseBookParser):
 
         # 1. Extract text from all pages first
         for page_num in range(len(pdf_doc)):
-            text = clean_text(pdf_doc[page_num].get_text())
+            text = pdf_doc[page_num].get_text()
 
-            # Clean up common PDF artifacts:
+            # Clean up common PDF artifacts BEFORE clean_text merges lines/adds punctuation
             text = _BRACKETED_NUMBERS_PATTERN.sub("", text)
             text = _STANDALONE_PAGE_NUMBERS_PATTERN.sub("", text)
             text = _PAGE_NUMBERS_AT_END_PATTERN.sub("", text)
             text = _PAGE_NUMBERS_WITH_DASH_PATTERN.sub("", text)
+
+            text = clean_text(text)
 
             page_id = f"page_{page_num + 1}"
             self.content_texts[page_id] = text
@@ -386,6 +393,9 @@ class MarkdownParser(BaseBookParser):
                 header_tag.decompose()
 
             section_text = clean_text(section_soup.get_text()).strip()
+            section_text = deduplicate_chapter_title(
+                section_text, header_name, force_remove=True
+            )
             chapter_id = header_id
             if section_text:
                 full_content = f"{header_name}\n\n{section_text}"
@@ -943,6 +953,7 @@ class EpubParser(BaseBookParser):
                     tag.decompose()
 
                 text = clean_text(slice_soup.get_text()).strip()
+                text = deduplicate_chapter_title(text, current_entry["title"])
                 if text:
                     self.content_texts[current_src] = text
                     self.content_lengths[current_src] = calculate_text_length(text)

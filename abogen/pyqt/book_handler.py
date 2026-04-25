@@ -891,6 +891,24 @@ class HandlerDialog(QDialog):
         self._block_signals = False
         self._update_checked_set_from_tree()
 
+    def _should_exclude_by_title(self, item):
+        title = item.text(0).lower()
+        excluded_keywords = [
+            "copyright",
+            "table of contents",
+            "cover",
+            "title page",
+            "index",
+            "bibliography",
+            "supplemental images",
+            "title",
+            "contents",
+            "further reading",
+            "list of figures",
+            "list of tables"
+        ]
+        return any(keyword in title for keyword in excluded_keywords)
+
     def _run_epub_auto_check(self):
         iterator = QTreeWidgetItemIterator(self.treeWidget)
         while iterator.value():
@@ -904,12 +922,17 @@ class HandlerDialog(QDialog):
             has_significant_content = src and self.content_lengths.get(src, 0) > 1000
             is_parent = item.childCount() > 0
 
-            if has_significant_content or is_parent:
+            if self._should_exclude_by_title(item):
+                item.setCheckState(0, Qt.CheckState.Unchecked)
+            elif has_significant_content or is_parent:
                 item.setCheckState(0, Qt.CheckState.Checked)
                 if is_parent:
                     for i in range(item.childCount()):
                         child = item.child(i)
                         if child.flags() & Qt.ItemFlag.ItemIsUserCheckable:
+                            if self._should_exclude_by_title(child):
+                                child.setCheckState(0, Qt.CheckState.Unchecked)
+                                continue
                             child_src = child.data(0, Qt.ItemDataRole.UserRole)
                             child_has_content = (
                                 child_src and self.content_lengths.get(child_src, 0) > 0
@@ -939,13 +962,18 @@ class HandlerDialog(QDialog):
             )
             is_parent = item.childCount() > 0
 
-            if has_significant_content or is_parent:
+            if self._should_exclude_by_title(item):
+                item.setCheckState(0, Qt.CheckState.Unchecked)
+            elif has_significant_content or is_parent:
                 item.setCheckState(0, Qt.CheckState.Checked)
                 # Also check children if this is a parent
                 if is_parent:
                     for i in range(item.childCount()):
                         child = item.child(i)
                         if child.flags() & Qt.ItemFlag.ItemIsUserCheckable:
+                            if self._should_exclude_by_title(child):
+                                child.setCheckState(0, Qt.CheckState.Unchecked)
+                                continue
                             child_identifier = child.data(0, Qt.ItemDataRole.UserRole)
                             child_has_content = (
                                 child_identifier
@@ -974,7 +1002,10 @@ class HandlerDialog(QDialog):
 
             # Logic: Check item if it has content (already handled by ItemIsUserCheckable flag really)
             # But duplicate logic from previous implementation:
-            item.setCheckState(0, Qt.CheckState.Checked)
+            if self._should_exclude_by_title(item):
+                item.setCheckState(0, Qt.CheckState.Unchecked)
+            else:
+                item.setCheckState(0, Qt.CheckState.Checked)
 
             iterator += 1
 

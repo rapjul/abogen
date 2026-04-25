@@ -459,6 +459,17 @@ def expand_common_abbreviations(text):
         r"\bFri\.?(?!\w)": "Friday",
         r"\bSat\.(?!\w)": "Saturday",
         r"\bSun\.(?!\w)": "Sunday",
+        # Directional / Compass abbreviations moved to case_sensitive_abbreviations
+    }
+
+    for pattern, replacement in abbreviations.items():
+        # Negative lookbehind to prevent replacing mid-word if boundary somehow fails
+        # Use simple ignorecase RegEx replace
+        processed_text = re.sub(
+            pattern, replacement, processed_text, flags=re.IGNORECASE
+        )
+
+    case_sensitive_abbreviations = {
         # Directional / Compass
         r"\bN\.?(?!\w)": "North",
         r"\bNW\.?(?!\w)": "Northwest",
@@ -475,16 +486,7 @@ def expand_common_abbreviations(text):
         r"\bWSW\.?(?!\w)": "West-Southwest",
         r"\bW\.?(?!\w)": "West",
         r"\bWNW\.?(?!\w)": "West-Northwest",
-    }
-
-    for pattern, replacement in abbreviations.items():
-        # Negative lookbehind to prevent replacing mid-word if boundary somehow fails
-        # Use simple ignorecase RegEx replace
-        processed_text = re.sub(
-            pattern, replacement, processed_text, flags=re.IGNORECASE
-        )
-
-    case_sensitive_abbreviations = {
+        
         # Data transfer rates (bits)
         r"(?<=\d)\s*[Kk]bps\.?(?!\w)": " kilobits per second",
         r"(?<=\d)\s*[Mm]bps\.?(?!\w)": " megabits per second",

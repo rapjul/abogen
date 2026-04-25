@@ -408,6 +408,27 @@ def clean_text(text, *args, **kwargs):
     text = "\n".join(lines)
     # Standardize paragraph breaks (multiple newlines become exactly two) and trim overall whitespace
     text = _PARAGRAPH_BREAK_RE.sub("\n\n", text).strip()
+    
+    # Ensure paragraphs end with terminal punctuation to trigger TTS pauses
+    paragraphs = text.split("\n\n")
+    processed_paragraphs = []
+    for p in paragraphs:
+        p_stripped = p.strip()
+        if not p_stripped:
+            processed_paragraphs.append(p)
+            continue
+            
+        if not re.search(r'[.!?:;]["\'' "’" '”)]*$', p_stripped):
+            # Ensure it ends with word char (possibly followed by quotes) before adding period
+            if re.search(r'\w["\'' "’" '”)]*$', p_stripped):
+                m = re.search(r'(["\'' "’" '”)]+)$', p_stripped)
+                if m:
+                    p = p_stripped[:-len(m.group(1))] + "." + m.group(1)
+                else:
+                    p = p_stripped + "."
+        processed_paragraphs.append(p)
+    text = "\n\n".join(processed_paragraphs)
+
     # Optionally replace single newlines with spaces, but preserve double newlines
     if replace_single_newlines:
         text = _SINGLE_NEWLINE_RE.sub(" ", text)
