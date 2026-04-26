@@ -581,8 +581,6 @@ class HandlerDialog(QDialog):
         select_layout.addWidget(self.deselect_all_btn)
         buttons_layout.addLayout(select_layout)
 
-
-
         leftLayout = QVBoxLayout()
         leftLayout.setContentsMargins(0, 0, 5, 0)
         leftLayout.addLayout(buttons_layout)
@@ -594,11 +592,15 @@ class HandlerDialog(QDialog):
             self,
         )
         self.instructions_label.setWordWrap(True)
-        self.instructions_label.setStyleSheet("color: #888888; font-size: 12px; margin-bottom: 6px;")
+        self.instructions_label.setStyleSheet(
+            "color: #888888; font-size: 12px; margin-bottom: 6px;"
+        )
         leftLayout.addWidget(self.instructions_label)
 
         self.count_label = QLabel("0 of 0 items selected", self)
-        self.count_label.setStyleSheet("font-weight: bold; font-size: 14px; margin-bottom: 4px;")
+        self.count_label.setStyleSheet(
+            "font-weight: bold; font-size: 14px; margin-bottom: 4px;"
+        )
         leftLayout.addWidget(self.count_label)
 
         self.search_bar = QLineEdit(self)
@@ -894,18 +896,68 @@ class HandlerDialog(QDialog):
     def _should_exclude_by_title(self, item):
         title = item.text(0).lower()
         excluded_keywords = [
-            "copyright",
-            "table of contents",
-            "cover",
-            "title page",
-            "index",
-            "bibliography",
-            "supplemental images",
-            "title",
-            "contents",
-            "further reading",
-            "list of figures",
-            "list of tables"
+            # --- Front Matter ---
+            "cover",  # Image-only section
+            "praise for",  # Marketing blurbs
+            "also by",  # Other books by author
+            "half title",  # Redundant title item
+            "title page",  # Front matter
+            "title",  # Redundant title item
+            "copyright",  # Legal front matter
+            "copyright page",  # Legal front matter
+            "disclaimer",  # Legal text
+            "permissions",  # Copyright permissions
+            "dedication",  # Personal note (often skipped)
+            "publisher's note",  # Administrative preface
+            "publisher note",  # Administrative preface
+            "map",  # Visual content placeholder
+            "list of maps",  # Navigation for maps
+            "list of illustrations",  # Navigation for illustrations
+            "cast of characters",  # Reference list
+            "dramatis personae",  # Reference list
+            "chronology",  # Reference list
+            "abbreviations",  # Technical reference list
+            "acronyms",  # Technical reference list
+            # "abstract",  # Technical/Academic summary
+            "table of contents",  # Navigation (redundant in audio)
+            "contents",  # Navigation (redundant in audio)
+            "list of figures",  # Navigation for visuals
+            "list of tables",  # Navigation for tables
+            "acknowledgments",  # Administrative/Personal thanks
+            "acknowledgements",  # Administrative/Personal thanks
+            "supplemental images",  # Visual-only content
+            # --- Back Matter ---
+            "afterword",  # Meta-commentary at end
+            "author's note",  # Meta-commentary
+            "author note",  # Meta-commentary
+            "translator's note",  # Meta-commentary
+            "translator note",  # Meta-commentary
+            "errata",  # List of corrections
+            "appendix",  # Supplementary material
+            "source notes",  # Reference citations
+            "notes",  # Endnotes or reference citations
+            "endnotes",  # Reference citations
+            "glossary",  # Reference/Dictionary
+            "bibliography",  # Reference (not readable)
+            "references",  # Reference (not readable)
+            "works cited",  # Reference (not readable)
+            "further reading",  # Reference list
+            "suggested reading",  # Reference list
+            "recommended reading",  # Reference list
+            "index",  # Reference (not readable)
+            "about the author",  # Biographical info
+            "author bio",  # Biographical info
+            "about the illustrator",  # Biographical info
+            "about the translator",  # Biographical info
+            "credits",  # Administrative/Image credits
+            "teaser",  # Marketing/Book preview
+            "preview",  # Marketing/Book preview
+            "excerpt",  # Marketing/Book preview
+            "advertisement",  # Marketing
+            "newsletter",  # Marketing/Sign-up
+            "series list",  # List of other books
+            "about the series",  # Info about the book series
+            "colophon",  # Technical production details
         ]
         return any(keyword in title for keyword in excluded_keywords)
 
