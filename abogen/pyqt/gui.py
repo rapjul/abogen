@@ -1,5 +1,6 @@
 # pyright: reportAttributeAccessIssue=false, reportOptionalMemberAccess=false, reportOptionalSubscript=false
 import base64
+import gc
 import hashlib  # Added for cache path generation
 import html
 import logging
@@ -10,9 +11,8 @@ import sys
 import tempfile
 import threading
 import time
-import gc
-import psutil
 
+import psutil
 from PyQt6.QtCore import (
     QBuffer,
     QEvent,
@@ -3294,6 +3294,12 @@ class abogen(QWidget):
                 and self.queued_items
                 and not self.queue_cancel_summary_shown
             ):
+                # Ensure model released before showing cancellation summary
+                try:
+                    self.purge_tts_model()
+                    QApplication.processEvents()
+                except Exception:
+                    pass
                 self.show_queue_summary(outcome="cancelled")
                 self.queue_cancel_summary_shown = True
             self.queue_run_active = False
@@ -3363,6 +3369,12 @@ class abogen(QWidget):
                         detailed_message=message_details,
                     )
                 if self.queue_run_active:
+                    # Ensure model released before showing failure summary
+                    try:
+                        self.purge_tts_model()
+                        QApplication.processEvents()
+                    except Exception:
+                        pass
                     self.show_queue_summary(outcome="failed")
                 self.queue_run_active = False
             else:
@@ -3430,6 +3442,13 @@ class abogen(QWidget):
             save_config(self.config)
             # Show queue summary if more than one item
             if self.queued_items:
+                # Release the TTS model before showing the modal summary dialog
+                try:
+                    self.purge_tts_model()
+                    QApplication.processEvents()
+                except Exception:
+                    # Non-fatal: if purge or UI flush fails, continue to show summary
+                    pass
                 self.show_queue_summary(outcome="completed")
         else:
             # More items in queue: clear log and potentially reload/reuse model
@@ -3437,7 +3456,7 @@ class abogen(QWidget):
 
             # Decide whether to keep the model based on settings and system state
             should_cache = self.should_cache_model()
-            
+
             # Safety Check: Even if we want to cache, check for significant memory growth
             current_rss = self._get_process_rss()
             over_limit = False
@@ -3455,13 +3474,12 @@ class abogen(QWidget):
 
             if not should_cache or over_limit:
                 self.purge_tts_model()
-            
+
             QApplication.processEvents()
 
         # Final cleanup if the queue is finished or it was a single job
-        is_last_item = (
-            not self.queued_items
-            or self.current_queue_index + 1 >= len(self.queued_items)
+        is_last_item = not self.queued_items or self.current_queue_index + 1 >= len(
+            self.queued_items
         )
         if is_last_item or message == "Cancelled":
             self.purge_tts_model()
@@ -3489,14 +3507,14 @@ class abogen(QWidget):
             return True
         if mode == "off":
             return False
-            
+
         # "auto" mode logic:
         # 1. Check system RAM. If < 16GB, be conservative.
         try:
             total_ram_gb = psutil.virtual_memory().total / (1024**3)
             if total_ram_gb < 15.5:  # ~16GB allowing for reporting differences
                 return False
-                
+
             # 2. Check available memory. If < 2GB free, don't cache.
             available_ram_gb = psutil.virtual_memory().available / (1024**3)
             if available_ram_gb < 2.0:
@@ -3504,7 +3522,7 @@ class abogen(QWidget):
         except Exception:
             # Fallback if psutil fails
             return False
-            
+
         return True
 
     def set_model_cache_mode(self, mode):
@@ -3524,9 +3542,14 @@ class abogen(QWidget):
             gc.collect()
             try:
                 import torch
+
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
-                elif hasattr(torch, "backends") and hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                elif (
+                    hasattr(torch, "backends")
+                    and hasattr(torch.backends, "mps")
+                    and torch.backends.mps.is_available()
+                ):
                     # No explicit empty_cache for MPS, but GC handles it
                     pass
             except ImportError:
@@ -4093,6 +4116,12 @@ class abogen(QWidget):
                     )
                 self.queue_last_outcome = "cancelled"
                 if not self.queue_cancel_summary_shown:
+                    # Ensure model released before showing cancellation summary
+                    try:
+                        self.purge_tts_model()
+                        QApplication.processEvents()
+                    except Exception:
+                        pass
                     self.show_queue_summary(outcome="cancelled")
                     self.queue_cancel_summary_shown = True
 
@@ -4488,25 +4517,29 @@ class abogen(QWidget):
 
         # TTS Model Caching menu
         cache_menu = QMenu("TTS model caching", self)
-        cache_menu.setToolTip("Control whether the TTS model stays in memory between queue items. Auto mode adapts to your system RAM. A safety check will force a reload if the program's memory grows more than 300MB.")
-        
+        cache_menu.setToolTip(
+            "Control whether the TTS model stays in memory between queue items. Auto mode adapts to your system RAM. A safety check will force a reload if the program's memory grows more than 300MB."
+        )
+
         cache_group = QActionGroup(self)
         cache_group.setExclusive(True)
-        
+
         cache_options = [
             ("auto", "Auto (recommended)"),
             ("on", "On"),
             ("off", "Off"),
         ]
-        
+
         for value, text in cache_options:
             action = QAction(text, self)
             action.setCheckable(True)
             action.setChecked(self.tts_model_cache_mode == value)
-            action.triggered.connect(lambda checked, v=value: self.set_model_cache_mode(v))
+            action.triggered.connect(
+                lambda checked, v=value: self.set_model_cache_mode(v)
+            )
             cache_group.addAction(action)
             cache_menu.addAction(action)
-            
+
         menu.addMenu(cache_menu)
 
         # Add separate chapters format option
