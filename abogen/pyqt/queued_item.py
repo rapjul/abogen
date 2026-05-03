@@ -27,3 +27,9 @@ class QueuedItem:
     replace_all_caps: bool = False
     replace_numerals: bool = False
     fix_nonstandard_punctuation: bool = False
+    output_path: str | None = None
+    logs: list | None = None
+
+    def __post_init__(self):
+        if self.logs is None:
+            self.logs = []
