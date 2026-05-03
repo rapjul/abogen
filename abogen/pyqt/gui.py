@@ -2390,6 +2390,15 @@ class abogen(QWidget):
                 self.log_message_buffer = self.log_message_buffer[
                     -self.log_window_max_lines :
                 ]
+            if (
+                self.queue_run_active
+                and self.queued_items
+                and 0 <= self.current_queue_index < len(self.queued_items)
+            ):
+                current_item = self.queued_items[self.current_queue_index]
+                if getattr(current_item, "logs", None) is None:
+                    current_item.logs = []
+                current_item.logs.append(message)
 
         txt = self.log_text
         sb = txt.verticalScrollBar()
@@ -2475,6 +2484,88 @@ class abogen(QWidget):
 
         if at_bottom:
             sb.setValue(sb.maximum())
+
+    def _show_queue_item_logs_dialog(self, queue_item):
+        item_name = os.path.basename(getattr(queue_item, "file_name", ""))
+        logs = list(getattr(queue_item, "logs", []) or [])
+
+        dialog = QDialog(self)
+        title = "Queue Item Logs"
+        if item_name:
+            title = f"Queue Item Logs: {item_name}"
+        dialog.setWindowTitle(title)
+        dialog.resize(980, 620)
+
+        layout = QVBoxLayout(dialog)
+        text_edit = QTextEdit(dialog)
+        text_edit.setReadOnly(True)
+        text_edit.setFrameStyle(QFrame.Shape.NoFrame)
+        text_edit.setStyleSheet("QTextEdit { border: none; }")
+        layout.addWidget(text_edit)
+
+        if not logs:
+            text_edit.setPlainText("No logs were captured for this queue item.")
+        else:
+            cursor = text_edit.textCursor()
+            prefix_color = QColor(COLORS["ORANGE"])
+
+            for message in logs:
+                if isinstance(message, tuple):
+                    text = message[0] if len(message) > 0 else ""
+                    spec = message[1] if len(message) > 1 else None
+                    text_str = str(text)
+                else:
+                    text_str = str(message)
+                    spec = None
+
+                tuple_color = QColor(LOG_COLOR_MAP.get(spec, COLORS["LIGHT_DISABLED"]))
+                match = STORY_PREFIX_RE.match(text_str)
+                if match:
+                    leading_ws = match.group(1)
+                    prefix = match.group(2)
+                    rest = text_str[match.end() :]
+
+                    if leading_ws:
+                        fmt = cursor.charFormat()
+                        if isinstance(message, tuple):
+                            fmt.setForeground(tuple_color)
+                        else:
+                            fmt.clearForeground()
+                        cursor.setCharFormat(fmt)
+                        cursor.insertText(leading_ws)
+
+                    fmt = cursor.charFormat()
+                    fmt.setForeground(prefix_color)
+                    cursor.setCharFormat(fmt)
+                    cursor.insertText(prefix + " ")
+
+                    fmt = cursor.charFormat()
+                    if isinstance(message, tuple):
+                        fmt.setForeground(tuple_color)
+                    else:
+                        fmt.clearForeground()
+                    cursor.setCharFormat(fmt)
+                    cursor.insertText(rest)
+                else:
+                    fmt = cursor.charFormat()
+                    if isinstance(message, tuple):
+                        fmt.setForeground(tuple_color)
+                    else:
+                        fmt.clearForeground()
+                    cursor.setCharFormat(fmt)
+                    cursor.insertText(text_str)
+
+                cursor.insertText("\n")
+
+        close_btn = QPushButton("Close", dialog)
+        close_btn.setFixedHeight(36)
+        close_btn.clicked.connect(dialog.accept)
+        layout.addWidget(close_btn)
+
+        dialog.setLayout(layout)
+        dialog.setMinimumSize(480, 300)
+        dialog.setSizeGripEnabled(True)
+        dialog.exec()
 
     def _get_queue_progress_format(self, value=None):
         """Return the progress bar format string for queue mode."""
@@ -2727,6 +2818,7 @@ class abogen(QWidget):
     def start_next_queued_item(self):
         if self.current_queue_index < len(self.queued_items):
             queued_item = self.queued_items[self.current_queue_index]
+            queued_item.logs = []
             self.queue_item_started_at[self.current_queue_index] = time.time()
             self.queue_item_status[self.current_queue_index] = "In Progress"
 
@@ -3352,10 +3444,10 @@ class abogen(QWidget):
             # Reset queue position so a retry starts from the beginning.
             if self.queued_items:
                 failed_item_name = ""
+                failed_item = None
                 if 0 <= self.current_queue_index < len(self.queued_items):
-                    failed_item_name = os.path.basename(
-                        self.queued_items[self.current_queue_index].file_name
-                    )
+                    failed_item = self.queued_items[self.current_queue_index]
+                    failed_item_name = os.path.basename(failed_item.file_name)
                 self.current_queue_index = 0
                 if failed_item_name:
                     self._show_error_message_box(
@@ -3368,6 +3460,8 @@ class abogen(QWidget):
                         copy_button_text="Copy Error",
                         detailed_message=message_details,
                     )
+                if failed_item is not None:
+                    self._show_queue_item_logs_dialog(failed_item)
                 if self.queue_run_active:
                     # Ensure model released before showing failure summary
                     try:
@@ -3376,6 +3470,7 @@ class abogen(QWidget):
                     except Exception:
                         pass
                     self.show_queue_summary(outcome="failed")
+                    self.go_back_ui()
                 self.queue_run_active = False
             else:
                 self._show_error_message_box(
