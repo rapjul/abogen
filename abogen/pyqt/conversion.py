@@ -715,10 +715,7 @@ class ConversionThread(QThread):
             speed: Speech speed multiplier.
             split_pattern: Regex pattern for sub-splitting within segments.
         """
-        from abogen.word_substitution import (
-            convert_roman_numerals_to_numbers,
-            expand_common_abbreviations,
-        )
+        from abogen.word_substitution import convert_roman_numerals_to_numbers
 
         for segment in segments:
             # Skip empty or whitespace-only segments to avoid unnecessary
@@ -726,7 +723,6 @@ class ConversionThread(QThread):
             if not segment or not segment.strip():
                 continue
             tts_segment = convert_roman_numerals_to_numbers(segment)
-            tts_segment = expand_common_abbreviations(tts_segment)
             for result in tts(
                 tts_segment,
                 voice=loaded_voice,
@@ -1053,14 +1049,9 @@ class ConversionThread(QThread):
         ]
         for batched_segment in batched_segments:
             # Pre-apply word substitutions so we can track progress against the text TTS actually sees
-            from abogen.word_substitution import (
-                convert_roman_numerals_to_numbers,
-                expand_common_abbreviations,
-            )
+            from abogen.word_substitution import convert_roman_numerals_to_numbers
 
             tts_segment = convert_roman_numerals_to_numbers(batched_segment)
-            tts_segment = expand_common_abbreviations(tts_segment)
-
             remaining_text = tts_segment
             batch_yield_count = 0
 

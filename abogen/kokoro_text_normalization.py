@@ -2017,6 +2017,29 @@ def _normalize_dotted_acronyms(text: str) -> str:
     return re.sub(r"\b(?:[A-Z]\.){1,}[A-Z]\.?(?=\W|$)", _replace, text)
 
 
+def _normalize_temperature(text: str) -> str:
+    """Expand temperature notation (e.g., 15°C -> 15 degrees Celsius)."""
+    if not text:
+        return text
+    # Match patterns like: 15°C, 15°F, 98.6°C, -40°F, etc.
+    # Handles optional spaces and both degree symbol (°) and letter 'd' (for d)
+    text = re.sub(
+        r"([-+]?\d+(?:\.\d+)?)\s*(?:°|d)([CF])\b",
+        lambda m: _replace_temperature(m),
+        text,
+        flags=re.IGNORECASE,
+    )
+    return text
+
+
+def _replace_temperature(match: re.Match[str]) -> str:
+    """Replace temperature match with spoken form."""
+    number = match.group(1)
+    scale = match.group(2).upper()
+    scale_name = "Celsius" if scale == "C" else "Fahrenheit"
+    return f"{number} degrees {scale_name}"
+
+
 # ---------- Optional phoneme hint post-processing ----------
 
 
@@ -2347,11 +2370,17 @@ def normalize_for_pipeline(
     if runtime_settings.get("normalization_numbers", True):
         normalized = _normalize_dates(normalized, cfg.number_lang)
         normalized = _normalize_times(normalized)
+        normalized = _normalize_temperature(normalized)
         normalized = _normalize_dotted_acronyms(normalized)
     if runtime_settings.get("normalization_titles", True):
         normalized = _normalize_address_abbreviations(normalized)
     if runtime_settings.get("normalization_internet_slang", False):
         normalized = _normalize_internet_slang(normalized)
+
+    # Expand common abbreviations BEFORE apostrophe handling so patterns like No. + digits work
+    from abogen.word_substitution import expand_common_abbreviations
+
+    normalized = expand_common_abbreviations(normalized)
 
     if mode == "off":
         normalized = normalize_unicode_apostrophes(normalized)
@@ -2381,6 +2410,7 @@ def normalize_for_pipeline(
 
     if runtime_settings.get("normalization_titles", True):
         normalized = expand_titles_and_suffixes(normalized)
+
     if runtime_settings.get("normalization_terminal", True):
         normalized = ensure_terminal_punctuation(normalized)
     if runtime_settings.get("normalization_caps_quotes", True):

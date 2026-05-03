@@ -12,10 +12,13 @@ from abogen.word_substitution import (
 
 
 def test_expand_common_abbreviations_titles() -> None:
-    """Test expansion of common titles like Dr. and Mr."""
-    text = "Dr. Smith went to see Mr. Jones and Mrs. Daisy. Say hello to Capt. Kirk. Mme. Curie and Mlle. Rose."
-    expected = "Doctor Smith went to see Mister Jones and Missus Daisy. Say hello to Captain Kirk. Madame Curie and Mademoiselle Rose."
-    assert expand_common_abbreviations(text) == expected
+    """Test that military abbreviations are expanded (Dr, Mr, Prof, Gen, Sgt, etc. are handled by expand_titles_and_suffixes)."""
+    text = "Adm. Johnson met Capt. Kirk and Cmdr. Scott."
+    result = expand_common_abbreviations(text)
+    # These are expanded (military ranks not handled by expand_titles_and_suffixes)
+    assert "Admiral" in result
+    assert "Captain" in result
+    assert "Commander" in result
 
 
 def test_expand_common_abbreviations_no_false_positives() -> None:
@@ -101,6 +104,28 @@ def test_expand_common_abbreviations_data_sizes() -> None:
     """Test case-sensitive data size abbreviations."""
     text = "File is 5MB or 12 GB, up to 1TB. Speed is 50Mbps or 10 MBps."
     expected = "File is 5 megabytes or 12 gigabytes, up to 1 terabytes. Speed is 50 megabits per second or 10 megabytes per second"
+    assert expand_common_abbreviations(text) == expected
+
+
+def test_expand_common_abbreviations_no_only_with_digits() -> None:
+    """Test that No. only expands to Number when followed by digits."""
+    # No. at sentence end or without digits should NOT expand
+    text = "The answer is no. She said no. It happened at No."
+    result = expand_common_abbreviations(text)
+    # "no" without period or at sentence end should stay as-is
+    assert "No." in result  # Should not become "Number" if not followed by digits
+
+    # No. followed by digits SHOULD expand
+    text2 = "See No. 5 for details. Check No. 42 in the manual."
+    result2 = expand_common_abbreviations(text2)
+    assert "Number 5" in result2
+    assert "Number 42" in result2
+
+
+def test_expand_common_abbreviations_misc() -> None:
+    """Test that misc. and misc expand to miscellaneous."""
+    text = "See misc. notes for details. Check the misc section."
+    expected = "See Miscellaneous notes for details. Check the Miscellaneous section."
     assert expand_common_abbreviations(text) == expected
 
 
@@ -209,7 +234,8 @@ def test_apply_word_substitutions_full() -> None:
 def test_expand_common_abbreviations_japan_railways() -> None:
     """Test expansion of JR to Japan Railways when followed by regions."""
     text = "We took JR East to Tokyo. Then JR West and JR Kyushu. But Jr. Smith is our friend."
-    expected = "We took Japan Railways East to Tokyo. Then Japan Railways West and Japan Railways Kyushu. But Junior Smith is our friend."
+    # Jr. is handled by expand_titles_and_suffixes, not expand_common_abbreviations
+    expected = "We took Japan Railways East to Tokyo. Then Japan Railways West and Japan Railways Kyushu. But Jr. Smith is our friend."
     assert expand_common_abbreviations(text) == expected
 
 

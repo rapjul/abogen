@@ -42,7 +42,7 @@ _SETTINGS_DEFAULTS: Dict[str, Any] = {
     "normalization_phoneme_hints": True,
     "normalization_caps_quotes": True,
     "normalization_internet_slang": False,
-    "normalization_apostrophes_contractions": True,
+    "normalization_apostrophes_contractions": False,
     "normalization_apostrophes_plural_possessives": True,
     "normalization_apostrophes_sibilant_possessives": True,
     "normalization_apostrophes_decades": True,

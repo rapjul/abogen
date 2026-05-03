@@ -326,23 +326,14 @@ def expand_common_abbreviations(text):
     )
 
     abbreviations = {
-        # Titles
-        r"\bDr\.?(?!\w)": "Doctor",
-        r"\bMr\.?(?!\w)": "Mister",
-        r"\bMrs\.?(?!\w)": "Missus",
-        r"\bMs\.?(?!\w)": "Miss",
-        r"\bProf\.?(?!\w)": "Professor",
+        # Titles (Dr, Mr, Mrs, Ms, Prof, Rev, Gen, Sgt, Jr, Sr are handled by expand_titles_and_suffixes)
         r"\bPres\.?(?!\w)": "President",
         r"\bDir\.?(?!\w)": "Director",
         r"\bHon\.?(?!\w)": "Honorable",
         r"\bCllr\.?(?!\w)": "Councillor",
-        r"\bRev\.?(?!\w)": "Reverend",
-        r"\bSr\.?(?!\w)": "Senior",
-        r"\bJr\.?(?!\w)": "Junior",
         r"\bAssoc\.?(?!\w)": "Associate",
         r"\bAsst\.?(?!\w)": "Assistant",
         # Military
-        r"\bGen\.?(?!\w)": "General",
         r"\bAdm\.?(?!\w)": "Admiral",
         r"\bCol\.?(?!\w)": "Colonel",
         r"\bMaj\.?(?!\w)": "Major",
@@ -350,7 +341,6 @@ def expand_common_abbreviations(text):
         r"\bCmdr\.?(?!\w)": "Commander",
         r"\bLieut\.?(?!\w)": "Lieutenant",
         r"\bLt\.?(?!\w)": "Lieutenant",
-        r"\bSgt\.?(?!\w)": "Sergeant",
         r"\bCpl\.?(?!\w)": "Corporal",
         r"\bPvt\.?(?!\w)": "Private",
         # Government & Politics
@@ -372,12 +362,13 @@ def expand_common_abbreviations(text):
         r"\bCt\.?(?!\w)": "Court",
         r"\bSte\.?(?!\w)": "Suite",
         # Science & Math
-        r"\bFig\.(?!\w)": "Figure",
+        r"\bFig\.?(?=\s*\d)": "Figure",  # Only expand Fig. when followed by digits (e.g., Fig. 5)
         r"\bEq\.?(?!\w)": "Equation",
         r"\bApprox\.?(?!\w)": "Approximately",
         r"\bDept\.?(?!\w)": "Department",
         r"\bVol\.?(?!\w)": "Volume",
-        r"\bNo\.(?!\w)": "Number",
+        r"\bNo\.?(?=\s*\d)": "Number",  # Only expand No. when followed by digits (e.g., No. 5)
+        r"\bMisc\.?(?!\w)": "Miscellaneous",  # misc. or misc -> Miscellaneous
         # Common Latin / Academic abbreviations
         r"\ba\.?k\.?a\.?(?!\w)": "also known as",
         r"\bc\.?f\.?(?!\w)": "compare",
@@ -486,7 +477,6 @@ def expand_common_abbreviations(text):
         r"\bWSW\.?(?!\w)": "West-Southwest",
         r"\bW\.?(?!\w)": "West",
         r"\bWNW\.?(?!\w)": "West-Northwest",
-        
         # Data transfer rates (bits)
         r"(?<=\d)\s*[Kk]bps\.?(?!\w)": " kilobits per second",
         r"(?<=\d)\s*[Mm]bps\.?(?!\w)": " megabits per second",

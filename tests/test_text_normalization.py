@@ -166,6 +166,28 @@ def test_decimal_numbers_include_point() -> None:
     assert "four point five" in normalized.lower()
 
 
+def test_temperature_celsius_expanded() -> None:
+    """Test that temperature notation with Celsius is expanded."""
+    normalized = _normalize_text("Water boils at 100°C.")
+    folded = normalized.lower()
+    assert "degrees celsius" in folded
+
+
+def test_temperature_fahrenheit_expanded() -> None:
+    """Test that temperature notation with Fahrenheit is expanded."""
+    normalized = _normalize_text("It was 98.6°F outside.")
+    folded = normalized.lower()
+    assert "degrees fahrenheit" in folded
+
+
+def test_temperature_multiple_formats() -> None:
+    """Test various temperature notations."""
+    normalized = _normalize_text("From -40°C to 32°F and back to 0°C.")
+    folded = normalized.lower()
+    assert "degrees celsius" in folded
+    assert "degrees fahrenheit" in folded
+
+
 def test_space_separated_numbers_become_ranges() -> None:
     normalized = _normalize_text("Read pages 12 14 tonight.")
     assert "pages twelve to fourteen" in normalized.lower()
@@ -252,6 +274,20 @@ def test_contractions_can_be_kept_when_override_disabled() -> None:
     assert "It's" in normalized
 
 
+def test_contractions_are_unexpanded_by_default() -> None:
+    """Test that contractions stay unexpanded by default (new default behavior)."""
+    # Use default settings (which now have contractions disabled)
+    normalized = _normalize_text("He'd left early. She's happy. They're coming.")
+    # Contractions should remain unchanged
+    assert "He'd" in normalized
+    assert "She's" in normalized
+    assert "They're" in normalized
+    # Expansions should NOT occur
+    assert "He had" not in normalized and "He would" not in normalized
+    assert "She is" not in normalized
+    assert "They are" not in normalized
+
+
 def test_sibilant_possessives_remain_when_marking_disabled() -> None:
     normalized = _normalize_text(
         "The boss's chair wobbled.",
@@ -307,25 +343,37 @@ def test_internet_slang_expansion_is_configurable() -> None:
 
 @pytest.mark.skipif(not SPACY_RESOLVER_AVAILABLE, reason="spaCy model unavailable")
 def test_spacy_disambiguates_it_has_from_context() -> None:
-    normalized = _normalize_text("It's been a long time.")
+    normalized = _normalize_text(
+        "It's been a long time.",
+        normalization_overrides={"normalization_apostrophes_contractions": True},
+    )
     assert "It has been a long time." == normalized
 
 
 @pytest.mark.skipif(not SPACY_RESOLVER_AVAILABLE, reason="spaCy model unavailable")
 def test_spacy_disambiguates_it_is_from_context() -> None:
-    normalized = _normalize_text("It's cold outside.")
+    normalized = _normalize_text(
+        "It's cold outside.",
+        normalization_overrides={"normalization_apostrophes_contractions": True},
+    )
     assert "It is cold outside." == normalized
 
 
 @pytest.mark.skipif(not SPACY_RESOLVER_AVAILABLE, reason="spaCy model unavailable")
 def test_spacy_disambiguates_she_had() -> None:
-    normalized = _normalize_text("She'd left before dawn.")
+    normalized = _normalize_text(
+        "She'd left before dawn.",
+        normalization_overrides={"normalization_apostrophes_contractions": True},
+    )
     assert "She had left before dawn." == normalized
 
 
 @pytest.mark.skipif(not SPACY_RESOLVER_AVAILABLE, reason="spaCy model unavailable")
 def test_spacy_disambiguates_she_would() -> None:
-    normalized = _normalize_text("She'd go if invited.")
+    normalized = _normalize_text(
+        "She'd go if invited.",
+        normalization_overrides={"normalization_apostrophes_contractions": True},
+    )
     assert "She would go if invited." == normalized
 
 
@@ -334,7 +382,10 @@ def test_sample_sentence_handles_complex_contractions() -> None:
     sample = (
         "I've heard the captain'll arrive by dusk, but they'd said the same yesterday."
     )
-    normalized = _normalize_text(sample)
+    normalized = _normalize_text(
+        sample,
+        normalization_overrides={"normalization_apostrophes_contractions": True},
+    )
     assert (
         "I have heard the captain will arrive by dusk, but they had said the same yesterday."
         == normalized
@@ -345,7 +396,10 @@ def test_modal_will_contractions_can_be_disabled() -> None:
     sample = "The captain'll arrive at dawn."
     normalized = _normalize_text(
         sample,
-        normalization_overrides={"normalization_contraction_modal_will": False},
+        normalization_overrides={
+            "normalization_apostrophes_contractions": True,
+            "normalization_contraction_modal_will": False,
+        },
     )
     assert "captain'll" in normalized
 
@@ -358,7 +412,7 @@ def mock_settings():
         "normalization_terminal": True,
         "normalization_phoneme_hints": True,
         "normalization_caps_quotes": True,
-        "normalization_apostrophes_contractions": True,
+        "normalization_apostrophes_contractions": False,
         "normalization_apostrophes_plural_possessives": True,
         "normalization_apostrophes_sibilant_possessives": True,
         "normalization_apostrophes_decades": True,
