@@ -2299,11 +2299,12 @@ class abogen(QWidget):
                 del self.config["selected_profile_name"]
                 save_config(self.config)
 
-    def convert_input_box_to_log(self):
+    def convert_input_box_to_log(self, preserve_story_state=False):
         self.input_box.hide()
         self.log_header_widget.show()
-        self.story_text_visible = True
-        self.btn_toggle_story.setText("Hide story text")
+        if not preserve_story_state:
+            self.story_text_visible = True
+            self.btn_toggle_story.setText("Hide story text")
         self.set_log_text_collapsed(False, resize_window=False)
         self.log_text.show()
         self._clear_log_display_and_buffer()
@@ -2990,7 +2991,7 @@ class abogen(QWidget):
 
         prevent_sleep_start()
         self.is_converting = True
-        self.convert_input_box_to_log()
+        self.convert_input_box_to_log(preserve_story_state=from_queue)
         self.overall_progress_label.show()
         self.progress_bar.setValue(0)
         self.conversion_sep1.show()
