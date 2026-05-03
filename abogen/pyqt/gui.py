@@ -3392,8 +3392,8 @@ class abogen(QWidget):
                     QApplication.processEvents()
                 except Exception:
                     pass
-                self.show_queue_summary(outcome="cancelled")
                 self.queue_cancel_summary_shown = True
+                self.show_queue_summary(outcome="cancelled")
             self.queue_run_active = False
             return
 
@@ -4217,8 +4217,8 @@ class abogen(QWidget):
                         QApplication.processEvents()
                     except Exception:
                         pass
-                    self.show_queue_summary(outcome="cancelled")
                     self.queue_cancel_summary_shown = True
+                    self.show_queue_summary(outcome="cancelled")
 
             prevent_sleep_end()
         except Exception as e:
