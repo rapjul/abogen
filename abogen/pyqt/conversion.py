@@ -1546,21 +1546,68 @@ class ConversionThread(QThread):
                 f"  - Silence between chapters: {self.silence_duration} seconds"
             )
 
-    def _ffmpeg_output_tail(self, proc, max_chars=3000):
+    def _ffmpeg_output_tail(self, proc, max_chars=6000, max_lines=80):
         if proc is None:
             return ""
         getter = getattr(proc, "_abogen_get_output_tail", None)
         if not callable(getter):
             return ""
         try:
-            tail = str(getter() or "").strip()
+            tail = str(getter() or "")
         except Exception:
             return ""
-        if len(tail) > max_chars:
-            return tail[-max_chars:]
-        return tail
+        if not tail:
+            return ""
 
-    def _build_ffmpeg_failure_message(self, proc, context):
+        truncated = False
+        lines = tail.splitlines()
+        if len(lines) > max_lines:
+            lines = lines[-max_lines:]
+            truncated = True
+
+        normalized = "\n".join(lines).strip()
+        if len(normalized) > max_chars:
+            truncated = True
+            normalized = normalized[-max_chars:]
+            first_newline = normalized.find("\n")
+            if first_newline != -1:
+                # Drop a potentially partial first line after char truncation.
+                normalized = normalized[first_newline + 1 :]
+            normalized = normalized.strip()
+
+        if not normalized:
+            return ""
+        if truncated:
+            return "[log truncated; showing most recent FFmpeg output]\n" + normalized
+        return normalized
+
+    def _looks_like_output_io_failure(self, ffmpeg_tail, pipe_error=None):
+        signal_text = str(ffmpeg_tail or "").lower()
+        if pipe_error is not None:
+            signal_text += f"\n{type(pipe_error).__name__}: {pipe_error}".lower()
+        indicators = (
+            "unable to re-open",
+            "input/output error",
+            "error writing trailer",
+            "error closing file",
+            "no space left on device",
+            "permission denied",
+            "read-only file system",
+            "disk quota exceeded",
+            "broken pipe",
+        )
+        return any(indicator in signal_text for indicator in indicators)
+
+    def _extract_ffmpeg_output_path(self, ffmpeg_tail):
+        tail = str(ffmpeg_tail or "")
+        match = re.search(
+            r"Unable to re-open\s+(.+?)\s+output file for shifting data", tail
+        )
+        if match:
+            return match.group(1).strip()
+        return ""
+
+    def _build_ffmpeg_failure_message(self, proc, context, pipe_error=None):
         returncode = None
         if proc is not None:
             try:
@@ -1572,6 +1619,14 @@ class ConversionThread(QThread):
         code_text = "unknown" if returncode is None else str(returncode)
         msg = f"FFmpeg exited unexpectedly while {context} (exit code: {code_text})."
         tail = self._ffmpeg_output_tail(proc)
+        if self._looks_like_output_io_failure(tail, pipe_error=pipe_error):
+            msg += (
+                "\nLikely cause: output file write failed. "
+                "Check destination drive availability, free space, and write permissions."
+            )
+            output_path = self._extract_ffmpeg_output_path(tail)
+            if output_path:
+                msg += f"\nOutput path: {output_path}"
         if tail:
             msg += f"\nFFmpeg output (tail):\n{tail}"
         return msg
@@ -1588,7 +1643,7 @@ class ConversionThread(QThread):
             stdin.write(audio_bytes)
         except (BrokenPipeError, OSError, ValueError) as exc:
             raise RuntimeError(
-                self._build_ffmpeg_failure_message(proc, context)
+                self._build_ffmpeg_failure_message(proc, context, pipe_error=exc)
                 + f"\nOriginal pipe error: {exc}"
             ) from exc
 
