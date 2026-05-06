@@ -289,6 +289,62 @@ def get_user_cache_path(folder=None):
     return base
 
 
+def reveal_in_file_manager(path: str) -> bool:
+    """Reveal a file or folder in the system file manager.
+
+    On macOS this uses `open -R <file>` to reveal and select the file in Finder.
+    On Windows this uses `explorer /select,<path>` to open Explorer and select the file.
+    On Linux this falls back to `xdg-open` to open the containing folder
+    (there is no reliable cross-desktop "select file" command).
+
+    The function swallows exceptions and returns False on failure so callers
+    can optionally fall back to Qt-based folder opening.
+    """
+    if not path:
+        return False
+    try:
+        path = os.path.abspath(path)
+        if os.path.isdir(path):
+            folder = path
+            file_to_select = None
+        else:
+            folder = os.path.dirname(path)
+            file_to_select = path
+
+        system = platform.system()
+        if system == "Darwin":
+            if file_to_select:
+                subprocess.run(["open", "-R", file_to_select], check=False)
+            else:
+                subprocess.run(["open", folder], check=False)
+            return True
+
+        if system == "Windows":
+            if file_to_select:
+                p = file_to_select.replace("/", "\\")
+                subprocess.run(["explorer", f"/select,{p}"], check=False)
+            else:
+                subprocess.run(["explorer", folder.replace("/", "\\")], check=False)
+            return True
+
+        # Linux and other platforms: open the folder (no reliable "select")
+        try:
+            subprocess.run(["xdg-open", folder], check=False)
+            return True
+        except Exception:
+            # Last-resort: try Qt to open the folder
+            try:
+                from PyQt6.QtCore import QUrl
+                from PyQt6.QtGui import QDesktopServices
+
+                QDesktopServices.openUrl(QUrl.fromLocalFile(folder))
+                return True
+            except Exception:
+                return False
+    except Exception:
+        return False
+
+
 @lru_cache(maxsize=1)
 def get_user_output_root():
     override = os.environ.get("ABOGEN_OUTPUT_DIR") or os.environ.get(
@@ -408,7 +464,7 @@ def clean_text(text, *args, **kwargs):
     text = "\n".join(lines)
     # Standardize paragraph breaks (multiple newlines become exactly two) and trim overall whitespace
     text = _PARAGRAPH_BREAK_RE.sub("\n\n", text).strip()
-    
+
     # Ensure paragraphs end with terminal punctuation to trigger TTS pauses
     paragraphs = text.split("\n\n")
     processed_paragraphs = []
@@ -417,13 +473,13 @@ def clean_text(text, *args, **kwargs):
         if not p_stripped:
             processed_paragraphs.append(p)
             continue
-            
-        if not re.search(r'[.!?:;]["\'' "’" '”)]*$', p_stripped):
+
+        if not re.search(r'[.!?:;]["\'' "’" "”)]*$", p_stripped):
             # Ensure it ends with word char (possibly followed by quotes) before adding period
-            if re.search(r'\w["\'' "’" '”)]*$', p_stripped):
-                m = re.search(r'(["\'' "’" '”)]+)$', p_stripped)
+            if re.search(r'\w["\'' "’" "”)]*$", p_stripped):
+                m = re.search(r'(["\'' "’" "”)]+)$", p_stripped)
                 if m:
-                    p = p_stripped[:-len(m.group(1))] + "." + m.group(1)
+                    p = p_stripped[: -len(m.group(1))] + "." + m.group(1)
                 else:
                     p = p_stripped + "."
         processed_paragraphs.append(p)

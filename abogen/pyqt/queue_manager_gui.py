@@ -36,7 +36,7 @@ from abogen.pyqt.file_dialog_paths import (
     selected_directory_from_files,
 )
 from abogen.subtitle_utils import calculate_text_length, clean_text
-from abogen.utils import load_config, save_config
+from abogen.utils import load_config, reveal_in_file_manager, save_config
 
 logger = logging.getLogger(__name__)
 
@@ -1379,9 +1379,12 @@ class QueueManager(QDialog):
                         f"The file does not exist: {target_path}",
                     )
                     return
-                folder = os.path.dirname(target_path)
-                if os.path.exists(folder):
-                    QDesktopServices.openUrl(QUrl.fromLocalFile(folder))
+                # Try to reveal the file in the system file manager (select the item
+                # when supported). Fall back to opening the parent folder if needed.
+                if not reveal_in_file_manager(target_path):
+                    folder = os.path.dirname(target_path)
+                    if os.path.exists(folder):
+                        QDesktopServices.openUrl(QUrl.fromLocalFile(folder))
 
             if is_document_input:
                 processed_action = QAction("Go to processed file", self)
@@ -1420,9 +1423,11 @@ class QueueManager(QDialog):
                                     self, "File Not Found", "The file does not exist."
                                 )
                                 return
-                            folder = os.path.dirname(target_path)
-                            if os.path.exists(folder):
-                                QDesktopServices.openUrl(QUrl.fromLocalFile(folder))
+                            # Reveal or open containing folder
+                            if not reveal_in_file_manager(target_path):
+                                folder = os.path.dirname(target_path)
+                                if os.path.exists(folder):
+                                    QDesktopServices.openUrl(QUrl.fromLocalFile(folder))
                             break
 
                 go_to_folder_action.triggered.connect(go_to_folder)

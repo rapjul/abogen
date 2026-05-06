@@ -106,6 +106,7 @@ from abogen.utils import (
     load_config,
     prevent_sleep_end,
     prevent_sleep_start,
+    reveal_in_file_manager,
     save_config,
 )
 from abogen.voice_profiles import load_profiles
@@ -3787,12 +3788,15 @@ class abogen(QWidget):
         if not path:
             return
         try:
-            # Check if path is a directory (for multiple chapter files)
-            if os.path.isdir(path):
-                folder = path
-            else:
-                folder = os.path.dirname(path)
-            QDesktopServices.openUrl(QUrl.fromLocalFile(folder))
+            # Try to reveal the file/folder in the system file manager.
+            # This will select the file on macOS/Windows when supported.
+            if not reveal_in_file_manager(path):
+                # Fallback: open the containing folder via Qt
+                if os.path.isdir(path):
+                    folder = path
+                else:
+                    folder = os.path.dirname(path)
+                QDesktopServices.openUrl(QUrl.fromLocalFile(folder))
         except Exception as e:
             self._show_error_message_box(
                 "Open Folder Error", f"Could not open folder:\n{e}"
