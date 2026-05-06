@@ -9,8 +9,8 @@ from copy import deepcopy
 from types import SimpleNamespace
 from typing import Any
 
-from PyQt6.QtCore import QFileInfo, Qt
-from PyQt6.QtGui import QFontDatabase, QFontMetrics, QKeyEvent
+from PyQt6.QtCore import QFileInfo, QItemSelectionModel, Qt
+from PyQt6.QtGui import QColor, QFontDatabase, QFontMetrics, QKeyEvent
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -19,14 +19,14 @@ from PyQt6.QtWidgets import (
     QFileDialog,
     QFileIconProvider,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
-    QListWidget,
-    QListWidgetItem,
     QMessageBox,
     QPushButton,
     QSizePolicy,
+    QTableWidget,
+    QTableWidgetItem,
     QVBoxLayout,
-    QWidget,
 )
 
 from abogen.constants import COLORS
@@ -42,6 +42,7 @@ logger = logging.getLogger(__name__)
 
 # Show a summary pop-up only when there are many character-count read failures.
 CHAR_COUNT_FAILURE_WARNING_THRESHOLD = 3
+QUEUE_ITEM_KEY_ROLE = Qt.ItemDataRole.UserRole + 1
 
 TEXT_EXTENSIONS = {".txt"}
 SUBTITLE_EXTENSIONS = {".srt", ".ass", ".vtt"}
@@ -113,35 +114,45 @@ class ElidedLabel(QLabel):
         return hint
 
 
-class QueueListItemWidget(QWidget):
-    def __init__(self, file_name, char_count):
-        super().__init__()
-        layout = QHBoxLayout()
-        layout.setContentsMargins(12, 0, 6, 0)
-        layout.setSpacing(0)
-        import os
-
-        name_label = ElidedLabel(os.path.basename(file_name))
-        formatted_count = format_char_count(char_count)
-        char_label = QLabel(f"Chars: {formatted_count}")
-        char_label.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
-        char_label.setStyleSheet(f"color: {COLORS['LIGHT_DISABLED']};")
-        char_label.setAlignment(
-            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-        )
-        char_label.setSizePolicy(
-            QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Preferred
-        )
-        layout.addWidget(name_label, 1)
-        layout.addWidget(char_label, 0)
-        self.setLayout(layout)
+class NumericTableWidgetItem(QTableWidgetItem):
+    def __lt__(self, other):
+        # Sort based on UserRole integer value if both have it, otherwise fallback.
+        data_self = self.data(Qt.ItemDataRole.UserRole)
+        data_other = other.data(Qt.ItemDataRole.UserRole)
+        if isinstance(data_self, int) and isinstance(data_other, int):
+            return data_self < data_other
+        return super().__lt__(other)
 
 
-class DroppableQueueListWidget(QListWidget):
+class DroppableQueueTableWidget(QTableWidget):
     def __init__(self, parent_dialog):
         super().__init__()
         self.parent_dialog = parent_dialog
         self.setAcceptDrops(True)
+        self.setColumnCount(2)
+        self.setHorizontalHeaderLabels(["File", "Characters"])
+        self.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.setAlternatingRowColors(True)
+        self.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.setSortingEnabled(True)
+        vertical_header = self.verticalHeader()
+        if vertical_header is not None:
+            vertical_header.setVisible(False)
+        horizontal_header = self.horizontalHeader()
+        if horizontal_header is not None:
+            horizontal_header.setStretchLastSection(False)
+            horizontal_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+            horizontal_header.setSectionResizeMode(
+                1, QHeaderView.ResizeMode.ResizeToContents
+            )
+            horizontal_header.sectionClicked.connect(self._handle_header_clicked)
+            horizontal_header.sortIndicatorChanged.connect(
+                self._notify_parent_view_changed
+            )
+        model = self.model()
+        if model is not None:
+            model.layoutChanged.connect(self._notify_parent_view_changed)
         # Overlay for drag hover
         self.drag_overlay = QLabel("", self)
         self.drag_overlay.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -218,6 +229,23 @@ class DroppableQueueListWidget(QListWidget):
         if hasattr(self, "drag_overlay"):
             self.drag_overlay.resize(self.size())
 
+    def _handle_header_clicked(self, column):
+        header = self.horizontalHeader()
+        if header is not None:
+            header.setSortIndicatorShown(True)
+        if not self.isSortingEnabled():
+            self.setSortingEnabled(True)
+            self.sortByColumn(column, Qt.SortOrder.AscendingOrder)
+
+    def clear_sort_indicator(self):
+        header = self.horizontalHeader()
+        if header is not None:
+            header.setSortIndicatorShown(False)
+
+    def _notify_parent_view_changed(self, *args):
+        if hasattr(self.parent_dialog, "update_button_states"):
+            self.parent_dialog.update_button_states()
+
 
 class QueueManager(QDialog):
     def __init__(self, parent, queue: list, title="Queue Manager", size=(600, 700)):
@@ -237,11 +265,10 @@ class QueueManager(QDialog):
         layout.setContentsMargins(15, 15, 15, 15)  # set main layout margins
         layout.setSpacing(12)  # set spacing between widgets in main layout
         # list of queued items
-        self.listwidget = DroppableQueueListWidget(self)
+        self.listwidget = DroppableQueueTableWidget(self)
         self.listwidget.setSelectionMode(
             QAbstractItemView.SelectionMode.ExtendedSelection
         )
-        self.listwidget.setAlternatingRowColors(True)
         self.listwidget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.listwidget.customContextMenuRequested.connect(self.show_context_menu)
         # Add informative instructions at the top
@@ -363,7 +390,6 @@ class QueueManager(QDialog):
         layout.addWidget(self.listwidget)
 
         # Connect selection change to update button state
-        self.listwidget.currentItemChanged.connect(self.update_button_states)
         self.listwidget.itemSelectionChanged.connect(self.update_button_states)
 
         buttons = QDialogButtonBox(
@@ -396,7 +422,7 @@ class QueueManager(QDialog):
         import os
 
         try:
-            self.listwidget.clear()
+            self.listwidget.setRowCount(0)
             if not self.queue:
                 self.empty_overlay.show()
                 self.update_button_states()
@@ -441,8 +467,6 @@ class QueueManager(QDialog):
 
                 # Get icon for the display file
                 icon = icon_provider.icon(QFileInfo(display_file_path))
-                list_item = QListWidgetItem()
-
                 # Tooltip Generation
                 tooltip = ""
                 # If override is active, add the warning header on its own line
@@ -499,36 +523,54 @@ class QueueManager(QDialog):
                     # Only show merge option if saving chapters separately
                     if save_chapters_separately and merge_chapters_at_end is not None:
                         tooltip += f"<br><b>Merge chapters at the end:</b> {'Yes' if merge_chapters_at_end else 'No'}"
-                list_item.setToolTip(tooltip)
-                list_item.setIcon(icon)
-                # Store both paths for context menu
-                list_item.setData(
+                char_count = getattr(item, "total_char_count", 0)
+                row = self.listwidget.rowCount()
+                self.listwidget.insertRow(row)
+
+                file_item = QTableWidgetItem(
+                    os.path.basename(display_file_path) or display_file_path
+                )
+                file_item.setToolTip(tooltip)
+                file_item.setIcon(icon)
+                file_item.setData(
                     Qt.ItemDataRole.UserRole,
                     {
                         "display_path": display_file_path,
                         "processing_path": processing_file_path,
                     },
                 )
-                # Use custom widget for display
-                char_count = getattr(item, "total_char_count", 0)
-                widget = QueueListItemWidget(display_file_path, char_count)
-                self.listwidget.addItem(list_item)
-                self.listwidget.setItemWidget(list_item, widget)
+                file_item.setData(QUEUE_ITEM_KEY_ROLE, id(item))
+                file_item.setFlags(file_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+
+                char_item = NumericTableWidgetItem(format_char_count(char_count))
+                char_item.setTextAlignment(
+                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+                )
+                char_item.setFont(
+                    QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
+                )
+                char_item.setForeground(QColor(COLORS["LIGHT_DISABLED"]))
+                char_item.setData(Qt.ItemDataRole.UserRole, int(char_count or 0))
+                char_item.setFlags(char_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+
+                self.listwidget.setItem(row, 0, file_item)
+                self.listwidget.setItem(row, 1, char_item)
             self.update_button_states()
         except Exception as e:
-            self.listwidget.clear()
+            self.listwidget.setRowCount(0)
             self.empty_overlay.show()
             self.update_button_states()
             self._show_unexpected_error("refresh the queue view", e)
 
     def remove_item(self):
-        items = self.listwidget.selectedItems()
-        if not items:
+        selected_keys = self._get_selected_item_keys()
+        if not selected_keys:
             return
         from PyQt6.QtWidgets import QMessageBox
 
-        # Remove by index to ensure correct mapping
-        rows = sorted([self.listwidget.row(item) for item in items], reverse=True)
+        rows = sorted(self._get_selected_rows(), reverse=True)
+        if not rows:
+            return
         focus_row_hint = min(rows)
         # Warn user if removing multiple files
         if len(rows) > 1:
@@ -541,88 +583,166 @@ class QueueManager(QDialog):
             )
             if reply != QMessageBox.StandardButton.Yes:
                 return
-        for row in rows:
-            if 0 <= row < len(self.queue):
-                del self.queue[row]
+        key_set = set(selected_keys)
+        self.queue[:] = [item for item in self.queue if id(item) not in key_set]
+        self._disable_column_sorting()
         self.process_queue()
         self.update_button_states()
-        if self.listwidget.count() > 0:
-            self.listwidget.setCurrentRow(
-                min(focus_row_hint, self.listwidget.count() - 1)
+        if self.listwidget.rowCount() > 0:
+            self._restore_selection(
+                [min(focus_row_hint, self.listwidget.rowCount() - 1)]
             )
         self.listwidget.setFocus()
 
     def _get_selected_rows(self):
-        return sorted(
-            {self.listwidget.row(item) for item in self.listwidget.selectedItems()}
-        )
+        selection_model = self.listwidget.selectionModel()
+        if selection_model is None:
+            return []
+        return sorted({index.row() for index in selection_model.selectedRows()})
+
+    def _get_selected_item_keys(self):
+        keys = []
+        for row in self._get_selected_rows():
+            item = self.listwidget.item(row, 0)
+            if item is None:
+                continue
+            key = item.data(QUEUE_ITEM_KEY_ROLE)
+            if key is not None:
+                keys.append(key)
+        return keys
+
+    def _queue_items_in_current_view(self):
+        items_by_key = {id(item): item for item in self.queue}
+        ordered_items = []
+        ordered_keys = []
+        for row in range(self.listwidget.rowCount()):
+            item = self.listwidget.item(row, 0)
+            if item is None:
+                continue
+            key = item.data(QUEUE_ITEM_KEY_ROLE)
+            queue_item = items_by_key.get(key)
+            if queue_item is not None:
+                ordered_items.append(queue_item)
+                ordered_keys.append(key)
+        return ordered_items, ordered_keys
+
+    def _disable_column_sorting(self):
+        if self.listwidget.isSortingEnabled():
+            self.listwidget.setSortingEnabled(False)
+        self.listwidget.clear_sort_indicator()
+
+    def _restore_selection_by_keys(self, keys):
+        selection_model = self.listwidget.selectionModel()
+        if selection_model is None:
+            return
+        self.listwidget.clearSelection()
+        if not keys:
+            return
+        key_set = set(keys)
+        model = self.listwidget.model()
+        if model is None:
+            return
+        selected_rows = []
+        for row in range(self.listwidget.rowCount()):
+            item = self.listwidget.item(row, 0)
+            if item is None:
+                continue
+            if item.data(QUEUE_ITEM_KEY_ROLE) in key_set:
+                index = model.index(row, 0)
+                selection_model.select(
+                    index,
+                    QItemSelectionModel.SelectionFlag.Select
+                    | QItemSelectionModel.SelectionFlag.Rows,
+                )
+                selected_rows.append(row)
+        if selected_rows:
+            self.listwidget.setCurrentCell(selected_rows[0], 0)
 
     def _restore_selection(self, selected_rows):
+        selection_model = self.listwidget.selectionModel()
+        if selection_model is None:
+            return
         self.listwidget.clearSelection()
-        valid_rows = [r for r in selected_rows if 0 <= r < self.listwidget.count()]
+        valid_rows = [r for r in selected_rows if 0 <= r < self.listwidget.rowCount()]
+        model = self.listwidget.model()
+        if model is None:
+            return
         for row in valid_rows:
-            item = self.listwidget.item(row)
-            if item is not None:
-                item.setSelected(True)
+            index = model.index(row, 0)
+            selection_model.select(
+                index,
+                QItemSelectionModel.SelectionFlag.Select
+                | QItemSelectionModel.SelectionFlag.Rows,
+            )
         if valid_rows:
-            self.listwidget.setCurrentRow(valid_rows[0])
+            self.listwidget.setCurrentCell(valid_rows[0], 0)
+
+    def _reorder_queue_using_current_view(self, reorder_fn):
+        selected_rows = self._get_selected_rows()
+        if not selected_rows:
+            return
+        selected_keys = self._get_selected_item_keys()
+        if not selected_keys:
+            return
+
+        view_items, _view_keys = self._queue_items_in_current_view()
+        if not view_items:
+            return
+        if not reorder_fn(view_items, selected_rows):
+            return
+
+        self._disable_column_sorting()
+        self.queue[:] = view_items
+        self.process_queue()
+        self._restore_selection_by_keys(selected_keys)
 
     def move_selected_up(self):
-        rows = self._get_selected_rows()
-        if not rows or rows[0] == 0:
-            return
+        def reorder_fn(items, selected_rows):
+            if selected_rows[0] == 0:
+                return False
+            for row in selected_rows:
+                items[row - 1], items[row] = items[row], items[row - 1]
+            return True
 
-        for row in rows:
-            self.queue[row - 1], self.queue[row] = self.queue[row], self.queue[row - 1]
-
-        new_rows = [row - 1 for row in rows]
-        self.process_queue()
-        self._restore_selection(new_rows)
+        self._reorder_queue_using_current_view(reorder_fn)
 
     def move_selected_down(self):
-        rows = self._get_selected_rows()
-        if not rows or rows[-1] == len(self.queue) - 1:
-            return
+        def reorder_fn(items, selected_rows):
+            if selected_rows[-1] == len(items) - 1:
+                return False
+            for row in reversed(selected_rows):
+                items[row + 1], items[row] = items[row], items[row + 1]
+            return True
 
-        for row in reversed(rows):
-            self.queue[row + 1], self.queue[row] = self.queue[row], self.queue[row + 1]
-
-        new_rows = [row + 1 for row in rows]
-        self.process_queue()
-        self._restore_selection(new_rows)
+        self._reorder_queue_using_current_view(reorder_fn)
 
     def move_selected_to_top(self):
-        rows = self._get_selected_rows()
-        if not rows or rows[0] == 0:
-            return
+        def reorder_fn(items, selected_rows):
+            if selected_rows[0] == 0:
+                return False
+            selected_set = set(selected_rows)
+            selected_items = [items[row] for row in selected_rows]
+            remaining_items = [
+                item for idx, item in enumerate(items) if idx not in selected_set
+            ]
+            items[:] = selected_items + remaining_items
+            return True
 
-        selected_set = set(rows)
-        selected_items = [self.queue[row] for row in rows]
-        remaining_items = [
-            item for idx, item in enumerate(self.queue) if idx not in selected_set
-        ]
-        self.queue[:] = selected_items + remaining_items
-
-        new_rows = list(range(len(rows)))
-        self.process_queue()
-        self._restore_selection(new_rows)
+        self._reorder_queue_using_current_view(reorder_fn)
 
     def move_selected_to_bottom(self):
-        rows = self._get_selected_rows()
-        if not rows or rows[-1] == len(self.queue) - 1:
-            return
+        def reorder_fn(items, selected_rows):
+            if selected_rows[-1] == len(items) - 1:
+                return False
+            selected_set = set(selected_rows)
+            selected_items = [items[row] for row in selected_rows]
+            remaining_items = [
+                item for idx, item in enumerate(items) if idx not in selected_set
+            ]
+            items[:] = remaining_items + selected_items
+            return True
 
-        selected_set = set(rows)
-        selected_items = [self.queue[row] for row in rows]
-        remaining_items = [
-            item for idx, item in enumerate(self.queue) if idx not in selected_set
-        ]
-        start_row = len(remaining_items)
-        self.queue[:] = remaining_items + selected_items
-
-        new_rows = list(range(start_row, start_row + len(rows)))
-        self.process_queue()
-        self._restore_selection(new_rows)
+        self._reorder_queue_using_current_view(reorder_fn)
 
     def clear_queue(self):
         from PyQt6.QtWidgets import QMessageBox
@@ -639,7 +759,7 @@ class QueueManager(QDialog):
             if reply != QMessageBox.StandardButton.Yes:
                 return
         self.queue.clear()
-        self.listwidget.clear()
+        self.listwidget.setRowCount(0)
         self.empty_overlay.resize(
             self.listwidget.size()
         )  # Ensure overlay is sized correctly
@@ -1093,7 +1213,12 @@ class QueueManager(QDialog):
         if viewport is None:
             return
         global_pos = viewport.mapToGlobal(pos)
-        selected_items = self.listwidget.selectedItems()
+        selected_rows = self._get_selected_rows()
+        selected_items = []
+        for row in selected_rows:
+            item = self.listwidget.item(row, 0)
+            if item is not None:
+                selected_items.append(item)
         menu = QMenu(self)
         if len(selected_items) == 1:
             move_top_action = QAction("Move to top", self)
@@ -1208,8 +1333,6 @@ class QueueManager(QDialog):
             # Add Go to folder action
             # If the queued item represents a converted document (markdown, pdf, epub)
             # show two actions: Go to processed file (the cached .txt) and Go to input file (original source)
-
-            from PyQt6.QtWidgets import QMessageBox
 
             def open_folder_for(path_label: str):
                 # path_label should be either 'display' or 'processing'
