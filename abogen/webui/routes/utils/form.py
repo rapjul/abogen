@@ -83,6 +83,7 @@ _SUPPLEMENT_TITLE_PATTERNS: List[tuple[re.Pattern[str], float]] = [
     (re.compile(r"\bbibliograph(y|ies)\b"), 2.0),
     (re.compile(r"\breferences\b"), 1.8),
     (re.compile(r"\bappendix\b"), 1.9),
+    (re.compile(r"\bmap(s)?\b"), 1.0),
 ]
 
 _CONTENT_TITLE_PATTERNS: List[re.Pattern[str]] = [

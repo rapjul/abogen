@@ -894,72 +894,110 @@ class HandlerDialog(QDialog):
         self._update_checked_set_from_tree()
 
     def _should_exclude_by_title(self, item):
-        title = item.text(0).lower()
-        excluded_keywords = [
-            # --- Front Matter ---
-            "cover",  # Image-only section
-            "praise for",  # Marketing blurbs
-            "also by",  # Other books by author
-            "half title",  # Redundant title item
-            "title page",  # Front matter
-            "title",  # Redundant title item
-            "copyright",  # Legal front matter
-            "copyright page",  # Legal front matter
-            "disclaimer",  # Legal text
-            "permissions",  # Copyright permissions
-            "dedication",  # Personal note (often skipped)
-            "publisher's note",  # Administrative preface
-            "publisher note",  # Administrative preface
-            "map",  # Visual content placeholder
-            "list of maps",  # Navigation for maps
-            "list of illustrations",  # Navigation for illustrations
-            "cast of characters",  # Reference list
-            "dramatis personae",  # Reference list
-            "chronology",  # Reference list
-            "abbreviations",  # Technical reference list
-            "acronyms",  # Technical reference list
-            # "abstract",  # Technical/Academic summary
-            "table of contents",  # Navigation (redundant in audio)
-            "contents",  # Navigation (redundant in audio)
-            "list of figures",  # Navigation for visuals
-            "list of tables",  # Navigation for tables
-            "acknowledgments",  # Administrative/Personal thanks
-            "acknowledgements",  # Administrative/Personal thanks
-            "supplemental images",  # Visual-only content
-            # --- Back Matter ---
-            "afterword",  # Meta-commentary at end
-            "author's note",  # Meta-commentary
-            "author note",  # Meta-commentary
-            "translator's note",  # Meta-commentary
-            "translator note",  # Meta-commentary
-            "errata",  # List of corrections
-            "appendix",  # Supplementary material
-            "source notes",  # Reference citations
-            "notes",  # Endnotes or reference citations
-            "endnotes",  # Reference citations
-            "glossary",  # Reference/Dictionary
-            "bibliography",  # Reference (not readable)
-            "references",  # Reference (not readable)
-            "works cited",  # Reference (not readable)
-            "further reading",  # Reference list
-            "suggested reading",  # Reference list
-            "recommended reading",  # Reference list
-            "index",  # Reference (not readable)
-            "about the author",  # Biographical info
-            "author bio",  # Biographical info
-            "about the illustrator",  # Biographical info
-            "about the translator",  # Biographical info
-            "credits",  # Administrative/Image credits
-            "teaser",  # Marketing/Book preview
-            "preview",  # Marketing/Book preview
-            "excerpt",  # Marketing/Book preview
-            "advertisement",  # Marketing
-            "newsletter",  # Marketing/Sign-up
-            "series list",  # List of other books
-            "about the series",  # Info about the book series
-            "colophon",  # Technical production details
+        """
+        Heuristically determine if a chapter/page should be excluded based on its title.
+        Excludes typical front/back matter and visual placeholders like maps.
+        """
+        title = item.text(0).lower().strip()
+        if not title:
+            return False
+
+        words = title.split()
+
+        # 1. Specialized check for Maps
+        # We want to exclude standalone "Map" or "Map 1" but include "Chapter 1: The Map Crystal"
+        if "map" in words or "maps" in words:
+            # Exclude if it's a very short title (likely a visual placeholder)
+            if len(words) <= 3:
+                return True
+            # Still exclude explicit lists
+            if "list of maps" in title or "list of illustrations" in title:
+                return True
+            # For longer titles, we assume it's a real chapter title
+            return False
+
+        # 2. Exact match exclusions (for very common short names)
+        exact_exclusions = {
+            "cover",
+            "title",
+            "title page",
+            "half title",
+            "copyright",
+            "copyright page",
+            "table of contents",
+            "contents",
+            "dedication",
+            "disclaimer",
+            "permissions",
+            "acknowledgments",
+            "acknowledgements",
+            "glossary",
+            "bibliography",
+            "index",
+            "errata",
+            "colophon",
+            "teaser",
+            "preview",
+            "excerpt",
+            "advertisement",
+            "newsletter",
+            "chronology",
+            "abbreviations",
+            "acronyms",
+        }
+        if title in exact_exclusions:
+            return True
+
+        # 3. Pattern-based exclusions (whole word matching)
+        # We use a set of keywords that usually indicate supplemental material
+        # only if they appear in a relatively short title.
+        supplemental_keywords = {
+            "copyright",
+            "dedication",
+            "acknowledgments",
+            "acknowledgements",
+            "preface",
+            "foreword",
+            "afterword",
+            "appendix",
+            "glossary",
+            "bibliography",
+            "index",
+            "colophon",
+            "about the author",
+            "author bio",
+            "about the series",
+            "praise for",
+            "also by",
+            "further reading",
+            "suggested reading",
+            "recommended reading",
+        }
+
+        for keyword in supplemental_keywords:
+            if keyword in title:
+                # If it's a short title containing these words, exclude it
+                if len(words) <= len(keyword.split()) + 3:
+                    return True
+
+        # 4. Specific phrases that are almost always supplemental
+        phrases = [
+            "list of illustrations",
+            "list of figures",
+            "list of tables",
+            "cast of characters",
+            "dramatis personae",
+            "publisher's note",
+            "author's note",
+            "translator's note",
+            "source notes",
         ]
-        return any(keyword in title for keyword in excluded_keywords)
+        for phrase in phrases:
+            if phrase in title:
+                if len(words) <= len(phrase.split()) + 3:
+                    return True
+
+        return False
 
     def _run_epub_auto_check(self):
         iterator = QTreeWidgetItemIterator(self.treeWidget)
