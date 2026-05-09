@@ -282,25 +282,25 @@ class PreDownloadDialog(QDialog):
         status_title = QLabel("<b>Current Status:</b>")
         status_layout.addWidget(status_title)
 
-        self.voices_status = QLabel(self.VOICE_PREFIX + "⏳ Checking...")
+        self.voices_status = QLabel(self.VOICE_PREFIX + "Checking...")
         row = QHBoxLayout()
         row.addWidget(self.voices_status)
         row.addStretch()
         status_layout.addLayout(row)
 
-        self.model_status = QLabel(self.MODEL_PREFIX + "⏳ Checking...")
+        self.model_status = QLabel(self.MODEL_PREFIX + "Checking...")
         row = QHBoxLayout()
         row.addWidget(self.model_status)
         row.addStretch()
         status_layout.addLayout(row)
 
-        self.config_status = QLabel(self.CONFIG_PREFIX + "⏳ Checking...")
+        self.config_status = QLabel(self.CONFIG_PREFIX + "Checking...")
         row = QHBoxLayout()
         row.addWidget(self.config_status)
         row.addStretch()
         status_layout.addLayout(row)
 
-        self.spacy_status = QLabel(self.SPACY_PREFIX + "⏳ Checking...")
+        self.spacy_status = QLabel(self.SPACY_PREFIX + "Checking...")
         row = QHBoxLayout()
         row.addWidget(self.spacy_status)
         row.addStretch()
@@ -392,7 +392,7 @@ class PreDownloadDialog(QDialog):
         ):
             lbl.setStyleSheet(f"color: {COLORS['ORANGE']};")
 
-        self.spacy_status.setText(self.SPACY_PREFIX + "⏳ Checking...")
+        self.spacy_status.setText(self.SPACY_PREFIX + "Checking...")
         self._status_worker.start()
 
     # UI update callbacks
