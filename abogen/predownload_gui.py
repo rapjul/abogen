@@ -268,7 +268,7 @@ class PreDownloadDialog(QDialog):
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
         layout.setSpacing(0)
-        layout.setContentsMargins(15, 0, 15, 15)
+        layout.setContentsMargins(15, 15, 15, 15)
 
         desc = QLabel(
             "You can pre-download all required models and voices for offline use.\n"
