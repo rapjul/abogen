@@ -20,6 +20,7 @@ def apply_word_substitutions(
     replace_all_caps=False,
     replace_numerals=False,
     fix_nonstandard_punctuation=False,
+    apply_tts_fixes=True,
 ):
     """
     Apply word substitutions to text while preserving markers.
@@ -31,6 +32,7 @@ def apply_word_substitutions(
         replace_all_caps: Convert ALL CAPS words to lowercase
         replace_numerals: Convert numbers to words
         fix_nonstandard_punctuation: Fix curly quotes, em/en dashes, etc.
+        apply_tts_fixes: Fix known TTS mispronunciations (e.g., No.7, Co-research, "N")
 
     Returns:
         Modified text
@@ -38,6 +40,10 @@ def apply_word_substitutions(
     # Apply nonstandard punctuation fixes FIRST (if enabled)
     if fix_nonstandard_punctuation:
         text = fix_punctuation(text)
+
+    # Apply known TTS mispronunciation fixes (if enabled)
+    if apply_tts_fixes:
+        text = fix_tts_pronunciations(text)
 
     # Parse substitutions list
     substitutions = parse_substitutions_list(substitutions_list_str)
@@ -243,6 +249,36 @@ def fix_punctuation(text):
     # Apply all replacements
     for old_char, new_char in replacements.items():
         text = text.replace(old_char, new_char)
+
+    return text
+
+
+def fix_tts_pronunciations(text):
+    """
+    Apply specific text fixes for known TTS engine mispronunciations.
+
+    Fixes include:
+    - "No." followed by a number is read as "number" (e.g., "No.7" -> "number 7")
+    - "Co-" prefixes are lowercased to prevent "Company" expansion
+    - Standalone "N" in quotes is read phonetically as "en"
+
+    Args:
+        text: Input text
+
+    Returns:
+        Text with pronunciation fixes applied
+    """
+    # Fix 1: "No." followed by a number
+    # Expands "No.7" to "number 7" so it isn't read as "No 7"
+    text = re.sub(r"\bNo\.\s*(?=\d)", "number ", text)
+
+    # Fix 2: "Co-" prefixes
+    # Changes "Co-research" to "co-research" so the TTS doesn't expand it to "Company research"
+    text = re.sub(r"\bCo-(?=[a-zA-Z])", "co-", text)
+
+    # Fix 3: Standalone letter "N" in quotes (including optional punctuation)
+    # Replaces '"N"' with '"en"' and '"N,"' with '"en,"' so it isn't read as '"North"'
+    text = re.sub(r'([\'"])N([.,!?;:]*)(\1)', r"\1en\2\3", text)
 
     return text
 
