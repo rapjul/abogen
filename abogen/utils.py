@@ -691,7 +691,14 @@ def prevent_sleep_start():
             0x80000000 | 0x00000001 | 0x00000040
         )
     elif system == "Darwin":
-        _sleep_procs["Darwin"] = create_process(["caffeinate"])
+        _sleep_procs["Darwin"] = create_process(
+            [
+                "caffeinate",
+                # "-d",  # Prevent display sleep
+                "-i",  # Prevent idle sleep
+                "-s",  # Prevent display sleep
+            ]
+        )
     elif system == "Linux":
         # Add program name and reason for inhibition
         program_name = PROGRAM_NAME
@@ -701,12 +708,13 @@ def prevent_sleep_start():
             _sleep_procs["Linux"] = create_process(
                 [
                     "systemd-inhibit",
-                    f"--who={program_name}",
-                    f"--why={reason}",
-                    "--what=sleep",
-                    "--mode=block",
-                    "sleep",
-                    "infinity",
+                    f"--who={program_name}",  # Who is preventing sleep
+                    f"--why={reason}",  # Why we are preventing sleep
+                    "--what=sleep",  # Prevent sleep
+                    # "--what=idle",  # Prevent idle
+                    "--mode=block",  # Prevent sleep completely
+                    "sleep",  # Sleep indefinitely
+                    "infinity",  # Prevent sleep until terminated
                 ]
             )
         else:
@@ -727,8 +735,10 @@ def prevent_sleep_end():
         if proc:
             try:
                 proc.terminate()
-            except Exception:
-                pass
+                proc.wait(timeout=10)  # Wait for the process to terminate
+                print("Sleep inhibition released.")
+            except Exception as e:
+                print(f"Error releasing sleep inhibition: {e}")
             finally:
                 _sleep_procs[system] = None
 
