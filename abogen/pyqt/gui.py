@@ -3,6 +3,7 @@ import base64
 import gc
 import hashlib  # Added for cache path generation
 import html
+import json
 import logging
 import os
 import platform
@@ -11,6 +12,7 @@ import sys
 import tempfile
 import threading
 import time
+from pathlib import Path
 
 import psutil
 from PyQt6.QtCore import (
@@ -1027,6 +1029,180 @@ class WordSubstitutionsDialog(QDialog):
         return self.punctuation_checkbox.isChecked()
 
 
+class QueueRestoreDialog(QDialog):
+    """Dialog to ask the user if they want to restore the uncompleted queue from the last session."""
+
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        items_count: int = 0,
+        items_info: list[str] | None = None,
+        missing_files: list[str] | None = None,
+        has_completed: bool = False,
+    ) -> None:
+        """Initialize the QueueRestoreDialog.
+
+        Args:
+            parent: Parent widget.
+            items_count: Number of valid items in the queue.
+            items_info: List of strings summarizing each valid item (e.g. filename (char_count)).
+            missing_files: List of names of missing files that will be skipped.
+            has_completed: Whether there are completed items in the last queue session.
+        """
+        super().__init__(parent)
+        self.setWindowTitle("Restore Last Session's Queue?")
+        self.resize(680, 450)
+        self.setWindowFlags(
+            Qt.WindowType.Dialog
+            | Qt.WindowType.WindowTitleHint
+            | Qt.WindowType.WindowCloseButtonHint
+        )
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+
+        is_dark_theme = (
+            self.palette().color(QPalette.ColorRole.Window).lightness() < 128
+        )
+        bg_color = COLORS["DARK_BASE"] if is_dark_theme else "#f9f9f9"
+        fg_color = "#f5f5f5" if is_dark_theme else "#111111"
+
+        title_label = QLabel("Uncompleted Queue Found", self)
+        title_font = title_label.font()
+        title_font.setPointSize(16)
+        title_font.setBold(True)
+        title_label.setFont(title_font)
+        layout.addWidget(title_label)
+
+        msg_label = QLabel(
+            f"An uncompleted queue with {items_count} item(s) from your last session was found.\n"
+            "Would you like to restore it?",
+            self,
+        )
+        msg_label.setWordWrap(True)
+        layout.addWidget(msg_label)
+
+        if items_info:
+            from PyQt6.QtGui import QFontDatabase
+            from PyQt6.QtWidgets import (
+                QAbstractItemView,
+                QHeaderView,
+                QTableWidget,
+                QTableWidgetItem,
+            )
+
+            all_epubs = all(item.get("is_epub", False) for item in items_info)
+            first_column_title = "Book Title" if all_epubs else "File Name"
+
+            table = QTableWidget(self)
+            table.setColumnCount(3)
+            table.setHorizontalHeaderLabels(
+                [first_column_title, "Characters", "Status"]
+            )
+            table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+            table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+
+            # Enable word wrap and layout constraints
+            table.setWordWrap(True)
+            table.verticalHeader().setVisible(False)
+            table.setRowCount(len(items_info))
+
+            for row, item_data in enumerate(items_info):
+                name_item = QTableWidgetItem(item_data["name"])
+
+                # Format characters
+                try:
+                    char_count_str = f"{int(item_data['char_count']):,}"
+                except (ValueError, TypeError):
+                    char_count_str = str(item_data["char_count"])
+
+                char_item = QTableWidgetItem(char_count_str)
+                char_item.setTextAlignment(
+                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+                )
+                char_item.setFont(
+                    QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
+                )
+
+                status_item = QTableWidgetItem(item_data["status"])
+                status_item.setTextAlignment(
+                    Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter
+                )
+
+                # Custom colors for status
+                if item_data["status"] == "Completed":
+                    status_item.setForeground(QColor(COLORS["GREEN"]))
+                else:
+                    status_item.setForeground(QColor(COLORS["BLUE_BORDER_HOVER"]))
+
+                table.setItem(row, 0, name_item)
+                table.setItem(row, 1, char_item)
+                table.setItem(row, 2, status_item)
+
+            # Apply styling to table headers and background
+            header = table.horizontalHeader()
+            if header:
+                header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+                header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+                header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+
+            table.setStyleSheet(
+                f"QTableWidget {{ background-color: {bg_color}; color: {fg_color}; border: 1px solid {COLORS['GREY_BORDER']}; border-radius: 4px; }}"
+                f"QHeaderView::section {{ background-color: {bg_color}; color: {fg_color}; border: 1px solid {COLORS['GREY_BORDER']}; padding: 4px; }}"
+            )
+            layout.addWidget(table)
+
+        if missing_files:
+            warning_label = QLabel(
+                f"⚠️ Note: {len(missing_files)} file(s) are missing from disk and cannot be restored:\n"
+                + ", ".join(missing_files),
+                self,
+            )
+            warning_label.setStyleSheet(
+                f"color: {COLORS['ORANGE']}; font-weight: bold;"
+            )
+            warning_label.setWordWrap(True)
+            layout.addWidget(warning_label)
+
+        # Skip completed items checkbox
+        self.chk_remaining_only = QCheckBox(
+            "Only restore remaining items (skip completed ones)", self
+        )
+        self.chk_remaining_only.setChecked(True)
+        if not has_completed:
+            self.chk_remaining_only.setVisible(False)
+        layout.addWidget(self.chk_remaining_only)
+
+        button_layout = QHBoxLayout()
+        button_layout.setSpacing(10)
+        button_layout.addStretch(1)
+
+        self.btn_discard = QPushButton("Discard", self)
+        self.btn_discard.setFixedHeight(36)
+        self.btn_discard.clicked.connect(self.reject)
+        button_layout.addWidget(self.btn_discard)
+
+        self.btn_restore = QPushButton("Restore Queue", self)
+        self.btn_restore.setFixedHeight(36)
+        self.btn_restore.setStyleSheet(
+            f"QPushButton {{ background-color: {COLORS['GREEN']}; color: white; font-weight: bold; border-radius: 4px; padding: 0px 15px; }}"
+            f"QPushButton:hover {{ background-color: #3b9b42; }}"
+        )
+        self.btn_restore.clicked.connect(self.accept)
+        button_layout.addWidget(self.btn_restore)
+
+        layout.addLayout(button_layout)
+
+    def should_restore_remaining_only(self) -> bool:
+        """Return whether only remaining items should be restored.
+
+        Returns:
+            True if we should skip completed items, False otherwise.
+        """
+        return self.chk_remaining_only.isChecked()
+
+
 class abogen(QWidget):
     def __init__(self):
         super().__init__()
@@ -1190,6 +1366,9 @@ class abogen(QWidget):
         # Check for updates at startup if enabled
         if self.check_updates:
             QTimer.singleShot(1000, self.check_for_updates_startup)
+
+        # Check for restore queue at startup
+        QTimer.singleShot(100, self.check_restore_queue)
 
         # Set hf_tracker callbacks
         hf_tracker.set_log_callback(self.update_log)
@@ -2676,6 +2855,7 @@ class abogen(QWidget):
         self.queued_items.append(item)
         # self.update_log((f"Enqueued: {item.file_name}", True))
         # enable start queue button, manage queue button
+        self.save_current_queue_state()
         self.enable_disable_queue_buttons()
 
     def get_queue(self):
@@ -2777,6 +2957,7 @@ class abogen(QWidget):
         self.queue_run_active = False
         self.queue_last_outcome = None
         self.queue_cancel_summary_shown = False
+        self.save_current_queue_state()
         self.enable_disable_queue_buttons()
 
     def manage_queue(self):
@@ -2790,6 +2971,9 @@ class abogen(QWidget):
                 # The QueueManager writes to disk, so we must refresh our local copy
                 self.config = load_config()
 
+                # Save current queue state
+                self.save_current_queue_state()
+
                 # re-enable/disable buttons based on queue state
                 self.enable_disable_queue_buttons()
         except Exception as e:
@@ -2799,12 +2983,200 @@ class abogen(QWidget):
                 f"Could not open Queue Manager.\n\n{type(e).__name__}: {e}",
             )
 
+    def save_current_queue_state(self) -> None:
+        """Save the current state of the queue to disk."""
+        try:
+            import dataclasses
+
+            from abogen.utils import get_user_settings_dir
+
+            settings_dir = Path(get_user_settings_dir())
+            save_file = settings_dir / "last_queue.json"
+
+            # If there are no items, or they have all been converted, remove the last queue file
+            is_completed = not self.queued_items or (
+                self.current_queue_index >= len(self.queued_items)
+                and not self.queue_run_active
+            )
+
+            if is_completed:
+                if save_file.exists():
+                    save_file.unlink()
+                return
+
+            # Prepare items list serialization
+            serialized_items = []
+            for item in self.queued_items:
+                if dataclasses.is_dataclass(item):
+                    serialized_items.append(dataclasses.asdict(item))
+                else:
+                    # Fallback to dict
+                    serialized_items.append(dict(item.__dict__))
+
+            state = {
+                "queued_items": serialized_items,
+                "current_queue_index": self.current_queue_index,
+                "queue_run_active": self.queue_run_active,
+            }
+
+            with open(save_file, "w", encoding="utf-8") as f:
+                json.dump(state, f, indent=4)
+        except Exception as e:
+            logger.error(f"Failed to save current queue state: {e}")
+
+    def check_restore_queue(self) -> None:
+        """Check for an uncompleted queue session and prompt the user to restore it."""
+        try:
+            from abogen.utils import get_user_settings_dir
+
+            settings_dir = Path(get_user_settings_dir())
+            save_file = settings_dir / "last_queue.json"
+
+            if not save_file.exists():
+                return
+
+            with open(save_file, "r", encoding="utf-8") as f:
+                state = json.load(f)
+
+            raw_items = state.get("queued_items", [])
+            saved_index = state.get("current_queue_index", 0)
+
+            if not raw_items:
+                if save_file.exists():
+                    save_file.unlink()
+                return
+
+            # Validate files and determine items
+            valid_items = []
+            missing_files = []
+            items_info = []
+
+            for idx, raw_item in enumerate(raw_items):
+                file_path = Path(raw_item.get("file_name", ""))
+                is_missing = not file_path.exists()
+
+                # Check if this item is completed
+                is_completed = idx < saved_index
+
+                item = QueuedItem(
+                    file_name=raw_item.get("file_name"),
+                    lang_code=raw_item.get("lang_code"),
+                    speed=raw_item.get("speed"),
+                    voice=raw_item.get("voice"),
+                    save_option=raw_item.get("save_option"),
+                    output_folder=raw_item.get("output_folder"),
+                    subtitle_mode=raw_item.get("subtitle_mode"),
+                    output_format=raw_item.get("output_format"),
+                    total_char_count=raw_item.get("total_char_count"),
+                    replace_single_newlines=raw_item.get(
+                        "replace_single_newlines", True
+                    ),
+                    use_silent_gaps=raw_item.get("use_silent_gaps", False),
+                    subtitle_speed_method=raw_item.get("subtitle_speed_method", "tts"),
+                    save_base_path=raw_item.get("save_base_path"),
+                    save_chapters_separately=raw_item.get("save_chapters_separately"),
+                    merge_chapters_at_end=raw_item.get("merge_chapters_at_end"),
+                    m4b_aac_mode=raw_item.get("m4b_aac_mode", "aac_lc"),
+                    word_substitutions_enabled=raw_item.get(
+                        "word_substitutions_enabled", False
+                    ),
+                    word_substitutions_list=raw_item.get("word_substitutions_list", ""),
+                    case_sensitive_substitutions=raw_item.get(
+                        "case_sensitive_substitutions", False
+                    ),
+                    replace_all_caps=raw_item.get("replace_all_caps", False),
+                    replace_numerals=raw_item.get("replace_numerals", False),
+                    fix_nonstandard_punctuation=raw_item.get(
+                        "fix_nonstandard_punctuation", False
+                    ),
+                    output_path=raw_item.get("output_path"),
+                    logs=raw_item.get("logs"),
+                )
+
+                # Determine display name
+                display_name = file_path.name
+                original_path = raw_item.get("save_base_path") or raw_item.get(
+                    "file_name"
+                )
+                if original_path:
+                    orig_path_obj = Path(original_path)
+                    if orig_path_obj.suffix.lower() == ".epub":
+                        # Strip extension to show book title
+                        display_name = orig_path_obj.stem
+
+                display_name = display_name.replace("_", " ")
+
+                if is_missing:
+                    # Only report as missing if we plan to restore it (e.g. if it is not completed or user doesn't skip completed)
+                    missing_files.append(display_name)
+                else:
+                    valid_items.append((item, is_completed))
+                    items_info.append(
+                        {
+                            "name": display_name,
+                            "char_count": item.total_char_count,
+                            "status": "Completed" if is_completed else "Remaining",
+                            "is_epub": bool(
+                                original_path
+                                and Path(original_path).suffix.lower() == ".epub"
+                            ),
+                        }
+                    )
+
+            if not valid_items:
+                # No valid items could be restored
+                if save_file.exists():
+                    save_file.unlink()
+                if missing_files:
+                    QMessageBox.warning(
+                        self,
+                        "Missing Files",
+                        "An uncompleted queue was found, but all files in it are missing:\n"
+                        + ", ".join(missing_files),
+                    )
+                return
+
+            has_completed = any(is_completed for _, is_completed in valid_items)
+
+            dialog = QueueRestoreDialog(
+                parent=self,
+                items_count=len(valid_items),
+                items_info=items_info,
+                missing_files=missing_files,
+                has_completed=has_completed,
+            )
+
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                restore_remaining_only = dialog.should_restore_remaining_only()
+                restored_items = []
+                new_current_index = 0
+
+                for item, is_completed in valid_items:
+                    if is_completed and restore_remaining_only:
+                        continue
+                    restored_items.append(item)
+                    if is_completed:
+                        # Keep track of completed items to offset our start index
+                        new_current_index += 1
+
+                self.queued_items = restored_items
+                self.current_queue_index = new_current_index
+                self.enable_disable_queue_buttons()
+                self.update_log(("Restored queue from last session.", "green"))
+                self.save_current_queue_state()
+            else:
+                # Remove the last_queue.json file if discarded
+                if save_file.exists():
+                    save_file.unlink()
+
+        except Exception as e:
+            logger.error(f"Error checking or restoring queue: {e}")
+
     def start_queue(self):
         self.current_queue_index = 0  # Start from the first item
         self.queue_started_at = time.time()
         self.queue_elapsed_seconds = 0
         self.queue_item_started_at = {}
-        self.queue_item_elapsed_seconds = {}
         self.queue_item_status = {}
         self.queue_run_active = True
         self.queue_last_outcome = None
@@ -2918,6 +3290,7 @@ class abogen(QWidget):
     def queue_item_conversion_finished(self):
         # Called after each conversion finishes
         self.current_queue_index += 1
+        self.save_current_queue_state()
         if self.current_queue_index < len(self.queued_items):
             self.start_next_queued_item()
         else:
@@ -3397,6 +3770,7 @@ class abogen(QWidget):
                 self.queue_cancel_summary_shown = True
                 self.show_queue_summary(outcome="cancelled")
             self.queue_run_active = False
+            self.save_current_queue_state()
             return
 
         # Treat explicit error/failure results as unsuccessful completion.
@@ -3474,6 +3848,7 @@ class abogen(QWidget):
                     self.show_queue_summary(outcome="failed")
                     self.go_back_ui()
                 self.queue_run_active = False
+                self.save_current_queue_state()
             else:
                 self._show_error_message_box(
                     "Conversion Failed",
