@@ -93,6 +93,13 @@ def test_expand_common_abbreviations_directional() -> None:
     assert expand_common_abbreviations(text) == expected
 
 
+def test_expand_common_abbreviations_directional_dashes_and_stutters() -> None:
+    """Test that compass directions do not expand when followed by hyphens or dashes."""
+    text = "W-Wait! W–Wait! W—Wait! S-rank S–rank S—rank"
+    expected = "W-Wait! W–Wait! W—Wait! S-rank S–rank S—rank"
+    assert expand_common_abbreviations(text) == expected
+
+
 def test_expand_common_abbreviations_directional_case_sensitive() -> None:
     """Test compass directions do not incorrectly expand lowercase normal text like it's."""
     text = "it's going south or s. for some reason, maybe n.w. too. Only N. or NW should match."
@@ -108,18 +115,25 @@ def test_expand_common_abbreviations_data_sizes() -> None:
 
 
 def test_expand_common_abbreviations_no_only_with_digits() -> None:
-    """Test that No. only expands to Number when followed by digits."""
-    # No. at sentence end or without digits should NOT expand
-    text = "The answer is no. She said no. It happened at No."
+    """Test that No. only expands to Number when followed by digits and having a period."""
+    # No. at sentence end or without digits or quotes should NOT expand
+    text = "The answer is no. She said no. It happened at No. Also \"No.\" and 'No.'"
     result = expand_common_abbreviations(text)
-    # "no" without period or at sentence end should stay as-is
-    assert "No." in result  # Should not become "Number" if not followed by digits
+    assert "No." in result
+    assert '"No."' in result
+    assert "'No.'" in result
+    assert "Number" not in result
+
+    # No without a period followed by digits should NOT expand
+    text2 = "No 5 players were selected."
+    result2 = expand_common_abbreviations(text2)
+    assert result2 == "No 5 players were selected."
 
     # No. followed by digits SHOULD expand
-    text2 = "See No. 5 for details. Check No. 42 in the manual."
-    result2 = expand_common_abbreviations(text2)
-    assert "Number 5" in result2
-    assert "Number 42" in result2
+    text3 = "See No. 5 for details. Check No. 42 in the manual."
+    result3 = expand_common_abbreviations(text3)
+    assert "Number 5" in result3
+    assert "Number 42" in result3
 
 
 def test_expand_common_abbreviations_misc() -> None:

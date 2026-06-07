@@ -403,7 +403,7 @@ def expand_common_abbreviations(text):
         r"\bApprox\.?(?!\w)": "Approximately",
         r"\bDept\.?(?!\w)": "Department",
         r"\bVol\.?(?!\w)": "Volume",
-        r"\bNo\.?(?=\s*\d)": "Number",  # Only expand No. when followed by digits (e.g., No. 5)
+        r"\bNo\.(?=\s*\d)": "Number",  # Only expand No. when followed by digits (e.g., No. 5)
         r"\bMisc\.?(?!\w)": "Miscellaneous",  # misc. or misc -> Miscellaneous
         # Common Latin / Academic abbreviations
         r"\ba\.?k\.?a\.?(?!\w)": "also known as",
@@ -498,21 +498,21 @@ def expand_common_abbreviations(text):
 
     case_sensitive_abbreviations = {
         # Directional / Compass
-        r"\bN\.?(?!\w)": "North",
-        r"\bNW\.?(?!\w)": "Northwest",
-        r"\bNNE\.?(?!\w)": "North-Northeast",
-        r"\bNE\.?(?!\w)": "Northeast",
-        r"\bENE\.?(?!\w)": "East-Northeast",
-        r"\bE\.?(?!\w)": "East",
-        r"\bESE\.?(?!\w)": "East-Southeast",
-        r"\bSE\.?(?!\w)": "Southeast",
-        r"\bSSE\.?(?!\w)": "South-Southeast",
-        r"\bS\.?(?!\w)": "South",
-        r"\bSSW\.?(?!\w)": "South-Southwest",
-        r"\bSW\.?(?!\w)": "Southwest",
-        r"\bWSW\.?(?!\w)": "West-Southwest",
-        r"\bW\.?(?!\w)": "West",
-        r"\bWNW\.?(?!\w)": "West-Northwest",
+        r"\bN\.?(?![\w\-–—])": "North",
+        r"\bNW\.?(?![\w\-–—])": "Northwest",
+        r"\bNNE\.?(?![\w\-–—])": "North-Northeast",
+        r"\bNE\.?(?![\w\-–—])": "Northeast",
+        r"\bENE\.?(?![\w\-–—])": "East-Northeast",
+        r"\bE\.?(?![\w\-–—])": "East",
+        r"\bESE\.?(?![\w\-–—])": "East-Southeast",
+        r"\bSE\.?(?![\w\-–—])": "Southeast",
+        r"\bSSE\.?(?![\w\-–—])": "South-Southeast",
+        r"\bS\.?(?![\w\-–—])": "South",
+        r"\bSSW\.?(?![\w\-–—])": "South-Southwest",
+        r"\bSW\.?(?![\w\-–—])": "Southwest",
+        r"\bWSW\.?(?![\w\-–—])": "West-Southwest",
+        r"\bW\.?(?![\w\-–—])": "West",
+        r"\bWNW\.?(?![\w\-–—])": "West-Northwest",
         # Data transfer rates (bits)
         r"(?<=\d)\s*[Kk]bps\.?(?!\w)": " kilobits per second",
         r"(?<=\d)\s*[Mm]bps\.?(?!\w)": " megabits per second",
