@@ -18,6 +18,7 @@ from abogen.pyqt.conversion import ConversionThread
 
 class _SignalStub:
     """Stub for PyQt signal to track emissions."""
+
     def __init__(self) -> None:
         self.calls: list[object] = []
 
@@ -28,6 +29,7 @@ class _SignalStub:
 @dataclass
 class _ResultStub:
     """Stub for TTS result segment."""
+
     graphemes: str
     audio: list[float]
 
@@ -51,6 +53,7 @@ def _make_worker() -> ConversionThread:
     def mock_iter_tts_for_segments(tts, segments, voice, speed, pattern):
         for s in segments:
             yield from tts(s, voice=voice, speed=speed, split_pattern=pattern)
+
     worker._iter_tts_results_for_segments = mock_iter_tts_for_segments
 
     return worker
@@ -64,7 +67,9 @@ def test_fallback_prevents_duplication_on_partial_failure() -> None:
     """
     worker = _make_worker()
 
-    def fake_tts(text: str, voice: str, speed: float, split_pattern: Optional[str] = None) -> Iterator[_ResultStub]:
+    def fake_tts(
+        text: str, voice: str, speed: float, split_pattern: Optional[str] = None
+    ) -> Iterator[_ResultStub]:
         # Simple sentence splitter for the mock
         # We simulate that KPipeline/MLXKokoroPipeline yields sentence-by-sentence
         sentences = [s.strip() + "." for s in text.split(".") if s.strip()]
@@ -108,7 +113,9 @@ def test_fallback_full_retry_when_no_results_yielded() -> None:
     """
     worker = _make_worker()
 
-    def fake_tts(text: str, voice: str, speed: float, split_pattern: Optional[str] = None) -> Iterator[_ResultStub]:
+    def fake_tts(
+        text: str, voice: str, speed: float, split_pattern: Optional[str] = None
+    ) -> Iterator[_ResultStub]:
         if split_pattern is None:
             raise RuntimeError("Immediate failure before any results")
         yield _ResultStub(graphemes=text, audio=[0.0])

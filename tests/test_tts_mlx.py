@@ -77,8 +77,10 @@ class TestIsMLXAvailable(unittest.TestCase):
         """Should return False on an Intel Mac (x86_64 architecture)."""
         from abogen.tts_mlx import is_mlx_available
 
-        with patch("abogen.tts_mlx.sys") as mock_sys, \
-             patch("abogen.tts_mlx.platform") as mock_platform:
+        with (
+            patch("abogen.tts_mlx.sys") as mock_sys,
+            patch("abogen.tts_mlx.platform") as mock_platform,
+        ):
             mock_sys.platform = "darwin"
             mock_sys.modules = sys.modules
             mock_platform.machine.return_value = "x86_64"
@@ -90,8 +92,10 @@ class TestIsMLXAvailable(unittest.TestCase):
 
         # Setting a module to None in sys.modules will force an ImportError
         with patch.dict("sys.modules", {"mlx_audio": None}):
-            with patch("abogen.tts_mlx.sys") as mock_sys, \
-                 patch("abogen.tts_mlx.platform") as mock_platform:
+            with (
+                patch("abogen.tts_mlx.sys") as mock_sys,
+                patch("abogen.tts_mlx.platform") as mock_platform,
+            ):
                 mock_sys.platform = "darwin"
                 mock_platform.machine.return_value = "arm64"
                 result = is_mlx_available()
@@ -102,8 +106,10 @@ class TestIsMLXAvailable(unittest.TestCase):
         from abogen.tts_mlx import is_mlx_available
 
         _make_mlx_audio_stub()
-        with patch("abogen.tts_mlx.sys") as mock_sys, \
-             patch("abogen.tts_mlx.platform") as mock_platform:
+        with (
+            patch("abogen.tts_mlx.sys") as mock_sys,
+            patch("abogen.tts_mlx.platform") as mock_platform,
+        ):
             mock_sys.platform = "darwin"
             mock_sys.modules = sys.modules  # mlx_audio stub is present
             mock_platform.machine.return_value = "arm64"
@@ -121,6 +127,7 @@ class TestMLXQuantization(unittest.TestCase):
     def setUp(self) -> None:
         """Import the enum under test."""
         from abogen.tts_mlx import MLXQuantization
+
         self.MLXQuantization = MLXQuantization
 
     def test_all_members_present(self) -> None:
@@ -170,30 +177,35 @@ class TestRecommendedQuantization(unittest.TestCase):
             The :class:`MLXQuantization` member chosen by the heuristic.
         """
         from abogen.tts_mlx import recommended_quantization
+
         with patch("abogen.tts_mlx._get_system_memory_gb", return_value=mem_gb):
             return recommended_quantization()
 
     def test_high_memory_uses_bf16(self) -> None:
         """≥32 GiB should select BF16 (full quality)."""
         from abogen.tts_mlx import MLXQuantization
+
         result = self._call(64)
         self.assertIs(result, MLXQuantization.BF16)
 
     def test_medium_memory_uses_eight_bit(self) -> None:
         """16–31 GiB should select 8-bit."""
         from abogen.tts_mlx import MLXQuantization
+
         result = self._call(16)
         self.assertIs(result, MLXQuantization.EIGHT_BIT)
 
     def test_low_memory_uses_four_bit(self) -> None:
         """<16 GiB should select 4-bit to conserve VRAM."""
         from abogen.tts_mlx import MLXQuantization
+
         result = self._call(8)
         self.assertIs(result, MLXQuantization.FOUR_BIT)
 
     def test_boundary_32gb_uses_bf16(self) -> None:
         """Exactly 32 GiB should use BF16 (the high-memory branch)."""
         from abogen.tts_mlx import MLXQuantization
+
         result = self._call(32)
         self.assertIs(result, MLXQuantization.BF16)
 
@@ -243,8 +255,12 @@ class TestMLXKokoroPipelineCall(unittest.TestCase):
         mock_model.generate.return_value = iter([fake_result])
         stub.tts.utils.load_model.return_value = mock_model
 
-        with patch("abogen.tts_mlx.is_mlx_available", return_value=True), \
-             patch("abogen.tts_mlx.MLXKokoroPipeline._model", new=mock_model, create=True):
+        with (
+            patch("abogen.tts_mlx.is_mlx_available", return_value=True),
+            patch(
+                "abogen.tts_mlx.MLXKokoroPipeline._model", new=mock_model, create=True
+            ),
+        ):
             pipeline = MLXKokoroPipeline.__new__(MLXKokoroPipeline)
             pipeline._model = mock_model
             pipeline._lang_code = "a"
@@ -297,11 +313,16 @@ class TestMLXKokoroPipelineCall(unittest.TestCase):
         mock_model.generate.return_value = iter([fake_result])
 
         import logging
+
         with self.assertLogs("abogen.tts_mlx", level=logging.WARNING):
             list(pipeline("text", voice="af_heart*0.5+am_adam*0.5"))
 
         call_kwargs = mock_model.generate.call_args
-        used_voice: str = call_kwargs.kwargs.get("voice") or call_kwargs.args[1] if call_kwargs.args else ""
+        used_voice: str = (
+            call_kwargs.kwargs.get("voice") or call_kwargs.args[1]
+            if call_kwargs.args
+            else ""
+        )
         # The formula should have been reduced to "af_heart"
         if call_kwargs.kwargs.get("voice"):
             self.assertEqual(call_kwargs.kwargs["voice"], "af_heart")

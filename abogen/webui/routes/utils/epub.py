@@ -9,6 +9,7 @@ from xml.etree import ElementTree as ET
 
 from abogen.webui.service import Job, JobStatus
 
+
 def _coerce_path(value: Any) -> Optional[Path]:
     if isinstance(value, Path):
         return value
@@ -34,7 +35,7 @@ def normalize_epub_path(base_dir: str, href: str) -> str:
         base_lower = normalized_base.lower()
         prefix = base_lower + "/"
         if sanitized_lower.startswith(prefix):
-            remainder = sanitized[len(prefix):]
+            remainder = sanitized[len(prefix) :]
             if remainder.lower().startswith(prefix):
                 sanitized = remainder
                 sanitized_lower = sanitized.lower()
@@ -47,7 +48,9 @@ def normalize_epub_path(base_dir: str, href: str) -> str:
     if normalized in {"", "."}:
         return ""
     normalized = normalized.replace("\\", "/")
-    segments = [segment for segment in normalized.split("/") if segment and segment != "."]
+    segments = [
+        segment for segment in normalized.split("/") if segment and segment != "."
+    ]
     if not segments:
         return ""
     deduped: List[str] = []
@@ -132,7 +135,11 @@ class _NavMapParser(HTMLParser):
         tag_lower = tag.lower()
         if tag_lower == "nav":
             attributes = dict(attrs)
-            nav_type = (attributes.get("epub:type") or attributes.get("type") or "").strip().lower()
+            nav_type = (
+                (attributes.get("epub:type") or attributes.get("type") or "")
+                .strip()
+                .lower()
+            )
             nav_role = (attributes.get("role") or "").strip().lower()
             type_tokens = {token.strip() for token in nav_type.split() if token}
             role_tokens = {token.strip() for token in nav_role.split() if token}
@@ -196,7 +203,11 @@ def parse_ncx_document(payload: bytes, base_dir: str) -> Dict[str, str]:
         if not normalized:
             continue
         label_el = nav_point.find(".//{*}text")
-        label = (label_el.text or "").strip() if label_el is not None and label_el.text else ""
+        label = (
+            (label_el.text or "").strip()
+            if label_el is not None and label_el.text
+            else ""
+        )
         if not label:
             label = posixpath.basename(normalized) or f"Section {len(nav_map) + 1}"
         nav_map.setdefault(normalized, label)
@@ -300,11 +311,19 @@ def extract_epub_chapters(epub_path: Path) -> List[Dict[str, str]]:
                     normalized = href
                     if not normalized:
                         continue
-                    label = title or posixpath.basename(normalized) or f"Chapter {index}"
+                    label = (
+                        title or posixpath.basename(normalized) or f"Chapter {index}"
+                    )
                     chapters.append({"href": normalized, "title": label})
 
             return chapters
-    except (FileNotFoundError, zipfile.BadZipFile, KeyError, ET.ParseError, UnicodeDecodeError):
+    except (
+        FileNotFoundError,
+        zipfile.BadZipFile,
+        KeyError,
+        ET.ParseError,
+        UnicodeDecodeError,
+    ):
         return []
     return chapters
 
@@ -393,7 +412,9 @@ def find_job_file(job: Job, suffixes: Iterable[str]) -> Optional[Path]:
         pattern = f"*{suffix}"
         for directory in directories:
             try:
-                match = next((path for path in directory.rglob(pattern) if path.is_file()), None)
+                match = next(
+                    (path for path in directory.rglob(pattern) if path.is_file()), None
+                )
             except OSError:
                 match = None
             if match:
@@ -412,7 +433,9 @@ def locate_job_m4b(job: Job) -> Optional[Path]:
     return find_job_file(job, [".m4b"])
 
 
-def locate_job_audio(job: Job, preferred_suffixes: Optional[Iterable[str]] = None) -> Optional[Path]:
+def locate_job_audio(
+    job: Job, preferred_suffixes: Optional[Iterable[str]] = None
+) -> Optional[Path]:
     suffix_order: List[str] = []
     if preferred_suffixes:
         suffix_order.extend(preferred_suffixes)

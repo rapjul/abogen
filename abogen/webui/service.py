@@ -37,7 +37,11 @@ STATE_VERSION = 8
 _JOB_LOGGER = logging.getLogger("abogen.jobs")
 if not _JOB_LOGGER.handlers:
     handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", "%Y-%m-%d %H:%M:%S"))
+    handler.setFormatter(
+        logging.Formatter(
+            "%(asctime)s [%(levelname)s] %(message)s", "%Y-%m-%d %H:%M:%S"
+        )
+    )
     _JOB_LOGGER.addHandler(handler)
     _JOB_LOGGER.propagate = False
 _JOB_LOGGER.setLevel(logging.DEBUG)
@@ -140,7 +144,9 @@ class Job:
     pause_requested: bool = False
     paused: bool = False
     resume_token: Optional[str] = None
-    pause_event: threading.Event = field(default_factory=_create_set_event, repr=False, compare=False)
+    pause_event: threading.Event = field(
+        default_factory=_create_set_event, repr=False, compare=False
+    )
     cover_image_path: Optional[Path] = None
     cover_image_mime: Optional[str] = None
     chunk_level: str = "paragraph"
@@ -165,13 +171,17 @@ class Job:
         Returns the estimated seconds remaining based on current progress and elapsed time.
         Returns None if the job hasn't started, is finished, or progress is 0.
         """
-        if self.status != JobStatus.RUNNING or not self.started_at or self.progress <= 0:
+        if (
+            self.status != JobStatus.RUNNING
+            or not self.started_at
+            or self.progress <= 0
+        ):
             return None
-        
+
         elapsed = time.time() - self.started_at
         if elapsed <= 0:
             return None
-            
+
         # Estimate total time based on current progress
         total_estimated = elapsed / self.progress
         remaining = total_estimated - elapsed
@@ -197,9 +207,13 @@ class Job:
             "error": self.error,
             "logs": [log.__dict__ for log in self.logs],
             "result": {
-                "audio": str(self.result.audio_path) if self.result.audio_path else None,
+                "audio": str(self.result.audio_path)
+                if self.result.audio_path
+                else None,
                 "subtitles": [str(path) for path in self.result.subtitle_paths],
-                "artifacts": {key: str(path) for key, path in self.result.artifacts.items()},
+                "artifacts": {
+                    key: str(path) for key, path in self.result.artifacts.items()
+                },
             },
             "queue_position": self.queue_position,
             "options": {
@@ -215,8 +229,12 @@ class Job:
                 "chapter_intro_delay": self.chapter_intro_delay,
                 "read_title_intro": getattr(self, "read_title_intro", False),
                 "read_closing_outro": getattr(self, "read_closing_outro", True),
-                "auto_prefix_chapter_titles": getattr(self, "auto_prefix_chapter_titles", True),
-                "normalize_chapter_opening_caps": getattr(self, "normalize_chapter_opening_caps", True),
+                "auto_prefix_chapter_titles": getattr(
+                    self, "auto_prefix_chapter_titles", True
+                ),
+                "normalize_chapter_opening_caps": getattr(
+                    self, "normalize_chapter_opening_caps", True
+                ),
             },
             "metadata_tags": dict(self.metadata_tags),
             "chapters": [
@@ -246,7 +264,9 @@ class Job:
             "applied_speaker_config": self.applied_speaker_config,
             "entity_summary": dict(self.entity_summary),
             "manual_overrides": [dict(entry) for entry in self.manual_overrides],
-            "pronunciation_overrides": [dict(entry) for entry in self.pronunciation_overrides],
+            "pronunciation_overrides": [
+                dict(entry) for entry in self.pronunciation_overrides
+            ],
             "heteronym_overrides": [dict(entry) for entry in self.heteronym_overrides],
             "normalization_overrides": dict(self.normalization_overrides),
         }
@@ -282,7 +302,9 @@ def _split_people_field(raw: Any) -> List[str]:
     text = str(raw or "").strip()
     if not text:
         return []
-    tokens = [_token.strip() for _token in _PEOPLE_SPLIT_RE.split(text) if _token.strip()]
+    tokens = [
+        _token.strip() for _token in _PEOPLE_SPLIT_RE.split(text) if _token.strip()
+    ]
     seen: set[str] = set()
     ordered: List[str] = []
     for token in tokens:
@@ -369,7 +391,9 @@ def _extract_year(raw: Optional[str]) -> Optional[int]:
 
 def build_audiobookshelf_metadata(job: Job) -> Dict[str, Any]:
     tags = _normalize_metadata_casefold(job.metadata_tags)
-    filename = Path(job.original_filename or "").stem or job.original_filename or "Audiobook"
+    filename = (
+        Path(job.original_filename or "").stem or job.original_filename or "Audiobook"
+    )
     title = _first_nonempty(
         tags.get("title"),
         tags.get("book_title"),
@@ -384,10 +408,14 @@ def build_audiobookshelf_metadata(job: Job) -> Dict[str, Any]:
         or tags.get("artist")
     )
     narrators = _split_people_field(tags.get("narrators") or tags.get("narrator"))
-    description = _first_nonempty(tags.get("description"), tags.get("summary"), tags.get("comment"))
+    description = _first_nonempty(
+        tags.get("description"), tags.get("summary"), tags.get("comment")
+    )
     genres = _split_simple_list(tags.get("genre"))
     keywords = _split_simple_list(tags.get("tags") or tags.get("keywords"))
-    language = _first_nonempty(tags.get("language"), tags.get("lang")) or job.language or ""
+    language = (
+        _first_nonempty(tags.get("language"), tags.get("lang")) or job.language or ""
+    )
     series_name = _first_nonempty(
         tags.get("series"),
         tags.get("series_name"),
@@ -395,7 +423,7 @@ def build_audiobookshelf_metadata(job: Job) -> Dict[str, Any]:
         tags.get("series_title"),
         tags.get("seriestitle"),
     )
-    
+
     series_sequence = None
     for key in _SERIES_SEQUENCE_TAG_KEYS:
         raw_value = tags.get(key)
@@ -415,12 +443,19 @@ def build_audiobookshelf_metadata(job: Job) -> Dict[str, Any]:
         "genres": genres,
         "tags": keywords,
         "language": language,
-        "publishedYear": _extract_year(tags.get("published") or tags.get("publication_year") or tags.get("date") or tags.get("year")),
+        "publishedYear": _extract_year(
+            tags.get("published")
+            or tags.get("publication_year")
+            or tags.get("date")
+            or tags.get("year")
+        ),
         "seriesName": series_name,
         "seriesSequence": series_sequence,
         "isbn": _first_nonempty(tags.get("isbn"), tags.get("asin")),
     }
-    published_date = _first_nonempty(tags.get("published"), tags.get("publication_date"), tags.get("date"))
+    published_date = _first_nonempty(
+        tags.get("published"), tags.get("publication_date"), tags.get("date")
+    )
     if published_date:
         data["publishedDate"] = published_date
 
@@ -430,7 +465,9 @@ def build_audiobookshelf_metadata(job: Job) -> Dict[str, Any]:
             data["rating"] = float(str(rating_text).strip())
         except ValueError:
             pass
-        rating_max_text = _first_nonempty(tags.get("rating_max"), tags.get("rating_scale"))
+        rating_max_text = _first_nonempty(
+            tags.get("rating_max"), tags.get("rating_scale")
+        )
         if rating_max_text:
             try:
                 data["ratingMax"] = float(str(rating_max_text).strip())
@@ -486,7 +523,9 @@ def load_audiobookshelf_chapters(job: Job) -> Optional[List[Dict[str, Any]]]:
     metadata_ref = job.result.artifacts.get("metadata")
     if not metadata_ref:
         return None
-    metadata_path = metadata_ref if isinstance(metadata_ref, Path) else Path(str(metadata_ref))
+    metadata_path = (
+        metadata_ref if isinstance(metadata_ref, Path) else Path(str(metadata_ref))
+    )
     if not metadata_path.exists():
         return None
     try:
@@ -606,7 +645,9 @@ class ConversionService:
     # Public API ---------------------------------------------------------
     def list_jobs(self) -> List[Job]:
         with self._lock:
-            return sorted(self._jobs.values(), key=lambda job: job.created_at, reverse=True)
+            return sorted(
+                self._jobs.values(), key=lambda job: job.created_at, reverse=True
+            )
 
     def get_job(self, job_id: str) -> Optional[Job]:
         with self._lock:
@@ -640,12 +681,12 @@ class ConversionService:
         max_subtitle_words: int = 50,
         metadata_tags: Optional[Mapping[str, Any]] = None,
         cover_image_path: Optional[Path] = None,
-            cover_image_mime: Optional[str] = None,
-            chapter_intro_delay: float = 0.5,
-            read_title_intro: bool = False,
-            read_closing_outro: bool = True,
-            auto_prefix_chapter_titles: bool = True,
-            normalize_chapter_opening_caps: bool = True,
+        cover_image_mime: Optional[str] = None,
+        chapter_intro_delay: float = 0.5,
+        read_title_intro: bool = False,
+        read_closing_outro: bool = True,
+        auto_prefix_chapter_titles: bool = True,
+        normalize_chapter_opening_caps: bool = True,
         chunk_level: str = "paragraph",
         chunks: Optional[Iterable[Any]] = None,
         speakers: Optional[Mapping[str, Any]] = None,
@@ -665,7 +706,9 @@ class ConversionService:
         normalized_chapters = self._normalize_chapters(chapters)
         normalized_chunks = self._normalize_chunks(chunks)
         if total_characters <= 0 and normalized_chapters:
-            total_characters = sum(len(str(entry.get("text", ""))) for entry in normalized_chapters)
+            total_characters = sum(
+                len(str(entry.get("text", ""))) for entry in normalized_chapters
+            )
         job = Job(
             id=job_id,
             original_filename=original_filename,
@@ -709,9 +752,15 @@ class ConversionService:
             speaker_analysis_threshold=int(speaker_analysis_threshold or 3),
             analysis_requested=bool(analysis_requested),
             entity_summary=dict(entity_summary or {}),
-            manual_overrides=[dict(entry) for entry in manual_overrides] if manual_overrides else [],
-            pronunciation_overrides=[dict(entry) for entry in pronunciation_overrides] if pronunciation_overrides else [],
-            heteronym_overrides=[dict(entry) for entry in heteronym_overrides] if heteronym_overrides else [],
+            manual_overrides=[dict(entry) for entry in manual_overrides]
+            if manual_overrides
+            else [],
+            pronunciation_overrides=[dict(entry) for entry in pronunciation_overrides]
+            if pronunciation_overrides
+            else [],
+            heteronym_overrides=[dict(entry) for entry in heteronym_overrides]
+            if heteronym_overrides
+            else [],
             normalization_overrides=dict(normalization_overrides or {}),
         )
         with self._lock:
@@ -740,7 +789,11 @@ class ConversionService:
             job = self._jobs.get(job_id)
             if job is None:
                 return False
-            if job.status in {JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED}:
+            if job.status in {
+                JobStatus.COMPLETED,
+                JobStatus.FAILED,
+                JobStatus.CANCELLED,
+            }:
                 return False
             job.cancel_requested = True
             job.pause_requested = False
@@ -760,13 +813,20 @@ class ConversionService:
             job = self._jobs.get(job_id)
             if job is None:
                 return False
-            if job.status in {JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED}:
+            if job.status in {
+                JobStatus.COMPLETED,
+                JobStatus.FAILED,
+                JobStatus.CANCELLED,
+            }:
                 return False
             if job.pause_requested or job.paused:
                 return True
 
             job.pause_requested = True
-            job.add_log("Pause requested; finishing current chunk before stopping.", level="warning")
+            job.add_log(
+                "Pause requested; finishing current chunk before stopping.",
+                level="warning",
+            )
 
             if job.status == JobStatus.PENDING:
                 if job_id in self._queue:
@@ -783,7 +843,11 @@ class ConversionService:
             job = self._jobs.get(job_id)
             if job is None:
                 return False
-            if job.status in {JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED}:
+            if job.status in {
+                JobStatus.COMPLETED,
+                JobStatus.FAILED,
+                JobStatus.CANCELLED,
+            }:
                 return False
 
             job.pause_requested = False
@@ -812,7 +876,11 @@ class ConversionService:
             job = self._jobs.get(job_id)
             if job is None:
                 return None
-            if job.status not in {JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED}:
+            if job.status not in {
+                JobStatus.COMPLETED,
+                JobStatus.FAILED,
+                JobStatus.CANCELLED,
+            }:
                 job.add_log(
                     "Retry requested while job still active; ignoring.",
                     level="warning",
@@ -895,7 +963,9 @@ class ConversionService:
             return True
 
     def clear_finished(self, *, statuses: Optional[Iterable[JobStatus]] = None) -> int:
-        finished_statuses = set(statuses or {JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED})
+        finished_statuses = set(
+            statuses or {JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED}
+        )
         removed = 0
         with self._lock:
             # Remove any queued entries first to avoid stale references
@@ -942,7 +1012,9 @@ class ConversionService:
         if downloaded:
             count = len(downloaded)
             suffix = "s" if count != 1 else ""
-            _JOB_LOGGER.info("Voice cache ready: downloaded %d new asset%s.", count, suffix)
+            _JOB_LOGGER.info(
+                "Voice cache ready: downloaded %d new asset%s.", count, suffix
+            )
         if errors:
             for voice_id, message in errors.items():
                 _JOB_LOGGER.warning("Voice cache failed for %s: %s", voice_id, message)
@@ -1070,9 +1142,18 @@ class ConversionService:
             return
 
         audio_ref = job.result.audio_path
-        audio_path = audio_ref if isinstance(audio_ref, Path) else Path(str(audio_ref)) if audio_ref else None
+        audio_path = (
+            audio_ref
+            if isinstance(audio_ref, Path)
+            else Path(str(audio_ref))
+            if audio_ref
+            else None
+        )
         if not audio_path or not audio_path.exists():
-            job.add_log("Audiobookshelf upload skipped: audio output not found.", level="warning")
+            job.add_log(
+                "Audiobookshelf upload skipped: audio output not found.",
+                level="warning",
+            )
             return
 
         timeout_raw = integration_cfg.get("timeout", 3600.0)
@@ -1085,23 +1166,33 @@ class ConversionService:
             base_url=base_url,
             api_token=api_token,
             library_id=library_id,
-            collection_id=(str(integration_cfg.get("collection_id") or "").strip() or None),
+            collection_id=(
+                str(integration_cfg.get("collection_id") or "").strip() or None
+            ),
             folder_id=folder_id,
             verify_ssl=self._coerce_bool(integration_cfg.get("verify_ssl"), True),
             send_cover=self._coerce_bool(integration_cfg.get("send_cover"), True),
             send_chapters=self._coerce_bool(integration_cfg.get("send_chapters"), True),
-            send_subtitles=self._coerce_bool(integration_cfg.get("send_subtitles"), False),
+            send_subtitles=self._coerce_bool(
+                integration_cfg.get("send_subtitles"), False
+            ),
             timeout=timeout_value,
         )
 
         cover_ref = job.cover_image_path
         cover_path = None
         if config.send_cover and cover_ref:
-            cover_candidate = cover_ref if isinstance(cover_ref, Path) else Path(str(cover_ref))
+            cover_candidate = (
+                cover_ref if isinstance(cover_ref, Path) else Path(str(cover_ref))
+            )
             if cover_candidate.exists():
                 cover_path = cover_candidate
 
-        subtitles = _existing_paths(job.result.subtitle_paths) if config.send_subtitles else None
+        subtitles = (
+            _existing_paths(job.result.subtitle_paths)
+            if config.send_subtitles
+            else None
+        )
         chapters = load_audiobookshelf_chapters(job) if config.send_chapters else None
         metadata = build_audiobookshelf_metadata(job)
 
@@ -1109,7 +1200,9 @@ class ConversionService:
 
         display_title = metadata.get("title") or audio_path.stem
         try:
-            existing_items = client.find_existing_items(display_title, folder_id=config.folder_id)
+            existing_items = client.find_existing_items(
+                display_title, folder_id=config.folder_id
+            )
         except AudiobookshelfUploadError as exc:
             job.add_log(f"Audiobookshelf lookup failed: {exc}", level="error")
             return
@@ -1122,7 +1215,9 @@ class ConversionService:
             try:
                 client.delete_items(existing_items)
             except Exception as exc:
-                job.add_log(f"Failed to remove existing item(s): {exc}", level="warning")
+                job.add_log(
+                    f"Failed to remove existing item(s): {exc}", level="warning"
+                )
 
         client.upload_audiobook(
             audio_path,
@@ -1137,7 +1232,9 @@ class ConversionService:
     def _serialize_job(self, job: Job) -> Dict[str, Any]:
         result_audio = str(job.result.audio_path) if job.result.audio_path else None
         result_subtitles = [str(path) for path in job.result.subtitle_paths]
-        result_artifacts = {key: str(path) for key, path in job.result.artifacts.items()}
+        result_artifacts = {
+            key: str(path) for key, path in job.result.artifacts.items()
+        }
         result_epub = str(job.result.epub_path) if job.result.epub_path else None
         return {
             "id": job.id,
@@ -1184,7 +1281,9 @@ class ConversionService:
             "pause_requested": job.pause_requested,
             "paused": job.paused,
             "resume_token": job.resume_token,
-            "cover_image_path": str(job.cover_image_path) if job.cover_image_path else None,
+            "cover_image_path": str(job.cover_image_path)
+            if job.cover_image_path
+            else None,
             "cover_image_mime": job.cover_image_mime,
             "chapter_intro_delay": job.chapter_intro_delay,
             "read_title_intro": job.read_title_intro,
@@ -1200,7 +1299,9 @@ class ConversionService:
             "analysis_requested": job.analysis_requested,
             "entity_summary": dict(job.entity_summary),
             "manual_overrides": [dict(entry) for entry in job.manual_overrides],
-            "pronunciation_overrides": [dict(entry) for entry in job.pronunciation_overrides],
+            "pronunciation_overrides": [
+                dict(entry) for entry in job.pronunciation_overrides
+            ],
             "heteronym_overrides": [dict(entry) for entry in job.heteronym_overrides],
             "normalization_overrides": dict(job.normalization_overrides),
         }
@@ -1276,18 +1377,26 @@ class ConversionService:
             subtitle_format=payload.get("subtitle_format", "srt"),
             created_at=float(payload.get("created_at", time.time())),
             supertonic_total_steps=int(payload.get("supertonic_total_steps", 5)),
-            save_chapters_separately=bool(payload.get("save_chapters_separately", False)),
+            save_chapters_separately=bool(
+                payload.get("save_chapters_separately", False)
+            ),
             merge_chapters_at_end=bool(payload.get("merge_chapters_at_end", True)),
             separate_chapters_format=payload.get("separate_chapters_format", "wav"),
-            silence_between_chapters=float(payload.get("silence_between_chapters", 2.0)),
+            silence_between_chapters=float(
+                payload.get("silence_between_chapters", 2.0)
+            ),
             save_as_project=bool(payload.get("save_as_project", False)),
             voice_profile=payload.get("voice_profile"),
             metadata_tags=payload.get("metadata_tags", {}),
             max_subtitle_words=int(payload.get("max_subtitle_words", 50)),
             chapter_intro_delay=float(payload.get("chapter_intro_delay", 0.5)),
             read_title_intro=bool(payload.get("read_title_intro", False)),
-            auto_prefix_chapter_titles=bool(payload.get("auto_prefix_chapter_titles", True)),
-            normalize_chapter_opening_caps=bool(payload.get("normalize_chapter_opening_caps", True)),
+            auto_prefix_chapter_titles=bool(
+                payload.get("auto_prefix_chapter_titles", True)
+            ),
+            normalize_chapter_opening_caps=bool(
+                payload.get("normalize_chapter_opening_caps", True)
+            ),
         )
         job.status = JobStatus(payload.get("status", job.status.value))
         job.started_at = payload.get("started_at")
@@ -1300,9 +1409,12 @@ class ConversionService:
         result_payload = payload.get("result", {})
         audio_path_raw = result_payload.get("audio_path")
         job.result.audio_path = Path(audio_path_raw) if audio_path_raw else None
-        job.result.subtitle_paths = [Path(item) for item in result_payload.get("subtitle_paths", [])]
+        job.result.subtitle_paths = [
+            Path(item) for item in result_payload.get("subtitle_paths", [])
+        ]
         job.result.artifacts = {
-            key: Path(value) for key, value in result_payload.get("artifacts", {}).items()
+            key: Path(value)
+            for key, value in result_payload.get("artifacts", {}).items()
         }
         epub_path_raw = result_payload.get("epub_path")
         job.result.epub_path = Path(epub_path_raw) if epub_path_raw else None
@@ -1315,25 +1427,43 @@ class ConversionService:
         cover_path_raw = payload.get("cover_image_path")
         job.cover_image_path = Path(cover_path_raw) if cover_path_raw else None
         job.cover_image_mime = payload.get("cover_image_mime")
-        job.chunk_level = str(payload.get("chunk_level", job.chunk_level or "paragraph"))
+        job.chunk_level = str(
+            payload.get("chunk_level", job.chunk_level or "paragraph")
+        )
         job.chunks = self._normalize_chunks(payload.get("chunks"))
         job.speakers = dict(payload.get("speakers", {}))
-        job.speaker_mode = str(payload.get("speaker_mode", job.speaker_mode or "single"))
+        job.speaker_mode = str(
+            payload.get("speaker_mode", job.speaker_mode or "single")
+        )
         job.generate_epub3 = bool(payload.get("generate_epub3", job.generate_epub3))
         job.speaker_analysis = payload.get("speaker_analysis", {})
         job.speaker_analysis_threshold = int(
-            payload.get("speaker_analysis_threshold", job.speaker_analysis_threshold or 3)
+            payload.get(
+                "speaker_analysis_threshold", job.speaker_analysis_threshold or 3
+            )
         )
-        job.analysis_requested = bool(payload.get("analysis_requested", job.analysis_requested))
+        job.analysis_requested = bool(
+            payload.get("analysis_requested", job.analysis_requested)
+        )
         job.entity_summary = payload.get("entity_summary", {})
-        job.manual_overrides = [dict(entry) for entry in payload.get("manual_overrides", []) if isinstance(entry, Mapping)]
+        job.manual_overrides = [
+            dict(entry)
+            for entry in payload.get("manual_overrides", [])
+            if isinstance(entry, Mapping)
+        ]
         job.pronunciation_overrides = [
-            dict(entry) for entry in payload.get("pronunciation_overrides", []) if isinstance(entry, Mapping)
+            dict(entry)
+            for entry in payload.get("pronunciation_overrides", [])
+            if isinstance(entry, Mapping)
         ]
         job.heteronym_overrides = [
-            dict(entry) for entry in payload.get("heteronym_overrides", []) if isinstance(entry, Mapping)
+            dict(entry)
+            for entry in payload.get("heteronym_overrides", [])
+            if isinstance(entry, Mapping)
         ]
-        job.normalization_overrides = dict(payload.get("normalization_overrides", {}) or {})
+        job.normalization_overrides = dict(
+            payload.get("normalization_overrides", {}) or {}
+        )
         job.pause_event.set()
         return job
 
@@ -1363,7 +1493,10 @@ class ConversionService:
 
             if job.status in {JobStatus.RUNNING, JobStatus.PAUSED}:
                 job.status = JobStatus.PENDING
-                job.add_log("Job restored after restart: resetting to pending queue.", level="warning")
+                job.add_log(
+                    "Job restored after restart: resetting to pending queue.",
+                    level="warning",
+                )
                 job.progress = 0.0
                 job.processed_characters = 0
                 job.pause_requested = False
@@ -1425,7 +1558,9 @@ class ConversionService:
         return normalized
 
     @classmethod
-    def _normalize_chapters(cls, chapters: Optional[Iterable[Any]]) -> List[Dict[str, Any]]:
+    def _normalize_chapters(
+        cls, chapters: Optional[Iterable[Any]]
+    ) -> List[Dict[str, Any]]:
         if not chapters:
             return []
 
@@ -1443,7 +1578,9 @@ class ConversionService:
 
             entry: Dict[str, Any] = {}
 
-            id_value = raw_dict.get("id") or raw_dict.get("chapter_id") or raw_dict.get("key")
+            id_value = (
+                raw_dict.get("id") or raw_dict.get("chapter_id") or raw_dict.get("key")
+            )
             if id_value is not None:
                 entry["id"] = str(id_value)
 
@@ -1487,15 +1624,23 @@ class ConversionService:
 
             text_value = raw_dict.get("text")
             if text_value is None:
-                text_value = raw_dict.get("content") or raw_dict.get("body") or raw_dict.get("value")
+                text_value = (
+                    raw_dict.get("content")
+                    or raw_dict.get("body")
+                    or raw_dict.get("value")
+                )
             if text_value is not None:
                 entry["text"] = str(text_value)
 
             enabled = cls._coerce_bool(
-                raw_dict.get("enabled", raw_dict.get("include", raw_dict.get("selected", True))),
+                raw_dict.get(
+                    "enabled", raw_dict.get("include", raw_dict.get("selected", True))
+                ),
                 True,
             )
-            if "disabled" in raw_dict and cls._coerce_bool(raw_dict.get("disabled"), False):
+            if "disabled" in raw_dict and cls._coerce_bool(
+                raw_dict.get("disabled"), False
+            ):
                 enabled = False
             entry["enabled"] = enabled
 
@@ -1586,7 +1731,14 @@ class ConversionService:
             speaker_value = entry.get("speaker_id", entry.get("speaker"))
             chunk["speaker_id"] = str(speaker_value) if speaker_value else "narrator"
 
-            for key in ("voice", "voice_profile", "voice_formula", "audio_path", "start", "end"):
+            for key in (
+                "voice",
+                "voice_profile",
+                "voice_formula",
+                "audio_path",
+                "start",
+                "end",
+            ):
                 if key in entry and entry[key] is not None:
                     chunk[key] = entry[key]
 

@@ -15,4 +15,3 @@ __all__ = [
     "books_bp",
     "api_bp",
 ]
-

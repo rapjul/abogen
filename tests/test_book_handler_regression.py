@@ -16,7 +16,6 @@ app = QApplication(sys.argv)
 
 
 class TestBookHandlerRegression(unittest.TestCase):
-
     def setUp(self):
         self.test_dir = "tests/test_data_handler"
         if os.path.exists(self.test_dir):

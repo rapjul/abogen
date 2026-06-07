@@ -8,7 +8,11 @@ from typing import Any, Optional
 
 from flask import Flask
 
-from abogen.utils import get_user_cache_path, get_user_output_path, get_user_settings_dir
+from abogen.utils import (
+    get_user_cache_path,
+    get_user_output_path,
+    get_user_settings_dir,
+)
 
 from .conversion_runner import run_conversion_job
 from .service import build_service
@@ -17,7 +21,9 @@ from .service import build_service
 class _SuppressSuccessfulAccessFilter(logging.Filter):
     """Filter out successful (HTTP 200) werkzeug access logs."""
 
-    def filter(self, record: logging.LogRecord) -> bool:  # pragma: no cover - small utility
+    def filter(
+        self, record: logging.LogRecord
+    ) -> bool:  # pragma: no cover - small utility
         try:
             message = record.getMessage()
         except Exception:  # pragma: no cover - defensive
@@ -25,7 +31,9 @@ class _SuppressSuccessfulAccessFilter(logging.Filter):
         # Werkzeug access logs include the status code near the end, e.g.
         # "GET /path HTTP/1.1" 200 -
         # Treat any 2xx response as success to suppress.
-        return " 200 " not in message and " 201 " not in message and " 204 " not in message
+        return (
+            " 200 " not in message and " 201 " not in message and " 204 " not in message
+        )
 
 
 _access_log_filter_attached = False

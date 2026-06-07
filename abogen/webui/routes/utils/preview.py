@@ -39,6 +39,7 @@ def _to_float32(audio_segment) -> np.ndarray:
         return np.asarray(tensor.numpy(), dtype="float32").reshape(-1)
     return np.asarray(tensor, dtype="float32").reshape(-1)
 
+
 def get_preview_pipeline(language: str, device: str) -> Any:
     key = (language, device)
     with _preview_pipeline_lock:
@@ -48,9 +49,12 @@ def get_preview_pipeline(language: str, device: str) -> Any:
         from abogen.utils import load_numpy_kpipeline
 
         _, KPipeline = load_numpy_kpipeline()
-        pipeline = KPipeline(lang_code=language, repo_id="hexgrad/Kokoro-82M", device=device)
+        pipeline = KPipeline(
+            lang_code=language, repo_id="hexgrad/Kokoro-82M", device=device
+        )
         _preview_pipelines[key] = pipeline
         return pipeline
+
 
 def generate_preview_audio(
     text: str,
@@ -90,7 +94,9 @@ def generate_preview_audio(
             rules = runner._compile_pronunciation_rules(merged)
             source_text = runner._apply_pronunciation_rules(source_text, rules)
         except Exception:
-            current_app.logger.exception("Preview override application failed; using raw text")
+            current_app.logger.exception(
+                "Preview override application failed; using raw text"
+            )
             source_text = text
 
     normalized_text = source_text
@@ -106,7 +112,11 @@ def generate_preview_audio(
     if provider == "supertonic":
         from abogen.tts_supertonic import SupertonicPipeline
 
-        pipeline = SupertonicPipeline(sample_rate=SAMPLE_RATE, auto_download=True, total_steps=supertonic_total_steps)
+        pipeline = SupertonicPipeline(
+            sample_rate=SAMPLE_RATE,
+            auto_download=True,
+            total_steps=supertonic_total_steps,
+        )
         segments = pipeline(
             normalized_text,
             voice=voice_spec,
@@ -168,6 +178,7 @@ def generate_preview_audio(
     buffer = io.BytesIO()
     sf.write(buffer, audio_data, SAMPLE_RATE, format="WAV")
     return buffer.getvalue()
+
 
 def synthesize_preview(
     text: str,

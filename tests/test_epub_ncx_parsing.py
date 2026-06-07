@@ -38,7 +38,7 @@ class TestEpubNcxParsing(unittest.TestCase):
 
         epub_chapters = []
         for i, (title, content) in enumerate(chapters):
-            filename = f"chap{i+1}.xhtml"
+            filename = f"chap{i + 1}.xhtml"
             c = epub.EpubHtml(title=title, file_name=filename, lang="en")
             # Ensure content is substantial enough to not be skipped
             c.content = f"<h1>{title}</h1><p>{content}</p>"

@@ -9,16 +9,30 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 import numpy as np
 
-from abogen.debug_tts_samples import MARKER_PREFIX, MARKER_SUFFIX, build_debug_epub, iter_expected_codes
+from abogen.debug_tts_samples import (
+    MARKER_PREFIX,
+    MARKER_SUFFIX,
+    build_debug_epub,
+    iter_expected_codes,
+)
 from abogen.kokoro_text_normalization import normalize_for_pipeline
 from abogen.normalization_settings import build_apostrophe_config
 from abogen.text_extractor import extract_from_path
 from abogen.voice_cache import ensure_voice_assets
-from abogen.webui.conversion_runner import SAMPLE_RATE, SPLIT_PATTERN, _select_device, _to_float32, _resolve_voice, _spec_to_voice_ids
+from abogen.webui.conversion_runner import (
+    SAMPLE_RATE,
+    SPLIT_PATTERN,
+    _select_device,
+    _to_float32,
+    _resolve_voice,
+    _spec_to_voice_ids,
+)
 from abogen.utils import load_numpy_kpipeline
 
 
-_MARKER_RE = re.compile(re.escape(MARKER_PREFIX) + r"(?P<code>[A-Z0-9_]+)" + re.escape(MARKER_SUFFIX))
+_MARKER_RE = re.compile(
+    re.escape(MARKER_PREFIX) + r"(?P<code>[A-Z0-9_]+)" + re.escape(MARKER_SUFFIX)
+)
 
 
 @dataclass(frozen=True)
@@ -109,7 +123,9 @@ def run_debug_tts_wavs(
         epub_path = Path(epub_path)
 
     extraction = extract_from_path(epub_path)
-    combined_text = extraction.combined_text or "\n\n".join((c.text or "") for c in extraction.chapters)
+    combined_text = extraction.combined_text or "\n\n".join(
+        (c.text or "") for c in extraction.chapters
+    )
     cases = _extract_cases_from_text(combined_text)
 
     # Prefer the canonical sample catalog for text (EPUB extraction may include headings).
@@ -157,7 +173,9 @@ def run_debug_tts_wavs(
     # Resolve it to a concrete voice formula (e.g. "af_heart*0.5+...") so Kokoro
     # doesn't attempt to download a non-existent "voices/profile:<name>.pt".
     try:
-        resolved_voice, _profile_name, profile_language = _resolve_voice_setting(voice_spec)
+        resolved_voice, _profile_name, profile_language = _resolve_voice_setting(
+            voice_spec
+        )
         if resolved_voice:
             voice_spec = resolved_voice
         if profile_language:
@@ -220,14 +238,20 @@ def run_debug_tts_wavs(
             continue
         id_audio = synth(_spoken_id(code), apply_normalization=False)
         text_audio = synth(snippet, apply_normalization=True)
-        audio = np.concatenate([id_audio, pause_1s, text_audio]).astype("float32", copy=False)
+        audio = np.concatenate([id_audio, pause_1s, text_audio]).astype(
+            "float32", copy=False
+        )
         filename = f"case_{code}.wav"
         path = run_dir / filename
         # Write float32 PCM WAV.
         import soundfile as sf
 
         sf.write(path, audio, SAMPLE_RATE, subtype="FLOAT")
-        artifacts.append(DebugWavArtifact(label=f"{code}", filename=filename, code=code, text=snippet))
+        artifacts.append(
+            DebugWavArtifact(
+                label=f"{code}", filename=filename, code=code, text=snippet
+            )
+        )
         overall_audio.append(audio)
         overall_audio.append(between_cases)
 
@@ -239,7 +263,10 @@ def run_debug_tts_wavs(
     import soundfile as sf
 
     sf.write(overall_path, combined, SAMPLE_RATE, subtype="FLOAT")
-    artifacts.insert(0, DebugWavArtifact(label="Overall", filename="overall.wav", code=None, text=None))
+    artifacts.insert(
+        0,
+        DebugWavArtifact(label="Overall", filename="overall.wav", code=None, text=None),
+    )
 
     manifest = {
         "run_id": run_id,
@@ -247,5 +274,7 @@ def run_debug_tts_wavs(
         "artifacts": [artifact.__dict__ for artifact in artifacts],
         "sample_rate": SAMPLE_RATE,
     }
-    (run_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    (run_dir / "manifest.json").write_text(
+        json.dumps(manifest, indent=2), encoding="utf-8"
+    )
     return manifest

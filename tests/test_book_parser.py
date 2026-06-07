@@ -12,7 +12,6 @@ from abogen.book_parser import get_book_parser, PdfParser, EpubParser, MarkdownP
 
 
 class TestBookParser(unittest.TestCase):
-
     def setUp(self):
         self.test_dir = "tests/test_data"
         if os.path.exists(self.test_dir):
@@ -185,7 +184,7 @@ class TestBookParser(unittest.TestCase):
         chapters = parser_pdf.get_chapters()
         self.assertEqual(len(chapters), 2)
         self.assertEqual(chapters[0], ("page_1", "Page 1 - Page 1 content."))
-        
+
         # MD
         parser_md = get_book_parser(self.sample_md_path)
         parser_md.process_content()  # Must process to get structure

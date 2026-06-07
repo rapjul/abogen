@@ -40,7 +40,7 @@ class TestModelPersistence(unittest.TestCase):
             start_time=0,
             total_char_count=100,
             shared_model=self.mock_model,
-            shared_model_config=self.mlx_config
+            shared_model_config=self.mlx_config,
         )
         self.assertEqual(thread.shared_model, self.mock_model)
         self.assertEqual(thread.shared_model_config, self.mlx_config)
@@ -50,7 +50,7 @@ class TestModelPersistence(unittest.TestCase):
         gui = MagicMock()
         gui.tts_model_cache_mode = "on"
         self.assertTrue(abogen.should_cache_model(gui))
-        
+
         gui.tts_model_cache_mode = "off"
         self.assertFalse(abogen.should_cache_model(gui))
 
@@ -58,12 +58,12 @@ class TestModelPersistence(unittest.TestCase):
         """MainWindow 'auto' mode should decide based on system RAM."""
         gui = MagicMock()
         gui.tts_model_cache_mode = "auto"
-        
+
         with patch("psutil.virtual_memory") as mock_mem:
             mock_mem.return_value.total = 32 * (1024**3)
             mock_mem.return_value.available = 10 * (1024**3)
             self.assertTrue(abogen.should_cache_model(gui))
-            
+
             mock_mem.return_value.total = 8 * (1024**3)
             mock_mem.return_value.available = 4 * (1024**3)
             self.assertFalse(abogen.should_cache_model(gui))
@@ -73,15 +73,16 @@ class TestModelPersistence(unittest.TestCase):
         gui = MagicMock()
         gui.active_tts_model = MagicMock()
         gui.active_tts_config = {"some": "config"}
-        
+
         mock_torch = MagicMock()
         mock_torch.cuda.is_available.return_value = True
-        
-        with patch("gc.collect") as mock_gc, \
-             patch.dict("sys.modules", {"torch": mock_torch}):
-            
+
+        with (
+            patch("gc.collect") as mock_gc,
+            patch.dict("sys.modules", {"torch": mock_torch}),
+        ):
             abogen.purge_tts_model(gui)
-            
+
             self.assertIsNone(gui.active_tts_model)
             self.assertEqual(gui.active_tts_config, {})
             mock_gc.assert_called_once()
@@ -98,17 +99,19 @@ class TestModelPersistence(unittest.TestCase):
         gui.should_cache_model.return_value = True
         gui._get_process_rss.return_value = 150 * 1024 * 1024
         gui.config = {}
-        
-        with patch("abogen.pyqt.gui.QApplication.processEvents"), \
-             patch("abogen.pyqt.gui.prevent_sleep_end"):
-            
+
+        with (
+            patch("abogen.pyqt.gui.QApplication.processEvents"),
+            patch("abogen.pyqt.gui.prevent_sleep_end"),
+        ):
             abogen.on_conversion_finished(gui, "Success", "path")
             gui.purge_tts_model.assert_not_called()
-            
+
             gui.purge_tts_model.reset_mock()
             gui._get_process_rss.return_value = 600 * 1024 * 1024
             abogen.on_conversion_finished(gui, "Success", "path")
             gui.purge_tts_model.assert_called()
+
 
 if __name__ == "__main__":
     unittest.main()

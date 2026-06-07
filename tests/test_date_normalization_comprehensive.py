@@ -15,7 +15,6 @@ def normalize(text, config):
 
 
 class TestDateNormalization:
-
     def test_standard_years(self, cfg):
         # 1990 -> nineteen hundred ninety
         assert "nineteen hundred ninety" in normalize("In 1990, the web was born.", cfg)

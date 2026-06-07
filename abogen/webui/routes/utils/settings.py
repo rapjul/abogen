@@ -108,32 +108,89 @@ _NORMALIZATION_GROUPS = [
     {
         "label": "General Rules",
         "options": [
-            {"key": "normalization_numbers", "label": "Convert grouped numbers to words"},
-            {"key": "normalization_currency", "label": "Convert currency symbols ($10 → ten dollars)"},
-            {"key": "normalization_titles", "label": "Expand titles and suffixes (Dr., St., Jr., …)"},
-            {"key": "normalization_internet_slang", "label": "Expand internet slang (pls → please)"},
-            {"key": "normalization_footnotes", "label": "Remove footnote indicators ([1], [2])"},
-            {"key": "normalization_terminal", "label": "Ensure sentences end with terminal punctuation"},
-            {"key": "normalization_caps_quotes", "label": "Convert ALL CAPS dialogue inside quotes"},
-        ]
+            {
+                "key": "normalization_numbers",
+                "label": "Convert grouped numbers to words",
+            },
+            {
+                "key": "normalization_currency",
+                "label": "Convert currency symbols ($10 → ten dollars)",
+            },
+            {
+                "key": "normalization_titles",
+                "label": "Expand titles and suffixes (Dr., St., Jr., …)",
+            },
+            {
+                "key": "normalization_internet_slang",
+                "label": "Expand internet slang (pls → please)",
+            },
+            {
+                "key": "normalization_footnotes",
+                "label": "Remove footnote indicators ([1], [2])",
+            },
+            {
+                "key": "normalization_terminal",
+                "label": "Ensure sentences end with terminal punctuation",
+            },
+            {
+                "key": "normalization_caps_quotes",
+                "label": "Convert ALL CAPS dialogue inside quotes",
+            },
+        ],
     },
     {
         "label": "Apostrophes & Contractions",
         "options": [
-            {"key": "normalization_apostrophes_contractions", "label": "Expand contractions (it's → it is)"},
-            {"key": "normalization_apostrophes_plural_possessives", "label": "Collapse plural possessives (dogs' → dogs)"},
-            {"key": "normalization_apostrophes_sibilant_possessives", "label": "Mark sibilant possessives (boss's → boss + IZ marker)"},
-            {"key": "normalization_apostrophes_decades", "label": "Expand decades ('90s → 1990s)"},
-            {"key": "normalization_apostrophes_leading_elisions", "label": "Expand leading elisions ('tis → it is)"},
-            {"key": "normalization_phoneme_hints", "label": "Add phoneme hints for possessives"},
-            {"key": "normalization_contraction_aux_be", "label": "Expand auxiliary 'be' (I'm → I am)"},
-            {"key": "normalization_contraction_aux_have", "label": "Expand auxiliary 'have' (I've → I have)"},
-            {"key": "normalization_contraction_modal_will", "label": "Expand modal 'will' (I'll → I will)"},
-            {"key": "normalization_contraction_modal_would", "label": "Expand modal 'would' (I'd → I would)"},
-            {"key": "normalization_contraction_negation_not", "label": "Expand negation 'not' (don't → do not)"},
-            {"key": "normalization_contraction_let_us", "label": "Expand 'let's' → let us"},
-        ]
-    }
+            {
+                "key": "normalization_apostrophes_contractions",
+                "label": "Expand contractions (it's → it is)",
+            },
+            {
+                "key": "normalization_apostrophes_plural_possessives",
+                "label": "Collapse plural possessives (dogs' → dogs)",
+            },
+            {
+                "key": "normalization_apostrophes_sibilant_possessives",
+                "label": "Mark sibilant possessives (boss's → boss + IZ marker)",
+            },
+            {
+                "key": "normalization_apostrophes_decades",
+                "label": "Expand decades ('90s → 1990s)",
+            },
+            {
+                "key": "normalization_apostrophes_leading_elisions",
+                "label": "Expand leading elisions ('tis → it is)",
+            },
+            {
+                "key": "normalization_phoneme_hints",
+                "label": "Add phoneme hints for possessives",
+            },
+            {
+                "key": "normalization_contraction_aux_be",
+                "label": "Expand auxiliary 'be' (I'm → I am)",
+            },
+            {
+                "key": "normalization_contraction_aux_have",
+                "label": "Expand auxiliary 'have' (I've → I have)",
+            },
+            {
+                "key": "normalization_contraction_modal_will",
+                "label": "Expand modal 'will' (I'll → I will)",
+            },
+            {
+                "key": "normalization_contraction_modal_would",
+                "label": "Expand modal 'would' (I'd → I would)",
+            },
+            {
+                "key": "normalization_contraction_negation_not",
+                "label": "Expand negation 'not' (don't → do not)",
+            },
+            {
+                "key": "normalization_contraction_let_us",
+                "label": "Expand 'let's' → let us",
+            },
+        ],
+    },
 ]
 
 
@@ -164,7 +221,9 @@ def integration_defaults() -> Dict[str, Dict[str, Any]]:
 
 
 def has_output_override() -> bool:
-    return bool(os.environ.get("ABOGEN_OUTPUT_DIR") or os.environ.get("ABOGEN_OUTPUT_ROOT"))
+    return bool(
+        os.environ.get("ABOGEN_OUTPUT_DIR") or os.environ.get("ABOGEN_OUTPUT_ROOT")
+    )
 
 
 def settings_defaults() -> Dict[str, Any]:
@@ -172,7 +231,9 @@ def settings_defaults() -> Dict[str, Any]:
     return {
         "output_format": "wav",
         "subtitle_format": "srt",
-        "save_mode": "default_output" if has_output_override() else "save_next_to_input",
+        "save_mode": "default_output"
+        if has_output_override()
+        else "save_next_to_input",
         "default_speaker": "",
         "default_voice": VOICES_INTERNAL[0] if VOICES_INTERNAL else "",
         "supertonic_total_steps": 5,
@@ -262,7 +323,9 @@ def coerce_float(value: Any, default: float) -> float:
         return default
 
 
-def coerce_int(value: Any, default: int, *, minimum: int = 1, maximum: int = 200) -> int:
+def coerce_int(
+    value: Any, default: int, *, minimum: int = 1, maximum: int = 200
+) -> int:
     try:
         parsed = int(value)
     except (TypeError, ValueError):
@@ -348,7 +411,11 @@ def normalize_setting_value(key: str, value: Any, defaults: Dict[str, Any]) -> A
         return str(value or "").strip()
     if key == "speaker_random_languages":
         if isinstance(value, (list, tuple, set)):
-            return [code for code in value if isinstance(code, str) and code in LANGUAGE_DESCRIPTIONS]
+            return [
+                code
+                for code in value
+                if isinstance(code, str) and code in LANGUAGE_DESCRIPTIONS
+            ]
         if isinstance(value, str):
             parts = [item.strip().lower() for item in value.split(",") if item.strip()]
             return [code for code in parts if code in LANGUAGE_DESCRIPTIONS]
@@ -408,11 +475,15 @@ def load_integration_settings() -> Dict[str, Dict[str, Any]]:
                 else:
                     merged[field] = str(value or "")
         if key == "calibre_opds":
-            merged["has_password"] = bool(isinstance(stored, Mapping) and stored.get("password"))
+            merged["has_password"] = bool(
+                isinstance(stored, Mapping) and stored.get("password")
+            )
             # Do not clear the password here, let the template decide whether to show it or not
-            # merged["password"] = "" 
+            # merged["password"] = ""
         elif key == "audiobookshelf":
-            merged["has_api_token"] = bool(isinstance(stored, Mapping) and stored.get("api_token"))
+            merged["has_api_token"] = bool(
+                isinstance(stored, Mapping) and stored.get("api_token")
+            )
             # Do not clear the token here
             # merged["api_token"] = ""
         integrations[key] = merged
@@ -425,7 +496,7 @@ def load_integration_settings() -> Dict[str, Dict[str, Any]]:
         calibre["username"] = os.environ.get("OPDS_USERNAME", "")
     if not calibre.get("password"):
         calibre["password"] = os.environ.get("OPDS_PASSWORD", "")
-    
+
     # If we have a password (from storage or env), mark it as present for the UI
     if calibre.get("password"):
         calibre["has_password"] = True
@@ -446,7 +517,7 @@ def stored_integration_config(name: str) -> Dict[str, Any]:
         entry = integrations.get(name)
         if isinstance(entry, Mapping):
             return dict(entry)
-    
+
     # Fallback to top-level (legacy structure)
     entry = cfg.get(name)
     if isinstance(entry, Mapping):
@@ -471,9 +542,7 @@ def calibre_settings_from_payload(payload: Mapping[str, Any]) -> Dict[str, Any]:
         or ""
     ).strip()
     password_input = str(
-        payload.get("password")
-        or payload.get("calibre_opds_password")
-        or ""
+        payload.get("password") or payload.get("calibre_opds_password") or ""
     ).strip()
     use_saved_password = coerce_bool(
         payload.get("use_saved_password")
@@ -492,13 +561,11 @@ def calibre_settings_from_payload(payload: Mapping[str, Any]) -> Dict[str, Any]:
         password = str(stored.get("password") or "")
 
     verify_ssl = coerce_bool(
-        payload.get("verify_ssl")
-        or payload.get("calibre_opds_verify_ssl"),
+        payload.get("verify_ssl") or payload.get("calibre_opds_verify_ssl"),
         defaults["verify_ssl"],
     )
     enabled = coerce_bool(
-        payload.get("enabled")
-        or payload.get("calibre_opds_enabled"),
+        payload.get("enabled") or payload.get("calibre_opds_enabled"),
         coerce_bool(stored.get("enabled"), False),
     )
 
@@ -540,13 +607,10 @@ def audiobookshelf_settings_from_payload(payload: Mapping[str, Any]) -> Dict[str
         or ""
     ).strip()
     token_input = str(
-        payload.get("api_token")
-        or payload.get("audiobookshelf_api_token")
-        or ""
+        payload.get("api_token") or payload.get("audiobookshelf_api_token") or ""
     ).strip()
     use_saved_token = coerce_bool(
-        payload.get("use_saved_token")
-        or payload.get("audiobookshelf_use_saved_token"),
+        payload.get("use_saved_token") or payload.get("audiobookshelf_use_saved_token"),
         False,
     )
     clear_saved_token = coerce_bool(
@@ -562,28 +626,23 @@ def audiobookshelf_settings_from_payload(payload: Mapping[str, Any]) -> Dict[str
         api_token = ""
 
     verify_ssl = coerce_bool(
-        payload.get("verify_ssl")
-        or payload.get("audiobookshelf_verify_ssl"),
+        payload.get("verify_ssl") or payload.get("audiobookshelf_verify_ssl"),
         defaults["verify_ssl"],
     )
     send_cover = coerce_bool(
-        payload.get("send_cover")
-        or payload.get("audiobookshelf_send_cover"),
+        payload.get("send_cover") or payload.get("audiobookshelf_send_cover"),
         defaults["send_cover"],
     )
     send_chapters = coerce_bool(
-        payload.get("send_chapters")
-        or payload.get("audiobookshelf_send_chapters"),
+        payload.get("send_chapters") or payload.get("audiobookshelf_send_chapters"),
         defaults["send_chapters"],
     )
     send_subtitles = coerce_bool(
-        payload.get("send_subtitles")
-        or payload.get("audiobookshelf_send_subtitles"),
+        payload.get("send_subtitles") or payload.get("audiobookshelf_send_subtitles"),
         defaults["send_subtitles"],
     )
     auto_send = coerce_bool(
-        payload.get("auto_send")
-        or payload.get("audiobookshelf_auto_send"),
+        payload.get("auto_send") or payload.get("audiobookshelf_auto_send"),
         defaults["auto_send"],
     )
     timeout_raw = (
@@ -598,8 +657,7 @@ def audiobookshelf_settings_from_payload(payload: Mapping[str, Any]) -> Dict[str
         timeout = defaults["timeout"]
 
     enabled = coerce_bool(
-        payload.get("enabled")
-        or payload.get("audiobookshelf_enabled"),
+        payload.get("enabled") or payload.get("audiobookshelf_enabled"),
         coerce_bool(stored.get("enabled"), False),
     )
 
@@ -619,7 +677,9 @@ def audiobookshelf_settings_from_payload(payload: Mapping[str, Any]) -> Dict[str
     }
 
 
-def build_audiobookshelf_config(settings: Mapping[str, Any]) -> Optional[AudiobookshelfConfig]:
+def build_audiobookshelf_config(
+    settings: Mapping[str, Any],
+) -> Optional[AudiobookshelfConfig]:
     base_url = str(settings.get("base_url") or "").strip()
     api_token = str(settings.get("api_token") or "").strip()
     library_id = str(settings.get("library_id") or "").strip()
@@ -648,7 +708,9 @@ def calibre_integration_enabled(
 ) -> bool:
     if integrations is None:
         integrations = load_integration_settings()
-    payload = integrations.get("calibre_opds") if isinstance(integrations, Mapping) else None
+    payload = (
+        integrations.get("calibre_opds") if isinstance(integrations, Mapping) else None
+    )
     if not isinstance(payload, Mapping):
         return False
     base_url = str(payload.get("base_url") or "").strip()
@@ -689,8 +751,12 @@ def apply_integration_form(cfg: Dict[str, Any], form: Mapping[str, Any]) -> None
 
     current_calibre = dict(cfg.get("calibre_opds") or {})
     calibre_enabled = coerce_bool(form.get("calibre_opds_enabled"), False)
-    calibre_base = str(form.get("calibre_opds_base_url") or current_calibre.get("base_url") or "").strip()
-    calibre_username = str(form.get("calibre_opds_username") or current_calibre.get("username") or "").strip()
+    calibre_base = str(
+        form.get("calibre_opds_base_url") or current_calibre.get("base_url") or ""
+    ).strip()
+    calibre_username = str(
+        form.get("calibre_opds_username") or current_calibre.get("username") or ""
+    ).strip()
     calibre_password_input = str(form.get("calibre_opds_password") or "")
     calibre_clear = coerce_bool(form.get("calibre_opds_password_clear"), False)
     if calibre_password_input:
@@ -699,7 +765,9 @@ def apply_integration_form(cfg: Dict[str, Any], form: Mapping[str, Any]) -> None
         calibre_password = ""
     else:
         calibre_password = str(current_calibre.get("password") or "")
-    calibre_verify = coerce_bool(form.get("calibre_opds_verify_ssl"), defaults["calibre_opds"]["verify_ssl"])
+    calibre_verify = coerce_bool(
+        form.get("calibre_opds_verify_ssl"), defaults["calibre_opds"]["verify_ssl"]
+    )
     cfg["calibre_opds"] = {
         "enabled": calibre_enabled,
         "base_url": calibre_base,
@@ -710,10 +778,20 @@ def apply_integration_form(cfg: Dict[str, Any], form: Mapping[str, Any]) -> None
 
     current_abs = dict(cfg.get("audiobookshelf") or {})
     abs_enabled = coerce_bool(form.get("audiobookshelf_enabled"), False)
-    abs_base = str(form.get("audiobookshelf_base_url") or current_abs.get("base_url") or "").strip()
-    abs_library = str(form.get("audiobookshelf_library_id") or current_abs.get("library_id") or "").strip()
-    abs_collection = str(form.get("audiobookshelf_collection_id") or current_abs.get("collection_id") or "").strip()
-    abs_folder = str(form.get("audiobookshelf_folder_id") or current_abs.get("folder_id") or "").strip()
+    abs_base = str(
+        form.get("audiobookshelf_base_url") or current_abs.get("base_url") or ""
+    ).strip()
+    abs_library = str(
+        form.get("audiobookshelf_library_id") or current_abs.get("library_id") or ""
+    ).strip()
+    abs_collection = str(
+        form.get("audiobookshelf_collection_id")
+        or current_abs.get("collection_id")
+        or ""
+    ).strip()
+    abs_folder = str(
+        form.get("audiobookshelf_folder_id") or current_abs.get("folder_id") or ""
+    ).strip()
     abs_token_input = str(form.get("audiobookshelf_api_token") or "")
     abs_token_clear = coerce_bool(form.get("audiobookshelf_api_token_clear"), False)
     if abs_token_input:
@@ -722,12 +800,27 @@ def apply_integration_form(cfg: Dict[str, Any], form: Mapping[str, Any]) -> None
         abs_token = ""
     else:
         abs_token = str(current_abs.get("api_token") or "")
-    abs_verify = coerce_bool(form.get("audiobookshelf_verify_ssl"), defaults["audiobookshelf"]["verify_ssl"])
-    abs_send_cover = coerce_bool(form.get("audiobookshelf_send_cover"), defaults["audiobookshelf"]["send_cover"])
-    abs_send_chapters = coerce_bool(form.get("audiobookshelf_send_chapters"), defaults["audiobookshelf"]["send_chapters"])
-    abs_send_subtitles = coerce_bool(form.get("audiobookshelf_send_subtitles"), defaults["audiobookshelf"]["send_subtitles"])
-    abs_auto_send = coerce_bool(form.get("audiobookshelf_auto_send"), defaults["audiobookshelf"]["auto_send"])
-    timeout_raw = form.get("audiobookshelf_timeout", current_abs.get("timeout", defaults["audiobookshelf"]["timeout"]))
+    abs_verify = coerce_bool(
+        form.get("audiobookshelf_verify_ssl"), defaults["audiobookshelf"]["verify_ssl"]
+    )
+    abs_send_cover = coerce_bool(
+        form.get("audiobookshelf_send_cover"), defaults["audiobookshelf"]["send_cover"]
+    )
+    abs_send_chapters = coerce_bool(
+        form.get("audiobookshelf_send_chapters"),
+        defaults["audiobookshelf"]["send_chapters"],
+    )
+    abs_send_subtitles = coerce_bool(
+        form.get("audiobookshelf_send_subtitles"),
+        defaults["audiobookshelf"]["send_subtitles"],
+    )
+    abs_auto_send = coerce_bool(
+        form.get("audiobookshelf_auto_send"), defaults["audiobookshelf"]["auto_send"]
+    )
+    timeout_raw = form.get(
+        "audiobookshelf_timeout",
+        current_abs.get("timeout", defaults["audiobookshelf"]["timeout"]),
+    )
     try:
         abs_timeout = float(timeout_raw)
     except (TypeError, ValueError):

@@ -43,9 +43,9 @@ def test_prepare_project_layout_uses_timestamped_folder(
         job, tmp_path
     )
 
-    assert project_root.name.startswith(
-        "20250101-120000_Sample_Title"
-    ), project_root.name
+    assert project_root.name.startswith("20250101-120000_Sample_Title"), (
+        project_root.name
+    )
     assert audio_dir == project_root
     assert subtitle_dir == project_root
     assert metadata_dir is None

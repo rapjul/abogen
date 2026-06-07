@@ -2,8 +2,10 @@ from typing import cast
 from flask import current_app, abort
 from abogen.webui.service import ConversionService, PendingJob
 
+
 def get_service() -> ConversionService:
     return current_app.extensions["conversion_service"]
+
 
 def require_pending_job(pending_id: str) -> PendingJob:
     pending = get_service().get_pending_job(pending_id)
@@ -11,13 +13,15 @@ def require_pending_job(pending_id: str) -> PendingJob:
         abort(404)
     return cast(PendingJob, pending)
 
+
 def remove_pending_job(pending_id: str) -> None:
     get_service().pop_pending_job(pending_id)
+
 
 def submit_job(pending: PendingJob) -> str:
     service = get_service()
     service.pop_pending_job(pending.id)
-    
+
     job = service.enqueue(
         original_filename=pending.original_filename,
         stored_path=pending.stored_path,

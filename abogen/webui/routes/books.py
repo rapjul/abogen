@@ -11,9 +11,11 @@ from abogen.webui.routes.utils.voice import template_options
 
 books_bp = Blueprint("books", __name__)
 
+
 def _calibre_integration_enabled(integrations: Dict[str, Any]) -> bool:
     calibre = integrations.get("calibre_opds", {})
     return bool(calibre.get("enabled") and calibre.get("base_url"))
+
 
 @books_bp.get("/")
 def find_books_page() -> ResponseReturnValue:
@@ -27,8 +29,7 @@ def find_books_page() -> ResponseReturnValue:
         settings=settings,
     )
 
+
 @books_bp.get("/search")
 def search_books() -> ResponseReturnValue:
     return find_books_page()
-
-
