@@ -282,17 +282,17 @@ def test_parse_substitutions_list_invalid_lines() -> None:
 def test_fix_tts_pronunciations() -> None:
     """Test known TTS mispronunciation fixes."""
     from abogen.word_substitution import fix_tts_pronunciations
-    
+
     # Test No.
     assert fix_tts_pronunciations("No.7") == "number 7"
     assert fix_tts_pronunciations("See No. 5") == "See number 5"
     assert fix_tts_pronunciations("No. match") == "No. match"
-    
+
     # Test Co-
     assert fix_tts_pronunciations("Co-research") == "co-research"
     assert fix_tts_pronunciations("Co-author") == "co-author"
     assert fix_tts_pronunciations("Company") == "Company"
-    
+
     # Test "N"
     assert fix_tts_pronunciations('"N"') == '"en"'
     assert fix_tts_pronunciations("'N'") == "'en'"

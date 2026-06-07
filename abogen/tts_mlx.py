@@ -14,11 +14,12 @@ from __future__ import annotations
 import enum
 import logging
 import platform
+import re
 import sys
 from dataclasses import dataclass
 from typing import Any, Iterator, Optional
+
 import numpy as np
-import re
 
 logger = logging.getLogger(__name__)
 
@@ -226,6 +227,7 @@ class MLXKokoroPipeline:
             self._model = model
         else:
             from mlx_audio.tts.utils import load_model
+
             self._model = load_model(quantization.model_path)
 
         self._lang_code = lang_code
@@ -285,9 +287,13 @@ class MLXKokoroPipeline:
         if split_pattern:
             try:
                 # Use regex splitting; filter out empty segments
-                text_segments = [t.strip() for t in re.split(split_pattern, text) if t.strip()]
+                text_segments = [
+                    t.strip() for t in re.split(split_pattern, text) if t.strip()
+                ]
             except Exception as e:
-                logger.warning("Failed to split text with pattern %r: %s", split_pattern, e)
+                logger.warning(
+                    "Failed to split text with pattern %r: %s", split_pattern, e
+                )
                 text_segments = [text.strip()] if text.strip() else []
         else:
             text_segments = [text.strip()] if text.strip() else []

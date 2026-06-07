@@ -39,12 +39,14 @@ from dataclasses import dataclass
 from pathlib import Path
 import mimetypes
 
+
 @dataclass
 class PendingBuildResult:
     pending: PendingJob
     selected_speaker_config: Optional[str]
     config_languages: List[str]
     speaker_config_payload: Optional[Dict[str, Any]]
+
 
 _WIZARD_STEP_ORDER = ["book", "chapters", "entities"]
 _WIZARD_STEP_META = {
@@ -118,6 +120,7 @@ _SUPPLEMENT_TEXT_KEYWORDS: List[tuple[str, float]] = [
     ("sign-up", 2.2),
 ]
 
+
 def supplement_score(title: str, text: str, index: int) -> float:
     normalized_title = (title or "").lower()
     score = 0.0
@@ -167,8 +170,11 @@ def ensure_at_least_one_chapter_enabled(chapters: List[Dict[str, Any]]) -> None:
         return
     if any(chapter.get("enabled") for chapter in chapters):
         return
-    best_index = max(range(len(chapters)), key=lambda idx: chapters[idx].get("characters", 0))
+    best_index = max(
+        range(len(chapters)), key=lambda idx: chapters[idx].get("characters", 0)
+    )
     chapters[best_index]["enabled"] = True
+
 
 def apply_prepare_form(
     pending: PendingJob, form: Mapping[str, Any]
@@ -182,9 +188,15 @@ def apply_prepare_form(
     bool,
     bool,
 ]:
-    raw_chunk_level = (form.get("chunk_level") or pending.chunk_level or "paragraph").strip().lower()
+    raw_chunk_level = (
+        (form.get("chunk_level") or pending.chunk_level or "paragraph").strip().lower()
+    )
     if raw_chunk_level not in _CHUNK_LEVEL_VALUES:
-        raw_chunk_level = pending.chunk_level if pending.chunk_level in _CHUNK_LEVEL_VALUES else "paragraph"
+        raw_chunk_level = (
+            pending.chunk_level
+            if pending.chunk_level in _CHUNK_LEVEL_VALUES
+            else "paragraph"
+        )
     pending.chunk_level = raw_chunk_level
     chunk_level_literal = cast(ChunkLevel, pending.chunk_level)
 
@@ -192,7 +204,9 @@ def apply_prepare_form(
 
     pending.generate_epub3 = coerce_bool(form.get("generate_epub3"), False)
 
-    threshold_default = getattr(pending, "speaker_analysis_threshold", _DEFAULT_ANALYSIS_THRESHOLD)
+    threshold_default = getattr(
+        pending, "speaker_analysis_threshold", _DEFAULT_ANALYSIS_THRESHOLD
+    )
     raw_threshold = form.get("speaker_analysis_threshold")
     if raw_threshold is not None:
         pending.speaker_analysis_threshold = coerce_int(
@@ -224,8 +238,16 @@ def apply_prepare_form(
             pending.speakers["narrator"] = existing_narrator
 
     selected_config = (form.get("applied_speaker_config") or "").strip()
-    apply_config_requested = str(form.get("apply_speaker_config", "")).strip() in {"1", "true", "on"}
-    persist_config_requested = str(form.get("save_speaker_config", "")).strip() in {"1", "true", "on"}
+    apply_config_requested = str(form.get("apply_speaker_config", "")).strip() in {
+        "1",
+        "true",
+        "on",
+    }
+    persist_config_requested = str(form.get("save_speaker_config", "")).strip() in {
+        "1",
+        "true",
+        "on",
+    }
 
     pending.applied_speaker_config = selected_config or None
 
@@ -282,7 +304,9 @@ def apply_prepare_form(
             else:
                 raw_langs = form.get(lang_key)
                 if isinstance(raw_langs, str):
-                    languages = [item.strip() for item in raw_langs.split(",") if item.strip()]
+                    languages = [
+                        item.strip() for item in raw_langs.split(",") if item.strip()
+                    ]
             payload["config_languages"] = languages
 
     profiles = serialize_profiles()
@@ -308,7 +332,9 @@ def apply_prepare_form(
         if raw_intro is not None:
             intro_values = [raw_intro]
     if intro_values:
-        pending.read_title_intro = coerce_bool(intro_values[-1], pending.read_title_intro)
+        pending.read_title_intro = coerce_bool(
+            intro_values[-1], pending.read_title_intro
+        )
     elif hasattr(form, "__contains__") and "read_title_intro" in form:
         pending.read_title_intro = False
 
@@ -435,6 +461,7 @@ def apply_prepare_form(
         persist_config_requested,
     )
 
+
 def apply_book_step_form(
     pending: PendingJob,
     form: Mapping[str, Any],
@@ -447,19 +474,33 @@ def apply_book_step_form(
     if raw_language:
         pending.language = raw_language
 
-    subtitle_mode = (form.get("subtitle_mode") or pending.subtitle_mode or "Disabled").strip()
+    subtitle_mode = (
+        form.get("subtitle_mode") or pending.subtitle_mode or "Disabled"
+    ).strip()
     if subtitle_mode:
         pending.subtitle_mode = subtitle_mode
 
-    pending.generate_epub3 = coerce_bool(form.get("generate_epub3"), bool(pending.generate_epub3))
+    pending.generate_epub3 = coerce_bool(
+        form.get("generate_epub3"), bool(pending.generate_epub3)
+    )
 
     chunk_level_default = str(settings.get("chunk_level", "paragraph")).strip().lower()
-    raw_chunk_level = (form.get("chunk_level") or pending.chunk_level or chunk_level_default).strip().lower()
+    raw_chunk_level = (
+        (form.get("chunk_level") or pending.chunk_level or chunk_level_default)
+        .strip()
+        .lower()
+    )
     if raw_chunk_level not in _CHUNK_LEVEL_VALUES:
-        raw_chunk_level = chunk_level_default if chunk_level_default in _CHUNK_LEVEL_VALUES else (pending.chunk_level or "paragraph")
+        raw_chunk_level = (
+            chunk_level_default
+            if chunk_level_default in _CHUNK_LEVEL_VALUES
+            else (pending.chunk_level or "paragraph")
+        )
     pending.chunk_level = raw_chunk_level
 
-    threshold_default = pending.speaker_analysis_threshold or settings.get("speaker_analysis_threshold", _DEFAULT_ANALYSIS_THRESHOLD)
+    threshold_default = pending.speaker_analysis_threshold or settings.get(
+        "speaker_analysis_threshold", _DEFAULT_ANALYSIS_THRESHOLD
+    )
     raw_threshold = form.get("speaker_analysis_threshold")
     if raw_threshold is not None:
         pending.speaker_analysis_threshold = coerce_int(
@@ -476,7 +517,11 @@ def apply_book_step_form(
         except ValueError:
             pass
 
-    intro_default = pending.read_title_intro if isinstance(pending.read_title_intro, bool) else bool(settings.get("read_title_intro", False))
+    intro_default = (
+        pending.read_title_intro
+        if isinstance(pending.read_title_intro, bool)
+        else bool(settings.get("read_title_intro", False))
+    )
     intro_values: List[str] = []
     getter = getattr(form, "getlist", None)
     if callable(getter):
@@ -531,7 +576,9 @@ def apply_book_step_form(
         if raw_caps_flag is not None:
             caps_values = [raw_caps_flag]
     if caps_values:
-        pending.normalize_chapter_opening_caps = coerce_bool(caps_values[-1], caps_default)
+        pending.normalize_chapter_opening_caps = coerce_bool(
+            caps_values[-1], caps_default
+        )
     elif hasattr(form, "__contains__") and "normalize_chapter_opening_caps" in form:
         pending.normalize_chapter_opening_caps = False
     else:
@@ -592,12 +639,18 @@ def apply_book_step_form(
         or ""
     ).strip()
 
-    profiles_map = dict(profiles) if isinstance(profiles, Mapping) else dict(profiles or {})
+    profiles_map = (
+        dict(profiles) if isinstance(profiles, Mapping) else dict(profiles or {})
+    )
     base_spec, _selected_speaker_name = split_profile_spec(narrator_voice_raw)
 
-    profile_selection = (form.get("voice_profile") or pending.voice_profile or "__standard").strip()
+    profile_selection = (
+        form.get("voice_profile") or pending.voice_profile or "__standard"
+    ).strip()
     custom_formula_raw = (form.get("voice_formula") or "").strip()
-    narrator_voice_raw = (base_spec or narrator_voice_raw or settings.get("default_voice") or "").strip()
+    narrator_voice_raw = (
+        base_spec or narrator_voice_raw or settings.get("default_voice") or ""
+    ).strip()
     resolved_default_voice, inferred_profile, _ = resolve_voice_setting(
         narrator_voice_raw,
         profiles=profiles_map,
@@ -684,7 +737,10 @@ def apply_book_step_form(
         pending.cover_image_path = None
         pending.cover_image_mime = None
 
-def persist_cover_image(extraction_result: Any, stored_path: Path) -> tuple[Optional[Path], Optional[str]]:
+
+def persist_cover_image(
+    extraction_result: Any, stored_path: Path
+) -> tuple[Optional[Path], Optional[str]]:
     cover_bytes = getattr(extraction_result, "cover_image", None)
     if not cover_bytes:
         return None, None
@@ -704,6 +760,7 @@ def persist_cover_image(extraction_result: Any, stored_path: Path) -> tuple[Opti
         return None, None
 
     return candidate, mime
+
 
 def build_pending_job_from_extraction(
     *,
@@ -727,7 +784,10 @@ def build_pending_job_from_extraction(
 
     metadata_tags = dict(getattr(extraction, "metadata", {}) or {})
     if metadata_overrides:
-        normalized_keys = {str(existing_key).casefold(): str(existing_key) for existing_key in metadata_tags.keys()}
+        normalized_keys = {
+            str(existing_key).casefold(): str(existing_key)
+            for existing_key in metadata_tags.keys()
+        }
         for key, value in metadata_overrides.items():
             if value is None:
                 continue
@@ -749,14 +809,16 @@ def build_pending_job_from_extraction(
                 normalized_keys[lookup] = target_key
             metadata_tags[target_key] = value_text
 
-    total_chars = getattr(extraction, "total_characters", None) or calculate_text_length(
-        getattr(extraction, "combined_text", "")
-    )
+    total_chars = getattr(
+        extraction, "total_characters", None
+    ) or calculate_text_length(getattr(extraction, "combined_text", ""))
     chapters_source = getattr(extraction, "chapters", []) or []
     total_chapter_count = len(chapters_source)
     chapters_payload: List[Dict[str, Any]] = []
     for index, chapter in enumerate(chapters_source):
-        enabled = should_preselect_chapter(chapter.title, chapter.text, index, total_chapter_count)
+        enabled = should_preselect_chapter(
+            chapter.title, chapter.text, index, total_chapter_count
+        )
         chapters_payload.append(
             {
                 "id": f"{index:04d}",
@@ -783,7 +845,9 @@ def build_pending_job_from_extraction(
     ensure_at_least_one_chapter_enabled(chapters_payload)
 
     language = str(form.get("language") or "a").strip() or "a"
-    profiles_map = dict(profiles) if isinstance(profiles, Mapping) else dict(profiles or {})
+    profiles_map = (
+        dict(profiles) if isinstance(profiles, Mapping) else dict(profiles or {})
+    )
     default_voice_setting = settings.get("default_voice") or ""
     resolved_default_voice, inferred_profile, inferred_language = resolve_voice_setting(
         default_voice_setting,
@@ -796,11 +860,15 @@ def build_pending_job_from_extraction(
     if profile_selection in {"__standard", ""} and inferred_profile:
         profile_selection = inferred_profile
 
-    base_voice = base_voice_input or resolved_default_voice or str(default_voice_setting).strip()
+    base_voice = (
+        base_voice_input or resolved_default_voice or str(default_voice_setting).strip()
+    )
     if not base_voice and VOICES_INTERNAL:
         base_voice = VOICES_INTERNAL[0]
     selected_speaker_config = (form.get("speaker_config") or "").strip()
-    speaker_config_payload = get_config(selected_speaker_config) if selected_speaker_config else None
+    speaker_config_payload = (
+        get_config(selected_speaker_config) if selected_speaker_config else None
+    )
 
     if profile_selection == "__formula":
         profile_name = ""
@@ -829,11 +897,15 @@ def build_pending_job_from_extraction(
     output_format = settings["output_format"]
     subtitle_format = settings["subtitle_format"]
     save_mode_key = settings["save_mode"]
-    save_mode = SAVE_MODE_LABELS.get(save_mode_key, SAVE_MODE_LABELS["save_next_to_input"])
+    save_mode = SAVE_MODE_LABELS.get(
+        save_mode_key, SAVE_MODE_LABELS["save_next_to_input"]
+    )
     replace_single_newlines = settings["replace_single_newlines"]
     use_gpu = settings["use_gpu"]
     save_chapters_separately = settings["save_chapters_separately"]
-    merge_chapters_at_end = settings["merge_chapters_at_end"] or not save_chapters_separately
+    merge_chapters_at_end = (
+        settings["merge_chapters_at_end"] or not save_chapters_separately
+    )
     save_as_project = settings["save_as_project"]
     separate_chapters_format = settings["separate_chapters_format"]
     silence_between_chapters = settings["silence_between_chapters"]
@@ -845,9 +917,15 @@ def build_pending_job_from_extraction(
     auto_prefix_chapter_titles = settings["auto_prefix_chapter_titles"]
 
     chunk_level_default = str(settings.get("chunk_level", "paragraph")).strip().lower()
-    raw_chunk_level = str(form.get("chunk_level") or chunk_level_default).strip().lower()
+    raw_chunk_level = (
+        str(form.get("chunk_level") or chunk_level_default).strip().lower()
+    )
     if raw_chunk_level not in _CHUNK_LEVEL_VALUES:
-        raw_chunk_level = chunk_level_default if chunk_level_default in _CHUNK_LEVEL_VALUES else "paragraph"
+        raw_chunk_level = (
+            chunk_level_default
+            if chunk_level_default in _CHUNK_LEVEL_VALUES
+            else "paragraph"
+        )
     chunk_level_value = raw_chunk_level
     chunk_level_literal = cast(ChunkLevel, chunk_level_value)
 
@@ -856,9 +934,15 @@ def build_pending_job_from_extraction(
     generate_epub3_default = bool(settings.get("generate_epub3", False))
     generate_epub3 = coerce_bool(form.get("generate_epub3"), generate_epub3_default)
 
-    selected_chapter_sources = [entry for entry in chapters_payload if entry.get("enabled")]
-    raw_chunks = build_chunks_for_chapters(selected_chapter_sources, level=chunk_level_literal)
-    analysis_chunks = build_chunks_for_chapters(selected_chapter_sources, level="sentence")
+    selected_chapter_sources = [
+        entry for entry in chapters_payload if entry.get("enabled")
+    ]
+    raw_chunks = build_chunks_for_chapters(
+        selected_chapter_sources, level=chunk_level_literal
+    )
+    analysis_chunks = build_chunks_for_chapters(
+        selected_chapter_sources, level="sentence"
+    )
 
     analysis_threshold = coerce_int(
         settings.get("speaker_analysis_threshold"),
@@ -964,6 +1048,7 @@ def build_pending_job_from_extraction(
         speaker_config_payload=speaker_config_payload,
     )
 
+
 def render_jobs_panel() -> str:
     jobs = get_service().list_jobs()
     active_statuses = {JobStatus.PENDING, JobStatus.RUNNING, JobStatus.PAUSED}
@@ -982,7 +1067,9 @@ def render_jobs_panel() -> str:
     )
 
 
-def normalize_wizard_step(step: Optional[str], pending: Optional[PendingJob] = None) -> str:
+def normalize_wizard_step(
+    step: Optional[str], pending: Optional[PendingJob] = None
+) -> str:
     if pending is None:
         default_step = "book"
     else:
@@ -1069,7 +1156,9 @@ def wizard_step_payload(
         max_allowed = len(_WIZARD_STEP_ORDER) - 1
         if max_recorded_index > max_allowed:
             max_recorded_index = max_allowed
-    completed = [slug for idx, slug in enumerate(_WIZARD_STEP_ORDER) if idx <= max_recorded_index]
+    completed = [
+        slug for idx, slug in enumerate(_WIZARD_STEP_ORDER) if idx <= max_recorded_index
+    ]
     return {
         "step": step,
         "step_index": int(meta.get("index", active_index + 1)),
@@ -1079,7 +1168,9 @@ def wizard_step_payload(
         "html": html,
         "completed_steps": completed,
         "pending_id": pending.id if pending else "",
-        "filename": pending.original_filename if pending and pending.original_filename else "",
+        "filename": pending.original_filename
+        if pending and pending.original_filename
+        else "",
         "error": error or "",
         "notice": notice or "",
     }
