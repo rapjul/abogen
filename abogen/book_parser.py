@@ -1,5 +1,6 @@
 # pyright: reportOptionalMemberAccess=false
 
+import html
 import logging
 import os
 import re
@@ -322,7 +323,7 @@ class MarkdownParser(BaseBookParser):
         nav_nodes = []
         for token in toc_tokens:
             node = {
-                "title": token["name"],
+                "title": html.unescape(token["name"]),
                 "src": token["id"],
                 "children": self._convert_markdown_toc_to_nav(
                     token.get("children", [])
@@ -572,6 +573,7 @@ class EpubParser(BaseBookParser):
             if nav_label and nav_label.find("text")
             else "Untitled Section"
         )
+        title = html.unescape(title)
         src = content["src"] if content and "src" in content.attrs else None
 
         current_entry_node = {"title": title, "src": src, "children": []}
@@ -639,7 +641,7 @@ class EpubParser(BaseBookParser):
         if (not title.strip() or title == "Untitled Section") and span_element:
             title = span_element.get_text(strip=True) or title
 
-        return title
+        return html.unescape(title)
 
     def _parse_html_nav_li(
         self,

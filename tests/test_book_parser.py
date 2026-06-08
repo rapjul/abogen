@@ -1,14 +1,15 @@
-import unittest
 import os
-import sys
 import shutil
+import sys
+import unittest
+
 import fitz  # PyMuPDF
 from ebooklib import epub
 
 # Ensure we can import the module
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from abogen.book_parser import get_book_parser, PdfParser, EpubParser, MarkdownParser
+from abogen.book_parser import EpubParser, MarkdownParser, PdfParser, get_book_parser
 
 
 class TestBookParser(unittest.TestCase):
@@ -212,6 +213,73 @@ class TestBookParser(unittest.TestCase):
 
         md_parser = MarkdownParser(self.sample_md_path)
         self.assertEqual(md_parser.file_type, "markdown")
+
+    def test_html_entities_decoding_in_chapter_titles(self) -> None:
+        """Test that HTML entities in chapter titles are correctly decoded to normal text."""
+        # 1. Test EpubParser NCX decoding
+        epub_parser = EpubParser(self.sample_epub_path)
+
+        # Mock navigation nodes for NCX
+        from bs4 import BeautifulSoup
+
+        xml_nav = """
+        <navPoint id="navPoint-1">
+            <navLabel><text>Chapter 26 – &quot;Heaven&#x27;s Control&quot;</text></navLabel>
+            <content src="chap26.xhtml"/>
+        </navPoint>
+        """
+        soup = BeautifulSoup(xml_nav, "xml")
+        nav_point = soup.find("navPoint")
+
+        ordered_entries: list = []
+        tree_structure_list: list = []
+        doc_order: dict = {"chap26.xhtml": 0}
+        doc_order_decoded: dict = {"chap26.xhtml": 0}
+        epub_parser.doc_content["chap26.xhtml"] = "Some content"
+
+        epub_parser._parse_ncx_navpoint(
+            nav_point,
+            ordered_entries,
+            doc_order,
+            doc_order_decoded,
+            tree_structure_list,
+            lambda doc, frag: 0,
+        )
+
+        self.assertEqual(len(ordered_entries), 1)
+        self.assertEqual(
+            ordered_entries[0]["title"], 'Chapter 26 – "Heaven\'s Control"'
+        )
+        self.assertEqual(
+            tree_structure_list[0]["title"], 'Chapter 26 – "Heaven\'s Control"'
+        )
+
+        # 2. Test EpubParser HTML nav decoding via _extract_nav_li_title
+        html_nav = """
+        <li id="li-1">
+            <a href="chap25.xhtml">Chapter 25 – &quot;Lisa&#x27;s Past&quot;</a>
+        </li>
+        """
+        soup_html = BeautifulSoup(html_nav, "html.parser")
+        li_element = soup_html.find("li")
+        link_element = li_element.find("a")
+
+        extracted_title = epub_parser._extract_nav_li_title(
+            li_element, link_element=link_element
+        )
+        self.assertEqual(extracted_title, 'Chapter 25 – "Lisa\'s Past"')
+
+        # 3. Test MarkdownParser TOC decoding
+        md_parser = MarkdownParser(self.sample_md_path)
+        toc_tokens = [
+            {
+                "name": "Chapter 1 – &quot;Jack&#x27;s Code&quot;",
+                "id": "chap1",
+                "children": [],
+            }
+        ]
+        decoded_nav = md_parser._convert_markdown_toc_to_nav(toc_tokens)
+        self.assertEqual(decoded_nav[0]["title"], 'Chapter 1 – "Jack\'s Code"')
 
 
 if __name__ == "__main__":
