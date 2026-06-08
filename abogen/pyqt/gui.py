@@ -1849,7 +1849,7 @@ class abogen(QWidget):
         # Overall progress section (current item and queue position)
         self.overall_progress_label = QLabel("<b>Overall Progress</b>", self)
         self.overall_progress_label.setStyleSheet(
-            "font-size: 14px; margin-bottom: -2px; margin-top: 5px;"
+            "font-size: 14px; padding-bottom: 3px; margin-top: 5px;"
         )
         self.overall_progress_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.overall_progress_label.hide()
@@ -1872,10 +1872,19 @@ class abogen(QWidget):
         self.conversion_sep1.hide()
         container_layout.addWidget(self.conversion_sep1)
 
+        # Current book title label
+        self.current_book_label = ElidedLabel("", self)
+        self.current_book_label.setStyleSheet(
+            "font-size: 13px; font-weight: bold; color: #007dff; padding-bottom: 3px; margin-top: 5px;"
+        )
+        self.current_book_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.current_book_label.hide()
+        container_layout.addWidget(self.current_book_label)
+
         # Chapter progress section
         self.chapter_progress_label = QLabel("<b>Chapter Progress</b>", self)
         self.chapter_progress_label.setStyleSheet(
-            "font-size: 14px; margin-bottom: -2px; margin-top: 5px;"
+            "font-size: 14px; padding-bottom: 3px; margin-top: 5px;"
         )  # reduced top margin since we have a separator
         self.chapter_progress_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.chapter_progress_label.hide()
@@ -3394,6 +3403,22 @@ class abogen(QWidget):
         prevent_sleep_start()
         self.is_converting = True
         self.convert_input_box_to_log(preserve_story_state=from_queue)
+
+        # Get the display file path for logs
+        display_path = (
+            self.displayed_file_path if self.displayed_file_path else self.selected_file
+        )
+
+        # Show currently converting book/story title
+        book_title = ""
+        if display_path:
+            book_title = os.path.basename(display_path)
+        if book_title:
+            self.current_book_label.setText(book_title)
+            self.current_book_label.show()
+        else:
+            self.current_book_label.hide()
+
         self.overall_progress_label.show()
         self.progress_bar.setValue(0)
         self.conversion_sep1.show()
@@ -3433,11 +3458,6 @@ class abogen(QWidget):
         self.start_time = time.time()
         self.finish_widget.hide()
         speed = self.speed_slider.value() / 100.0
-
-        # Get the display file path for logs
-        display_path = (
-            self.displayed_file_path if self.displayed_file_path else self.selected_file
-        )
 
         # Get file size string
         try:
@@ -3759,6 +3779,7 @@ class abogen(QWidget):
             self.queue_last_outcome = "cancelled"
             self.etr_label.hide()  # Hide ETR label
             self.elapsed_label.hide()  # Hide elapsed label
+            self.current_book_label.hide()
             self.overall_progress_label.hide()
             self.progress_bar.hide()
             self.conversion_sep1.hide()
@@ -3831,6 +3852,7 @@ class abogen(QWidget):
             self.update_log(message)
             self.etr_label.hide()
             self.elapsed_label.hide()
+            self.current_book_label.hide()
             self.overall_progress_label.hide()
             self.progress_bar.hide()
             self.conversion_sep1.hide()
@@ -3898,6 +3920,7 @@ class abogen(QWidget):
         self.etr_label.hide()  # Hide ETR label
         self.elapsed_label.hide()  # Hide elapsed label
         self.progress_bar.setValue(100)
+        self.current_book_label.hide()
         self.overall_progress_label.hide()
         self.progress_bar.hide()
         self.conversion_sep1.hide()
@@ -4060,6 +4083,7 @@ class abogen(QWidget):
         try:
             self.etr_label.hide()  # Hide ETR label
             self.elapsed_label.hide()  # Hide elapsed label
+            self.current_book_label.hide()
             self.overall_progress_label.hide()
             self.progress_bar.setValue(0)
             self.progress_bar.hide()
@@ -4101,6 +4125,7 @@ class abogen(QWidget):
         self.queue_row_widget.show()  # Show queue row on go back
         self.etr_label.hide()
         self.elapsed_label.hide()
+        self.current_book_label.hide()
         self.overall_progress_label.hide()
         self.progress_bar.hide()
         self.conversion_sep1.hide()

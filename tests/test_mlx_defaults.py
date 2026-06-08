@@ -8,14 +8,33 @@ from __future__ import annotations
 
 import sys
 import unittest
+from typing import Any
 from unittest.mock import MagicMock, patch
+
+# Save original modules to restore later and prevent polluting other tests
+_orig_modules = {
+    "PyQt6": sys.modules.get("PyQt6"),
+    "PyQt6.QtCore": sys.modules.get("PyQt6.QtCore"),
+    "PyQt6.QtGui": sys.modules.get("PyQt6.QtGui"),
+    "PyQt6.QtWidgets": sys.modules.get("PyQt6.QtWidgets"),
+    "kokoro": sys.modules.get("kokoro"),
+    "soundfile": sys.modules.get("soundfile"),
+    "static_ffmpeg": sys.modules.get("static_ffmpeg"),
+}
 
 
 # Robustly mock PyQt6 to allow importing gui.py without real PyQt6
 class FakePyQt:
-    def __getattr__(self, name):
+    """Fake PyQt6 class to mock UI elements in headless tests."""
+
+    def __getattr__(self, name: str) -> Any:
+        """Dynamically return mock classes or MagicMocks."""
         if name in ("QWidget", "QDialog", "QObject", "QThread", "QMainWindow"):
-            return type(name, (), {"__repr__": lambda s: name})
+            attrs = {"__repr__": lambda s: name}
+            if name == "QDialog":
+                # Add mock for DialogCode enum used in GUI queue restore checks
+                attrs["DialogCode"] = MagicMock()
+            return type(name, (), attrs)
         return MagicMock()
 
 
@@ -30,6 +49,15 @@ sys.modules["static_ffmpeg"] = MagicMock()
 
 class TestMLXDefaults(unittest.TestCase):
     """Tests for default MLX backend selection logic."""
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        """Restore original modules to prevent polluting other test files."""
+        for name, mod in _orig_modules.items():
+            if mod is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = mod
 
     @patch("abogen.tts_mlx.is_mlx_available")
     @patch("abogen.tts_mlx.recommended_quantization")
@@ -77,6 +105,14 @@ class TestMLXDefaults(unittest.TestCase):
         thread.use_mlx_backend = False
         use_mlx = getattr(thread, "use_mlx_backend", is_mlx_available())
         self.assertFalse(use_mlx)
+
+
+# Restore original modules to prevent polluting other test files
+for name, mod in _orig_modules.items():
+    if mod is None:
+        sys.modules.pop(name, None)
+    else:
+        sys.modules[name] = mod
 
 
 if __name__ == "__main__":
