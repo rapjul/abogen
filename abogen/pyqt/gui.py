@@ -1373,7 +1373,12 @@ class abogen(QWidget):
         # Set hf_tracker callbacks
         hf_tracker.set_log_callback(self.update_log)
 
-    def initUI(self):
+    def initUI(self) -> None:
+        """Initialize and layout the main user interface.
+
+        Constructs all UI elements, registers signals, sets sizes, styles,
+        and initializes widget states based on configurations.
+        """
         self.setWindowTitle(f"{PROGRAM_NAME} v{VERSION}")
         screen_obj = QApplication.primaryScreen()
         screen = screen_obj.availableGeometry() if screen_obj else self.geometry()
@@ -1425,7 +1430,10 @@ class abogen(QWidget):
         self.log_header_label.setStyleSheet("font-size: 18px;")
         log_header_layout.addWidget(self.log_header_label)
         log_header_layout.addStretch(1)
-        self.btn_toggle_story = QPushButton("Hide story text", self)
+        self.story_text_visible = self.config.get("story_text_visible", True)
+        self.btn_toggle_story = QPushButton(
+            "Hide story text" if self.story_text_visible else "Show story text", self
+        )
         self.btn_toggle_story.setFixedHeight(28)
         self.btn_toggle_story.clicked.connect(self.toggle_story_visibility)
         log_header_layout.addWidget(self.btn_toggle_story)
@@ -1434,7 +1442,6 @@ class abogen(QWidget):
         self.btn_toggle_log.clicked.connect(self.toggle_log_text_visibility)
         log_header_layout.addWidget(self.btn_toggle_log)
         self.log_text_collapsed = False
-        self.story_text_visible = True
         self.log_message_buffer = []
         self.log_header_widget.hide()
         self.log_text.hide()
@@ -2479,37 +2486,58 @@ class abogen(QWidget):
                 del self.config["selected_profile_name"]
                 save_config(self.config)
 
-    def convert_input_box_to_log(self, preserve_story_state=False):
+    def convert_input_box_to_log(self, preserve_story_state: bool = False) -> None:
+        """Hide the input box and show the logging console.
+
+        Args:
+            preserve_story_state: If True, keeps the current story text visibility state.
+                Otherwise, loads the saved setting from config.
+        """
         self.input_box.hide()
         self.log_header_widget.show()
         if not preserve_story_state:
-            self.story_text_visible = True
-            self.btn_toggle_story.setText("Hide story text")
+            self.story_text_visible = self.config.get("story_text_visible", True)
+            self.btn_toggle_story.setText(
+                "Hide story text" if self.story_text_visible else "Show story text"
+            )
         self.set_log_text_collapsed(False, resize_window=False)
         self.log_text.show()
         self._clear_log_display_and_buffer()
         QApplication.processEvents()
 
-    def restore_input_box(self):
+    def restore_input_box(self) -> None:
+        """Restore the input box interface and hide the log view."""
         self.log_header_widget.hide()
         self.log_text.hide()
         self.input_box.show()
 
-    def toggle_log_text_visibility(self):
+    def toggle_log_text_visibility(self) -> None:
+        """Toggle log text pane collapse/expand state."""
         self.set_log_text_collapsed(not self.log_text_collapsed)
 
-    def set_log_text_collapsed(self, collapsed, resize_window=True):
+    def set_log_text_collapsed(
+        self, collapsed: bool, resize_window: bool = True
+    ) -> None:
+        """Set the log text collapse/expand state and update toggle button text.
+
+        Args:
+            collapsed: True to collapse the log pane, False to expand it.
+            resize_window: If True, resizes the parent window to match the toggled state height.
+        """
         self.log_text_collapsed = bool(collapsed)
         self.log_text.setVisible(not self.log_text_collapsed)
         self.btn_toggle_log.setText("Expand" if self.log_text_collapsed else "Collapse")
         if resize_window:
             self._refresh_window_size_for_log_toggle()
 
-    def toggle_story_visibility(self):
+    def toggle_story_visibility(self) -> None:
+        """Toggle the visibility of story text lines in the conversion log."""
         self.story_text_visible = not self.story_text_visible
         self.btn_toggle_story.setText(
             "Show story text" if not self.story_text_visible else "Hide story text"
         )
+        self.config["story_text_visible"] = self.story_text_visible
+        save_config(self.config)
         # Rebuild the log display with new filtering
         self._rebuild_log_display()
 

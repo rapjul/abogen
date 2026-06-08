@@ -1,7 +1,6 @@
 import unittest
-from unittest.mock import MagicMock
 from abogen.pyqt.book_handler import HandlerDialog
-from abogen.webui.routes.utils.form import should_preselect_chapter, supplement_score
+from abogen.webui.routes.utils.form import should_preselect_chapter
 
 
 class MockItem:

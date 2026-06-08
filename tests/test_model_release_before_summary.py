@@ -3,7 +3,6 @@ from __future__ import annotations
 import importlib
 import re
 
-import pytest
 
 gui_module = importlib.import_module("abogen.pyqt.gui")
 
