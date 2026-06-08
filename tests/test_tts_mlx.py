@@ -22,7 +22,6 @@ from dataclasses import dataclass
 from typing import Any
 from unittest.mock import MagicMock, patch
 
-
 # ---------------------------------------------------------------------------
 # Helpers: build a minimal mlx_audio stub so we can import tts_mlx anywhere.
 # ---------------------------------------------------------------------------
@@ -244,6 +243,7 @@ class TestMLXKokoroPipelineCall(unittest.TestCase):
             :class:`unittest.mock.MagicMock`.
         """
         import numpy as np
+
         from abogen.tts_mlx import MLXKokoroPipeline, MLXQuantization
 
         stub = _make_mlx_audio_stub()
@@ -271,6 +271,7 @@ class TestMLXKokoroPipelineCall(unittest.TestCase):
     def test_yields_segment_result(self) -> None:
         """Should yield at least one MLXSegmentResult for a normal synthesis."""
         import numpy as np
+
         from abogen.tts_mlx import MLXSegmentResult
 
         pipeline, _, fake_result = self._make_pipeline()

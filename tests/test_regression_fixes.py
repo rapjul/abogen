@@ -1,8 +1,8 @@
 from abogen.kokoro_text_normalization import (
-    normalize_for_pipeline,
     DEFAULT_APOSTROPHE_CONFIG,
+    normalize_for_pipeline,
 )
-from abogen.normalization_settings import build_apostrophe_config, _SETTINGS_DEFAULTS
+from abogen.normalization_settings import _SETTINGS_DEFAULTS, build_apostrophe_config
 
 
 def normalize(text, overrides=None):

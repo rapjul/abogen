@@ -1,7 +1,8 @@
-import unittest
 import os
 import shutil
 import sys
+import unittest
+
 from ebooklib import epub
 
 # Ensure import path

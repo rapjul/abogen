@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 from unittest.mock import MagicMock
 
-
 from abogen.webui.conversion_runner import _validate_cover_image
 from abogen.webui.service import Job
 

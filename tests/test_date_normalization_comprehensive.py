@@ -1,7 +1,8 @@
 import pytest
+
 from abogen.kokoro_text_normalization import (
-    _normalize_grouped_numbers,
     ApostropheConfig,
+    _normalize_grouped_numbers,
 )
 
 

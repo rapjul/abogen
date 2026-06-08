@@ -1,10 +1,11 @@
-import unittest
 import os
 import shutil
 import sys
-from ebooklib import epub
-import ebooklib
+import unittest
 from unittest.mock import MagicMock
+
+import ebooklib
+from ebooklib import epub
 
 # Ensure import path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))

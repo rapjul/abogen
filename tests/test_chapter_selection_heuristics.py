@@ -1,4 +1,5 @@
 import unittest
+
 from abogen.pyqt.book_handler import HandlerDialog
 from abogen.webui.routes.utils.form import should_preselect_chapter
 

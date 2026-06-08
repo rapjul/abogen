@@ -8,11 +8,11 @@ from unittest.mock import MagicMock, patch
 
 from PyQt6.QtWidgets import QApplication
 
-# Ensure a QApplication exists for any UI-related code
-app = QApplication.instance() or QApplication(sys.argv)
-
 from abogen.pyqt.conversion import ConversionThread
 from abogen.pyqt.gui import abogen
+
+# Ensure a QApplication exists for any UI-related code
+app = QApplication.instance() or QApplication(sys.argv)
 
 
 class TestModelPersistence(unittest.TestCase):
