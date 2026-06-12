@@ -109,3 +109,69 @@ def test_save_and_restore_queue_workflow(tmp_path: Path, monkeypatch) -> None:
     assert window.current_queue_index == 0
     # The file should be preserved (resaved) once successfully restored
     assert save_file.exists()
+
+
+def test_queue_completion_clears_queue(tmp_path: Path, monkeypatch) -> None:
+    """Test that when the queue finishes successfully, all items are cleared and properties reset."""
+    # Setup paths
+    settings_dir = tmp_path / "settings"
+    settings_dir.mkdir()
+
+    # Mock get_user_settings_dir
+    monkeypatch.setattr("abogen.utils.get_user_settings_dir", lambda: str(settings_dir))
+
+    # Create window instance stub
+    window: gui_module.abogen = gui_module.abogen.__new__(gui_module.abogen)
+    
+    file_a = tmp_path / "test_file_a.txt"
+    file_a.write_text("Hello A")
+
+    window.queued_items = [_build_queued_item(str(file_a))]
+    window.current_queue_index = 0
+    window.queue_run_active = True
+    window.queue_started_at = 123456789.0
+    window.queue_elapsed_seconds = 10
+    window.queue_item_started_at = {0: 123456789.0}
+    window.queue_item_elapsed_seconds = {0: 10}
+    window.queue_item_status = {0: "Completed"}
+    window.queue_last_outcome = "completed"
+    window.queue_cancel_summary_shown = False
+
+    # Track calls
+    save_called = False
+    enable_disable_called = False
+
+    def mock_save_current_queue_state() -> None:
+        nonlocal save_called
+        save_called = True
+        # Call the actual save_current_queue_state to make sure it runs fine and doesn't crash
+        gui_module.abogen.save_current_queue_state(window)
+
+    def mock_enable_disable_queue_buttons() -> None:
+        nonlocal enable_disable_called
+        enable_disable_called = True
+
+    window.save_current_queue_state = mock_save_current_queue_state
+    window.enable_disable_queue_buttons = mock_enable_disable_queue_buttons
+
+    # Execute the queue_item_conversion_finished, incrementing current_queue_index to 1 (which equals len(queued_items))
+    window.queue_item_conversion_finished()
+
+    # Verify that the queue state properties are cleared/reset
+    assert window.queued_items == []
+    assert window.current_queue_index == 0
+    assert window.queue_run_active is False
+    assert window.queue_started_at is None
+    assert window.queue_elapsed_seconds == 0
+    assert window.queue_item_started_at == {}
+    assert window.queue_item_elapsed_seconds == {}
+    assert window.queue_item_status == {}
+    assert window.queue_last_outcome is None
+    assert window.queue_cancel_summary_shown is False
+    assert save_called is True
+    assert enable_disable_called is True
+
+    # The save file should have been deleted (since is_completed is True)
+    save_file = settings_dir / "last_queue.json"
+    assert not save_file.exists()
+

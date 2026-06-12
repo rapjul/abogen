@@ -3324,7 +3324,12 @@ class abogen(QWidget):
             self.queue_run_active = False
             self.current_queue_index = 0
 
-    def queue_item_conversion_finished(self):
+    def queue_item_conversion_finished(self) -> None:
+        """Called after each conversion finishes to proceed to the next item or clear the queue.
+
+        This method increments the queue index, persists the updated queue state,
+        starts the next item if available, or clears the queue if all items completed.
+        """
         # Called after each conversion finishes
         self.current_queue_index += 1
         self.save_current_queue_state()
@@ -3333,6 +3338,17 @@ class abogen(QWidget):
         else:
             self.queue_run_active = False
             self.current_queue_index = 0  # Reset for next time
+            # Since the queue completed successfully without any failure, clear the queue
+            self.queued_items = []
+            self.queue_started_at = None
+            self.queue_elapsed_seconds = 0
+            self.queue_item_started_at = {}
+            self.queue_item_elapsed_seconds = {}
+            self.queue_item_status = {}
+            self.queue_last_outcome = None
+            self.queue_cancel_summary_shown = False
+            self.save_current_queue_state()
+            self.enable_disable_queue_buttons()
 
     def _format_elapsed_hms(self, elapsed_seconds):
         if elapsed_seconds is None:
