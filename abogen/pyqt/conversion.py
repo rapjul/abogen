@@ -2214,8 +2214,10 @@ class ConversionThread(QThread):
                     # Prepare per-chapter output file if needed
                     if save_chapters_separately and total_chapters > 1:
                         assert chapters_out_dir is not None
+                        # Replace periods with hyphens first to keep section numbers like 1.1 as 1-1
+                        sanitized = chapter_name.replace(".", "-")
                         # First pass: keep alphanumeric, spaces, hyphens, and underscores
-                        sanitized = re.sub(r"[^\w\s\-]", "", chapter_name)
+                        sanitized = re.sub(r"[^\w\s\-]", "", sanitized)
                         # Replace multiple spaces/hyphens with single underscore
                         sanitized = re.sub(r"[\s\-]+", "_", sanitized).strip("_")
                         # Apply OS-specific sanitization

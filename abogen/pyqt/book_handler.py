@@ -475,7 +475,19 @@ class HandlerDialog(QDialog):
         else:
             item.setCheckState(0, Qt.CheckState.PartiallyChecked)
 
-    def _build_tree_from_nav(self, nav_nodes, parent_item, seen_content_hashes=None):
+    def _build_tree_from_nav(
+        self,
+        nav_nodes: list[dict],
+        parent_item: QTreeWidgetItem | QTreeWidget,
+        seen_content_hashes: set[int] | None = None,
+    ) -> None:
+        """Build the selection tree recursively from navigation nodes.
+
+        Args:
+            nav_nodes: List of navigation dictionaries representing the chapters/pages.
+            parent_item: Parent tree item or widget under which nodes are added.
+            seen_content_hashes: Set of content hashes to track and detect duplicates.
+        """
         if seen_content_hashes is None:
             seen_content_hashes = set()
         for node in nav_nodes:
@@ -499,16 +511,20 @@ class HandlerDialog(QDialog):
                 else:
                     seen_content_hashes.add(content_hash)
 
-            if src and not is_empty and not is_duplicate:
+            if src and not is_empty:
                 item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-                is_checked = src in self.checked_chapters
-                item.setCheckState(
-                    0, Qt.CheckState.Checked if is_checked else Qt.CheckState.Unchecked
-                )
-            elif is_duplicate:
-                # Mark as duplicate and remove checkbox
-                item.setText(0, f"{title} (Duplicate)")
-                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsUserCheckable)
+                if is_duplicate:
+                    item.setText(0, f"{title} (Duplicate)")
+                    item.setData(0, Qt.ItemDataRole.UserRole + 1, True)
+                    item.setCheckState(0, Qt.CheckState.Unchecked)
+                else:
+                    is_checked = src in self.checked_chapters
+                    item.setCheckState(
+                        0,
+                        Qt.CheckState.Checked
+                        if is_checked
+                        else Qt.CheckState.Unchecked,
+                    )
             elif children:
                 item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
                 item.setCheckState(0, Qt.CheckState.Unchecked)
@@ -1012,7 +1028,8 @@ class HandlerDialog(QDialog):
 
         return False
 
-    def _run_epub_auto_check(self):
+    def _run_epub_auto_check(self) -> None:
+        """Auto-select EPUB chapters with significant content, skipping duplicate content items."""
         iterator = QTreeWidgetItemIterator(self.treeWidget)
         while iterator.value():
             item = iterator.value()
@@ -1021,11 +1038,12 @@ class HandlerDialog(QDialog):
                 continue
 
             src = item.data(0, Qt.ItemDataRole.UserRole)
+            is_duplicate = bool(item.data(0, Qt.ItemDataRole.UserRole + 1))
 
             has_significant_content = src and self.content_lengths.get(src, 0) > 1000
             is_parent = item.childCount() > 0
 
-            if self._should_exclude_by_title(item):
+            if is_duplicate or self._should_exclude_by_title(item):
                 item.setCheckState(0, Qt.CheckState.Unchecked)
             elif has_significant_content or is_parent:
                 item.setCheckState(0, Qt.CheckState.Checked)
@@ -1033,7 +1051,12 @@ class HandlerDialog(QDialog):
                     for i in range(item.childCount()):
                         child = item.child(i)
                         if child.flags() & Qt.ItemFlag.ItemIsUserCheckable:
-                            if self._should_exclude_by_title(child):
+                            child_is_duplicate = bool(
+                                child.data(0, Qt.ItemDataRole.UserRole + 1)
+                            )
+                            if child_is_duplicate or self._should_exclude_by_title(
+                                child
+                            ):
                                 child.setCheckState(0, Qt.CheckState.Unchecked)
                                 continue
                             child_src = child.data(0, Qt.ItemDataRole.UserRole)
@@ -1048,8 +1071,8 @@ class HandlerDialog(QDialog):
 
             iterator += 1
 
-    def _run_markdown_auto_check(self):
-        """Auto-select markdown chapters with significant content"""
+    def _run_markdown_auto_check(self) -> None:
+        """Auto-select markdown chapters with significant content, skipping duplicate content items."""
         iterator = QTreeWidgetItemIterator(self.treeWidget)
         while iterator.value():
             item = iterator.value()
@@ -1058,6 +1081,7 @@ class HandlerDialog(QDialog):
                 continue
 
             identifier = item.data(0, Qt.ItemDataRole.UserRole)
+            is_duplicate = bool(item.data(0, Qt.ItemDataRole.UserRole + 1))
 
             # Select chapters with content > 500 characters or parent items
             has_significant_content = (
@@ -1065,7 +1089,7 @@ class HandlerDialog(QDialog):
             )
             is_parent = item.childCount() > 0
 
-            if self._should_exclude_by_title(item):
+            if is_duplicate or self._should_exclude_by_title(item):
                 item.setCheckState(0, Qt.CheckState.Unchecked)
             elif has_significant_content or is_parent:
                 item.setCheckState(0, Qt.CheckState.Checked)
@@ -1074,7 +1098,12 @@ class HandlerDialog(QDialog):
                     for i in range(item.childCount()):
                         child = item.child(i)
                         if child.flags() & Qt.ItemFlag.ItemIsUserCheckable:
-                            if self._should_exclude_by_title(child):
+                            child_is_duplicate = bool(
+                                child.data(0, Qt.ItemDataRole.UserRole + 1)
+                            )
+                            if child_is_duplicate or self._should_exclude_by_title(
+                                child
+                            ):
                                 child.setCheckState(0, Qt.CheckState.Unchecked)
                                 continue
                             child_identifier = child.data(0, Qt.ItemDataRole.UserRole)
@@ -1090,7 +1119,8 @@ class HandlerDialog(QDialog):
 
             iterator += 1
 
-    def _run_pdf_auto_check(self):
+    def _run_pdf_auto_check(self) -> None:
+        """Auto-select PDF pages/bookmarks, skipping duplicate content items."""
         iterator = QTreeWidgetItemIterator(self.treeWidget)
         while iterator.value():
             item = iterator.value()
@@ -1099,13 +1129,12 @@ class HandlerDialog(QDialog):
                 continue
 
             identifier = item.data(0, Qt.ItemDataRole.UserRole)
+            is_duplicate = bool(item.data(0, Qt.ItemDataRole.UserRole + 1))
             if not identifier:
                 iterator += 1
                 continue
 
-            # Logic: Check item if it has content (already handled by ItemIsUserCheckable flag really)
-            # But duplicate logic from previous implementation:
-            if self._should_exclude_by_title(item):
+            if is_duplicate or self._should_exclude_by_title(item):
                 item.setCheckState(0, Qt.CheckState.Unchecked)
             else:
                 item.setCheckState(0, Qt.CheckState.Checked)
@@ -1588,6 +1617,33 @@ class HandlerDialog(QDialog):
 
         return "\n".join(metadata_tags)
 
+    def _get_hierarchical_title(self, item: QTreeWidgetItem) -> str:
+        """Construct a hierarchical title for an item by walking up its parents in the tree.
+
+        Args:
+            item: The tree item to get the hierarchical title for.
+
+        Returns:
+            The hierarchical title string.
+        """
+        parts = []
+        curr = item
+        while curr:
+            # Skip book info dummy node if present
+            if curr.data(0, Qt.ItemDataRole.UserRole) == "info:bookinfo":
+                break
+            txt = curr.text(0)
+            if txt:
+                # Remove typical TOC indentation/prefixes if present
+                txt = _LEADING_DASH_PATTERN.sub("", txt).strip()
+                # Remove "(Duplicate)" label if present
+                if txt.endswith(" (Duplicate)"):
+                    txt = txt[:-12].strip()
+                parts.append(txt)
+            curr = curr.parent()
+        parts.reverse()
+        return " - ".join(parts)
+
     def _get_markdown_selected_text(self):
         """Get selected text from markdown chapters"""
         all_checked_identifiers = set()
@@ -1616,9 +1672,7 @@ class HandlerDialog(QDialog):
         for order, item, identifier in ordered_checked_items:
             text = self.content_texts.get(identifier)
             if text and text.strip():
-                title = item.text(0)
-                # Remove leading dashes from title using pre-compiled pattern
-                title = _LEADING_DASH_PATTERN.sub("", title).strip()
+                title = self._get_hierarchical_title(item)
                 marker = f"<<CHAPTER_MARKER:{title}>>"
                 chapter_texts.append(marker + "\n" + text)
 
@@ -1651,9 +1705,7 @@ class HandlerDialog(QDialog):
         for order, item, identifier in ordered_checked_items:
             text = self.content_texts.get(identifier)
             if text and text.strip():
-                title = item.text(0)
-                # Use pre-compiled pattern for better performance
-                title = _LEADING_DASH_PATTERN.sub("", title).strip()
+                title = self._get_hierarchical_title(item)
                 marker = f"<<CHAPTER_MARKER:{title}>>"
                 chapter_texts.append(marker + "\n" + text)
 
@@ -1739,9 +1791,7 @@ class HandlerDialog(QDialog):
                             )
                         else:
                             # Start a new chapter
-                            cleaned_title = _LEADING_SIMPLE_DASH_PATTERN.sub(
-                                "", title
-                            ).strip()
+                            cleaned_title = self._get_hierarchical_title(item)
                             marker = f"<<CHAPTER_MARKER:{cleaned_title}>>"
                             section_titles.append((cleaned_title, marker + "\n" + text))
                             current_chapter_idx = len(section_titles) - 1
