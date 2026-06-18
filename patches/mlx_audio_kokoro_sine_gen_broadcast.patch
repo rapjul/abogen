@@ -1,0 +1,26 @@
+--- a/mlx_audio/tts/models/kokoro/istftnet.py
++++ b/mlx_audio/tts/models/kokoro/istftnet.py
+@@ -612,12 +612,21 @@ class SineGen:
+         # Generate sine waveforms
+         sine_waves = self._f02sine(fn) * self.sine_amp
+ 
+         # Generate UV signal
+         uv = self._f02uv(f0)
+ 
+-        # Generate noise
++        # Trim sine_waves to match uv's time-axis length.
++        # The interpolation in _f02sine can produce a slightly longer sequence
++        # due to rounding (e.g. 565500 vs 565200), which causes a broadcast error.
++        uv_len = uv.shape[1]
++        if sine_waves.shape[1] != uv_len:
++            sine_waves = sine_waves[:, :uv_len, :]
++
++        # Generate noise using noise_amp's shape (batch, length, 1) rather than
++        # sine_waves' shape (batch, length, harmonics). The single-channel noise
++        # broadcasts correctly across all harmonic dimensions.
+         noise_amp = uv * self.noise_std + (1 - uv) * self.sine_amp / 3
+-        noise = noise_amp * mx.random.normal(sine_waves.shape)
++        noise = noise_amp * mx.random.normal(noise_amp.shape)
+ 
+         sine_waves = sine_waves * uv + noise
+         return sine_waves, uv, noise

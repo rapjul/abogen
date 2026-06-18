@@ -63,6 +63,18 @@ uv pip install -e .[dev]
 uv tool install --compile-bytecode .[mlx]
 ```
 
+> ⚠️ **After every install or update**, apply local dependency patches:
+>
+> ```bash
+> uv run apply-patches
+> # or when using a dev venv:
+> python scripts/apply_patches.py
+> ```
+>
+> Patches live in [`patches/`](./patches/) and are idempotent (safe to re-run).
+> See [§ Dependency Patches](#5-dependency-patches) below for details.
+
+
 ### Running the Application
 
 ```bash
@@ -153,3 +165,35 @@ For macOS ARM64 systems, `abogen` leverages the MLX framework via `mlx-audio` fo
 
 - Implementation: [tts_mlx.py](./abogen/tts_mlx.py)
 - Auto-fallbacks to PyTorch CPU/MPS if `mlx-audio` is not installed or import fails.
+
+### 5. Dependency Patches
+
+Some upstream packages contain bugs that have not yet been fixed in a released version. Rather than maintaining a full fork, `abogen` stores minimal unified-diff patch files in [`patches/`](./patches/) and applies them post-install via [`scripts/apply_patches.py`](./scripts/apply_patches.py).
+
+#### How it works
+
+1. **Patch files** (`patches/*.patch`) — standard unified-diff format targeting installed package files.
+2. **Apply script** (`scripts/apply_patches.py`) — locates each package file via `sys.path`, checks idempotently via a sentinel string, and applies the diff with the system `patch` command.
+3. **`uv` entry point** — `apply-patches` is registered in `[project.scripts]` so `uv run apply-patches` works inside any managed environment.
+
+#### When to run
+
+```bash
+# After uv tool install / uv pip install / uv sync:
+uv run apply-patches
+```
+
+The script is **idempotent** — running it multiple times is safe.
+
+#### Current patches
+
+| Patch file                                  | Package     | Issue                                                                                                                                                                                                                                  |
+| ------------------------------------------- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mlx_audio_kokoro_sine_gen_broadcast.patch` | `mlx-audio` | `[broadcast_shapes]` error in `SineGen.__call__` when the interpolation upsample cycle produces a length slightly different from `uv` (`565200` vs `565500`), and `noise_amp` shape `(B,T,1)` vs `sine_waves` shape `(B,T,9)` mismatch |
+
+#### Adding a new patch
+
+1. Make the fix in the installed venv file.
+2. Generate the patch: `diff -u original.py patched.py > patches/my_fix.patch`
+3. Add an entry to the `PATCHES` list in `scripts/apply_patches.py` with `patch`, `target`, and `sentinel` keys.
+

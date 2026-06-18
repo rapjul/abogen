@@ -1,0 +1,150 @@
+#!/usr/bin/env python3
+"""Apply local patches to installed third-party packages.
+
+This script applies patches from the ``patches/`` directory to packages
+installed in the current Python environment. It is idempotent — already-applied
+patches are detected and skipped automatically.
+
+Run this after every ``uv tool install`` or ``uv pip install`` that updates
+one of the patched packages:
+
+    uv run python scripts/apply_patches.py
+
+Or if installed as a tool:
+
+    python scripts/apply_patches.py
+
+Patches are pure unified-diff (``.patch``) files stored under ``patches/``.
+Each patch targets a specific installed package file. The mapping between patch
+files and their target module paths is declared in the ``PATCHES`` list below.
+"""
+
+import subprocess
+import sys
+from pathlib import Path
+
+
+def _find_package_file(relative_path: str) -> Path | None:
+    """Locate a file inside an installed package using importlib.
+
+    Walks ``sys.path`` entries to find the first match for ``relative_path``
+    (e.g. ``mlx_audio/tts/models/kokoro/istftnet.py``).
+
+    Args:
+        relative_path: Slash-separated path relative to the site-packages root.
+
+    Returns:
+        The resolved :class:`~pathlib.Path` if found, otherwise ``None``.
+    """
+    for sp in sys.path:
+        candidate = Path(sp) / relative_path
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _patch_already_applied(target: Path, sentinel: str) -> bool:
+    """Check whether a patch has already been applied by scanning for a sentinel string.
+
+    Args:
+        target: Path to the file that would be patched.
+        sentinel: A unique string that only exists after the patch is applied.
+
+    Returns:
+        ``True`` if the sentinel is present in the file (patch already applied).
+    """
+    return sentinel in target.read_text(encoding="utf-8")
+
+
+def _apply_patch(patch_file: Path, target: Path) -> bool:
+    """Apply a unified-diff patch to ``target`` using the system ``patch`` command.
+
+    Args:
+        patch_file: Path to the ``.patch`` file.
+        target: Path to the file to patch.
+
+    Returns:
+        ``True`` on success, ``False`` on failure.
+    """
+    result = subprocess.run(
+        [
+            "patch",
+            "--forward",         # skip already-applied hunks instead of reversing
+            "--unified",
+            "--strip=1",         # strip one leading path component (a/ b/ prefix)
+            str(target),
+            str(patch_file),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0:
+        return True
+    # patch exits 1 for "already applied" too — check output to distinguish
+    already = "already applied" in result.stdout or "Skipping" in result.stdout
+    if already:
+        return True
+    print(result.stdout)
+    print(result.stderr, file=sys.stderr)
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Patch registry
+# Each entry is a dict with:
+#   patch:    path to the .patch file relative to the repo root
+#   target:   path to the installed file relative to site-packages root
+#   sentinel: a unique string that exists ONLY after the patch is applied
+#             (used to detect whether the patch has already been applied)
+# ---------------------------------------------------------------------------
+PATCHES: list[dict] = [
+    {
+        "patch": "patches/mlx_audio_kokoro_sine_gen_broadcast.patch",
+        "target": "mlx_audio/tts/models/kokoro/istftnet.py",
+        "sentinel": "# Trim sine_waves to match uv's time-axis length.",
+    },
+]
+
+
+def main() -> int:
+    """Apply all registered patches and return an exit code.
+
+    Returns:
+        0 if all patches applied (or were already applied) successfully,
+        1 if any patch failed.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    all_ok = True
+
+    for entry in PATCHES:
+        patch_file = repo_root / entry["patch"]
+        sentinel: str = entry["sentinel"]
+
+        if not patch_file.exists():
+            print(f"[WARN] Patch file not found: {patch_file}")
+            all_ok = False
+            continue
+
+        target = _find_package_file(entry["target"])
+        if target is None:
+            print(
+                f"[SKIP] Package file not installed — skipping patch: {entry['target']}"
+            )
+            continue
+
+        if _patch_already_applied(target, sentinel):
+            print(f"[OK]   Already applied: {patch_file.name} → {target}")
+            continue
+
+        print(f"[...]  Applying: {patch_file.name} → {target}")
+        if _apply_patch(patch_file, target):
+            print(f"[OK]   Applied:  {patch_file.name} → {target}")
+        else:
+            print(f"[FAIL] Failed:   {patch_file.name} → {target}", file=sys.stderr)
+            all_ok = False
+
+    return 0 if all_ok else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

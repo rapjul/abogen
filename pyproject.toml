@@ -69,6 +69,8 @@ abogen = "abogen.pyqt.main:main"
 abogen-cli = "abogen.webui.app:main"
 abogen-pyqt = "abogen.pyqt.main:main"
 abogen-web = "abogen.webui.app:main"
+# Run after every `uv tool install` or `uv pip install` to re-apply patches
+apply-patches = "scripts.apply_patches:main"
 
 [project.urls]
 Documentation = "https://github.com/denizsafak/abogen"
