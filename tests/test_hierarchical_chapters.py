@@ -68,6 +68,7 @@ class TestHierarchicalChapters(unittest.TestCase):
             "page_subsec111": "Subsection 1.1.1 content.",
         }
         self.dialog.checked_chapters = {"ch1", "sec11", "subsec111"}
+        self.dialog.save_chapters_checkbox = None
         HandlerDialog.has_pdf_bookmarks = True
 
     def test_visual_prefix_generation(self) -> None:
@@ -313,3 +314,270 @@ class TestHierarchicalChapters(unittest.TestCase):
         collated, _ = HandlerDialog._get_epub_selected_text(self.dialog)
         self.assertIn("L2 Content\n\nL3 Content\n\nL4 Content", collated)
         self.assertNotIn("<<CHAPTER_MARKER:│  └─ Subsection 1.1.1>>", collated)
+
+    def test_checkbox_cascading_and_propagation(self) -> None:
+        """Verify that checking/unchecking items propagates correctly down and up the tree."""
+        tree: QTreeWidget = QTreeWidget()
+        self.dialog.treeWidget = tree
+        self.dialog._block_signals = False
+        self.dialog.checked_chapters = set()
+
+        # Build a 3-level hierarchy
+        parent: QTreeWidgetItem = QTreeWidgetItem(tree, ["Parent"])
+        parent.setData(0, Qt.ItemDataRole.UserRole, "parent_id")
+        parent.setFlags(parent.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+
+        child: QTreeWidgetItem = QTreeWidgetItem(parent, ["Child"])
+        child.setData(0, Qt.ItemDataRole.UserRole, "child_id")
+        child.setFlags(child.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+
+        grandchild: QTreeWidgetItem = QTreeWidgetItem(child, ["Grandchild"])
+        grandchild.setData(0, Qt.ItemDataRole.UserRole, "grandchild_id")
+        grandchild.setFlags(grandchild.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+
+        # 1. Cascade down: Check parent, all descendants should become Checked
+        parent.setCheckState(0, Qt.CheckState.Checked)
+        self.dialog.handle_item_check(parent)
+
+        self.assertEqual(parent.checkState(0), Qt.CheckState.Checked)
+        self.assertEqual(child.checkState(0), Qt.CheckState.Checked)
+        self.assertEqual(grandchild.checkState(0), Qt.CheckState.Checked)
+
+        # 2. Cascade down: Uncheck parent, all descendants should become Unchecked
+        parent.setCheckState(0, Qt.CheckState.Unchecked)
+        self.dialog.handle_item_check(parent)
+
+        self.assertEqual(parent.checkState(0), Qt.CheckState.Unchecked)
+        self.assertEqual(child.checkState(0), Qt.CheckState.Unchecked)
+        self.assertEqual(grandchild.checkState(0), Qt.CheckState.Unchecked)
+
+        # 3. Propagate up: Check grandchild, parent/ancestors should become Checked since parent has only one child
+        grandchild.setCheckState(0, Qt.CheckState.Checked)
+        self.dialog.handle_item_check(grandchild)
+
+        self.assertEqual(grandchild.checkState(0), Qt.CheckState.Checked)
+        self.assertEqual(
+            child.checkState(0), Qt.CheckState.Checked
+        )  # Since child only has 1 checked child, it gets Checked
+        self.assertEqual(
+            parent.checkState(0), Qt.CheckState.Checked
+        )  # Since parent only has 1 checked child, it gets Checked
+
+        # Add a second child to parent to test PartiallyChecked
+        child2: QTreeWidgetItem = QTreeWidgetItem(parent, ["Child 2"])
+        child2.setData(0, Qt.ItemDataRole.UserRole, "child2_id")
+        child2.setFlags(child2.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+        child2.setCheckState(0, Qt.CheckState.Unchecked)
+
+        # Propagate up: Check grandchild, sibling child2 is unchecked, so parent should be PartiallyChecked
+        grandchild.setCheckState(0, Qt.CheckState.Checked)
+        self.dialog.handle_item_check(grandchild)
+        self.assertEqual(parent.checkState(0), Qt.CheckState.PartiallyChecked)
+
+        # Check child2 as well, parent should become Checked
+        child2.setCheckState(0, Qt.CheckState.Checked)
+        self.dialog.handle_item_check(child2)
+        self.assertEqual(parent.checkState(0), Qt.CheckState.Checked)
+
+    def test_title_exclusions(self) -> None:
+        """Verify that _should_exclude_by_title correctly identifies front/back matter."""
+        # We need to bind the actual _should_exclude_by_title to the dialog
+        self.dialog._should_exclude_by_title = lambda item: (
+            HandlerDialog._should_exclude_by_title(self.dialog, item)
+        )
+
+        # Helper to create a dummy item with a specific text
+        def make_item(text: str) -> QTreeWidgetItem:
+            item = QTreeWidgetItem()
+            item.setText(0, text)
+            return item
+
+        # Test exact match exclusions
+        self.assertTrue(self.dialog._should_exclude_by_title(make_item("Cover")))
+        self.assertTrue(self.dialog._should_exclude_by_title(make_item("Title Page")))
+        self.assertTrue(self.dialog._should_exclude_by_title(make_item("Copyright")))
+        self.assertTrue(
+            self.dialog._should_exclude_by_title(make_item("Table of Contents"))
+        )
+
+        # Test map rules
+        self.assertTrue(self.dialog._should_exclude_by_title(make_item("Map")))
+        self.assertTrue(self.dialog._should_exclude_by_title(make_item("Map 1")))
+        self.assertFalse(
+            self.dialog._should_exclude_by_title(
+                make_item("Chapter 1: The Map Crystal")
+            )
+        )
+
+        # Test prefix/suffix word counts
+        self.assertTrue(
+            self.dialog._should_exclude_by_title(make_item("About the Author"))
+        )
+        self.assertTrue(
+            self.dialog._should_exclude_by_title(make_item("Suggested Reading List"))
+        )
+        self.assertFalse(
+            self.dialog._should_exclude_by_title(
+                make_item("Suggested Reading of the Entire Galaxy and Universe")
+            )
+        )
+
+        # Test non-excluded titles
+        self.assertFalse(
+            self.dialog._should_exclude_by_title(
+                make_item("Chapter 1: Introduction to Electronics")
+            )
+        )
+
+    def test_selection_helpers(self) -> None:
+        """Verify that select/deselect helper methods correctly modify check states."""
+        tree: QTreeWidget = QTreeWidget()
+        self.dialog.treeWidget = tree
+        self.dialog._block_signals = False
+        self.dialog.checked_chapters = set()
+
+        # Bind methods
+        self.dialog.select_all_chapters = lambda: HandlerDialog.select_all_chapters(
+            self.dialog
+        )
+        self.dialog.deselect_all_chapters = lambda: HandlerDialog.deselect_all_chapters(
+            self.dialog
+        )
+        self.dialog.select_parent_chapters = lambda: (
+            HandlerDialog.select_parent_chapters(self.dialog)
+        )
+        self.dialog.deselect_parent_chapters = lambda: (
+            HandlerDialog.deselect_parent_chapters(self.dialog)
+        )
+        self.dialog._update_checked_set_from_tree = lambda: (
+            HandlerDialog._update_checked_set_from_tree(self.dialog)
+        )
+
+        # Build a small tree
+        parent: QTreeWidgetItem = QTreeWidgetItem(tree, ["Parent"])
+        parent.setData(0, Qt.ItemDataRole.UserRole, "parent_id")
+        parent.setFlags(parent.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+
+        child: QTreeWidgetItem = QTreeWidgetItem(parent, ["Child"])
+        child.setData(0, Qt.ItemDataRole.UserRole, "child_id")
+        child.setFlags(child.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+
+        # 1. Select all
+        self.dialog.select_all_chapters()
+        self.assertEqual(parent.checkState(0), Qt.CheckState.Checked)
+        self.assertEqual(child.checkState(0), Qt.CheckState.Checked)
+
+        # 2. Deselect all
+        self.dialog.deselect_all_chapters()
+        self.assertEqual(parent.checkState(0), Qt.CheckState.Unchecked)
+        self.assertEqual(child.checkState(0), Qt.CheckState.Unchecked)
+
+        # 3. Select parent chapters
+        self.dialog.select_parent_chapters()
+        self.assertEqual(parent.checkState(0), Qt.CheckState.Checked)
+        self.assertEqual(child.checkState(0), Qt.CheckState.Unchecked)
+
+        # 4. Deselect parent chapters
+        parent.setCheckState(0, Qt.CheckState.Checked)
+        child.setCheckState(0, Qt.CheckState.Checked)
+        self.dialog.deselect_parent_chapters()
+        self.assertEqual(parent.checkState(0), Qt.CheckState.Unchecked)
+        self.assertEqual(child.checkState(0), Qt.CheckState.Checked)
+
+    def test_auto_select_chapters(self) -> None:
+        """Verify the automatic checking algorithm for EPUB, Markdown, and PDF."""
+        self.dialog._run_epub_auto_check = lambda: HandlerDialog._run_epub_auto_check(
+            self.dialog
+        )
+        self.dialog._run_markdown_auto_check = lambda: (
+            HandlerDialog._run_markdown_auto_check(self.dialog)
+        )
+        self.dialog._run_pdf_auto_check = lambda: HandlerDialog._run_pdf_auto_check(
+            self.dialog
+        )
+        self.dialog._should_exclude_by_title = lambda item: (
+            HandlerDialog._should_exclude_by_title(self.dialog, item)
+        )
+
+        tree: QTreeWidget = QTreeWidget()
+        self.dialog.treeWidget = tree
+        self.dialog._block_signals = False
+        self.dialog.checked_chapters = set()
+
+        # Build items
+        parent: QTreeWidgetItem = QTreeWidgetItem(tree, ["Chapter 1"])
+        parent.setData(0, Qt.ItemDataRole.UserRole, "parent_id")
+        parent.setData(0, Qt.ItemDataRole.UserRole + 1, False)  # Not duplicate
+        parent.setFlags(parent.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+
+        child: QTreeWidgetItem = QTreeWidgetItem(parent, ["Section 1.1"])
+        child.setData(0, Qt.ItemDataRole.UserRole, "child_id")
+        child.setData(0, Qt.ItemDataRole.UserRole + 1, False)  # Not duplicate
+        child.setFlags(child.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+
+        # Mock content lengths
+        self.dialog.content_lengths = {
+            "parent_id": 2000,  # Significant content
+            "child_id": 2000,  # Significant for sub-item (> 1000)
+        }
+
+        # EPUB auto check
+        self.dialog._run_epub_auto_check()
+        self.assertEqual(parent.checkState(0), Qt.CheckState.Checked)
+        self.assertEqual(child.checkState(0), Qt.CheckState.Checked)
+
+        # Mock duplicate child
+        child.setData(0, Qt.ItemDataRole.UserRole + 1, True)
+        self.dialog._run_epub_auto_check()
+        self.assertEqual(child.checkState(0), Qt.CheckState.Unchecked)
+
+        # Markdown auto check
+        child.setData(0, Qt.ItemDataRole.UserRole + 1, False)
+        self.dialog._run_markdown_auto_check()
+        self.assertEqual(parent.checkState(0), Qt.CheckState.Checked)
+        self.assertEqual(child.checkState(0), Qt.CheckState.Checked)
+
+        # PDF auto check
+        self.dialog._run_pdf_auto_check()
+        self.assertEqual(parent.checkState(0), Qt.CheckState.Checked)
+        self.assertEqual(child.checkState(0), Qt.CheckState.Checked)
+
+    def test_parent_synchronization_helpers(self) -> None:
+        """Verify internal parent state synchronization methods."""
+        self.dialog._sync_parent_checkbox_states = lambda: (
+            HandlerDialog._sync_parent_checkbox_states(self.dialog)
+        )
+        self.dialog._update_item_checkbox_state = lambda item: (
+            HandlerDialog._update_item_checkbox_state(self.dialog, item)
+        )
+
+        tree: QTreeWidget = QTreeWidget()
+        self.dialog.treeWidget = tree
+
+        parent: QTreeWidgetItem = QTreeWidgetItem(tree, ["Parent"])
+        parent.setData(0, Qt.ItemDataRole.UserRole, "parent_id")
+        parent.setFlags(parent.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+
+        child1: QTreeWidgetItem = QTreeWidgetItem(parent, ["Child 1"])
+        child1.setData(0, Qt.ItemDataRole.UserRole, "child1_id")
+        child1.setFlags(child1.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+
+        child2: QTreeWidgetItem = QTreeWidgetItem(parent, ["Child 2"])
+        child2.setData(0, Qt.ItemDataRole.UserRole, "child2_id")
+        child2.setFlags(child2.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+
+        # 1. All checked
+        child1.setCheckState(0, Qt.CheckState.Checked)
+        child2.setCheckState(0, Qt.CheckState.Checked)
+        self.dialog._sync_parent_checkbox_states()
+        self.assertEqual(parent.checkState(0), Qt.CheckState.Checked)
+
+        # 2. Mixed -> PartiallyChecked
+        child2.setCheckState(0, Qt.CheckState.Unchecked)
+        self.dialog._sync_parent_checkbox_states()
+        self.assertEqual(parent.checkState(0), Qt.CheckState.PartiallyChecked)
+
+        # 3. All unchecked
+        child1.setCheckState(0, Qt.CheckState.Unchecked)
+        self.dialog._sync_parent_checkbox_states()
+        self.assertEqual(parent.checkState(0), Qt.CheckState.Unchecked)

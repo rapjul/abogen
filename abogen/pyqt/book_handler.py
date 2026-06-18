@@ -1221,17 +1221,77 @@ class HandlerDialog(QDialog):
         if hasattr(self, "save_chapters_checkbox") and self.save_chapters_checkbox:
             self._update_checkbox_states()
 
-    def handle_item_check(self, item):
+    def handle_item_check(self, item: QTreeWidgetItem) -> None:
+        """Handle checkbox change events and propagate check states.
+
+        This method cascades the check state of a modified item down to all of its
+        descendants (children, grandchildren, etc.). It also propagates check
+        states upwards to parent items, updating them to Checked, Unchecked, or
+        PartiallyChecked as appropriate.
+
+        Args:
+            item: The QTreeWidgetItem whose check state was changed.
+        """
         if self._block_signals:
             return
 
         self._block_signals = True
 
+        def cascade_down(parent_item: QTreeWidgetItem, state: Qt.CheckState) -> None:
+            """Recursively updates the check state of all descendant items.
+
+            Args:
+                parent_item: The parent item to cascade states down from.
+                state: The Qt.CheckState to apply.
+            """
+            for i in range(parent_item.childCount()):
+                child = parent_item.child(i)
+                if child is not None and (
+                    child.flags() & Qt.ItemFlag.ItemIsUserCheckable
+                ):
+                    child.setCheckState(0, state)
+                    cascade_down(child, state)
+
+        def propagate_up(child_item: QTreeWidgetItem) -> None:
+            """Recursively updates the check state of parent items.
+
+            Args:
+                child_item: The child item to propagate state up from.
+            """
+            parent = child_item.parent()
+            if not parent or parent == self.treeWidget.invisibleRootItem():
+                return
+
+            checked_children = 0
+            partially_checked_children = 0
+            checkable_children = 0
+
+            for i in range(parent.childCount()):
+                sibling = parent.child(i)
+                if sibling is not None and (
+                    sibling.flags() & Qt.ItemFlag.ItemIsUserCheckable
+                ):
+                    checkable_children += 1
+                    state = sibling.checkState(0)
+                    if state == Qt.CheckState.Checked:
+                        checked_children += 1
+                    elif state == Qt.CheckState.PartiallyChecked:
+                        partially_checked_children += 1
+
+            if (
+                parent.flags() & Qt.ItemFlag.ItemIsUserCheckable
+            ) and checkable_children > 0:
+                if checked_children == checkable_children:
+                    parent.setCheckState(0, Qt.CheckState.Checked)
+                elif checked_children == 0 and partially_checked_children == 0:
+                    parent.setCheckState(0, Qt.CheckState.Unchecked)
+                else:
+                    parent.setCheckState(0, Qt.CheckState.PartiallyChecked)
+                propagate_up(parent)
+
         if item.flags() & Qt.ItemFlag.ItemIsUserCheckable:
-            for i in range(item.childCount()):
-                child = item.child(i)
-                if child.flags() & Qt.ItemFlag.ItemIsUserCheckable:
-                    child.setCheckState(0, item.checkState(0))
+            cascade_down(item, item.checkState(0))
+            propagate_up(item)
 
         self._block_signals = False
         self._update_checked_set_from_tree()
@@ -1998,7 +2058,9 @@ class HandlerDialog(QDialog):
                         depth = self._get_item_depth(item)
 
                         # Treat pages beyond depth limit as gap pages so they merge into active chapter
-                        should_start_new = not is_gap_page and (depth <= self.chapter_depth_limit)
+                        should_start_new = not is_gap_page and (
+                            depth <= self.chapter_depth_limit
+                        )
 
                         if not should_start_new and current_chapter_idx >= 0:
                             # Append to current active chapter
@@ -2014,7 +2076,9 @@ class HandlerDialog(QDialog):
                             if self.chapter_visual_indentation:
                                 prefix = self._get_visual_prefix(item)
                                 cleaned_title = item.text(0)
-                                cleaned_title = _LEADING_DASH_PATTERN.sub("", cleaned_title).strip()
+                                cleaned_title = _LEADING_DASH_PATTERN.sub(
+                                    "", cleaned_title
+                                ).strip()
                                 if cleaned_title.endswith(" (Duplicate)"):
                                     cleaned_title = cleaned_title[:-12].strip()
                                 cleaned_title = f"{prefix}{cleaned_title}"
@@ -2023,7 +2087,6 @@ class HandlerDialog(QDialog):
                             marker = f"<<CHAPTER_MARKER:{cleaned_title}>>"
                             section_titles.append((cleaned_title, marker + "\n" + text))
                             current_chapter_idx = len(section_titles) - 1
-
 
                         included_text_ids.add(identifier)
             iterator += 1
@@ -2149,4 +2212,3 @@ class HandlerDialog(QDialog):
             The depth limit integer value.
         """
         return self.chapter_depth_limit
-
