@@ -10,6 +10,10 @@ resolution-markers = [
     "python_full_version < '3.11' and sys_platform != 'darwin'",
 ]
 
+[options]
+exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for backwards compatibility when using relative exclude-newer values.
+exclude-newer-span = "P7D"
+
 [[package]]
 name = "abogen"
 source = { editable = "." }
@@ -2170,9 +2174,9 @@ name = "pytorch-triton-rocm"
 version = "3.6.0+git8fedd49b"
 source = { registry = "https://download.pytorch.org/whl/nightly/rocm6.4" }
 wheels = [
-    { url = "https://download-r2.pytorch.org/whl/nightly/pytorch_triton_rocm-3.6.0%2Bgit8fedd49b-cp310-cp310-linux_x86_64.whl" },
-    { url = "https://download-r2.pytorch.org/whl/nightly/pytorch_triton_rocm-3.6.0%2Bgit8fedd49b-cp311-cp311-linux_x86_64.whl" },
-    { url = "https://download-r2.pytorch.org/whl/nightly/pytorch_triton_rocm-3.6.0%2Bgit8fedd49b-cp312-cp312-linux_x86_64.whl" },
+    { url = "https://download-r2.pytorch.org/whl/nightly/pytorch_triton_rocm-3.6.0%2Bgit8fedd49b-cp310-cp310-linux_x86_64.whl", upload-time = "2025-12-09T15:40:28Z" },
+    { url = "https://download-r2.pytorch.org/whl/nightly/pytorch_triton_rocm-3.6.0%2Bgit8fedd49b-cp311-cp311-linux_x86_64.whl", upload-time = "2025-12-09T15:40:33Z" },
+    { url = "https://download-r2.pytorch.org/whl/nightly/pytorch_triton_rocm-3.6.0%2Bgit8fedd49b-cp312-cp312-linux_x86_64.whl", upload-time = "2025-12-09T15:40:38Z" },
 ]
 
 [[package]]
