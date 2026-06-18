@@ -282,5 +282,6 @@ dev_notes/
 .claude/
 .vscode/settings.json
 
-.specstory/
-_agents/
+# AI planning conversations and artifacts
+_artifacts/
+.specstory
