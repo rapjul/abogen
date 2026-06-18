@@ -327,6 +327,9 @@ class HandlerDialog(QDialog):
             ):
                 self.hierarchy_container.show()
 
+            # Update dialog labels and texts based on TOC and levels
+            self._update_ui_labels()
+
             # Run auto-check if no provided checks are relevant
             if not self._are_provided_checks_relevant():
                 self._run_auto_check()
@@ -358,6 +361,59 @@ class HandlerDialog(QDialog):
         if getattr(self, "splitter", None) is not None:
             self.splitter.setVisible(True)
         self._hide_loading_overlay()
+
+    def _update_ui_labels(self) -> None:
+        """Update dialog labels, button text, and tooltips based on detected document structure.
+
+        This method dynamically adjusts the terminology (e.g. 'chapters', 'sections',
+        or 'pages') depending on whether a Table of Contents (ToC) or bookmark structure
+        is present, and whether multiple hierarchical levels exist.
+        """
+        has_toc: bool = False
+        if self.parser.file_type in ["epub", "markdown"]:
+            has_toc = True
+        elif self.parser.file_type == "pdf" and getattr(
+            self, "has_pdf_bookmarks", False
+        ):
+            has_toc = True
+
+        if has_toc:
+            if getattr(self, "has_multiple_toc_levels", False):
+                item_type: str = "chapters/sections"
+                checkbox_text: str = "Save each chapter/section separately"
+                singular_item: str = "chapter/section"
+            else:
+                item_type = "chapters"
+                checkbox_text = "Save each chapter separately"
+                singular_item = "chapter"
+        else:
+            item_type = "pages"
+            checkbox_text = "Save each page separately"
+            singular_item = "page"
+
+        # Update window title
+        book_name: str = os.path.splitext(os.path.basename(self.book_path))[0]
+        self.setWindowTitle(f"Select {item_type.capitalize()} - {book_name}")
+
+        # Update button texts and tooltips
+        if getattr(self, "auto_select_btn", None) is not None:
+            self.auto_select_btn.setText(f"Auto-select {item_type}")
+            self.auto_select_btn.setToolTip(f"Automatically select main {item_type}")
+        if getattr(self, "select_all_btn", None) is not None:
+            self.select_all_btn.setToolTip(f"Select all available {item_type}.")
+        if getattr(self, "deselect_all_btn", None) is not None:
+            self.deselect_all_btn.setToolTip(f"Clear selection for all {item_type}.")
+
+        # Update checkboxes and tooltips
+        if getattr(self, "save_chapters_checkbox", None) is not None:
+            self.save_chapters_checkbox.setText(checkbox_text)
+            self.save_chapters_checkbox.setToolTip(
+                f"Save each selected {singular_item} as a separate output file."
+            )
+        if getattr(self, "merge_chapters_checkbox", None) is not None:
+            self.merge_chapters_checkbox.setToolTip(
+                f"Create one additional merged output containing all selected {item_type}."
+            )
 
     def _preprocess_content(self) -> None:
         """Pre-process content from the document.
@@ -1016,21 +1072,40 @@ class HandlerDialog(QDialog):
             # Check if preceded only by articles
             preceding_words = words[:map_idx]
             preceding_articles = {"the", "a", "an"}
-            is_preceded_only_by_articles = all(w in preceding_articles for w in preceding_words)
+            is_preceded_only_by_articles = all(
+                w in preceding_articles for w in preceding_words
+            )
 
             # Check if followed only by short alphanumeric identifiers (like numbers or letters)
-            following_words = words[map_idx + 1:]
-            is_followed_only_by_identifiers = all(w.isalnum() and len(w) <= 3 for w in following_words)
+            following_words = words[map_idx + 1 :]
+            is_followed_only_by_identifiers = all(
+                w.isalnum() and len(w) <= 3 for w in following_words
+            )
 
             # Scenario A: Starts with Map/Maps (optionally preceded by articles) and followed by nothing or short identifier
-            if is_preceded_only_by_articles and (not following_words or is_followed_only_by_identifiers):
+            if is_preceded_only_by_articles and (
+                not following_words or is_followed_only_by_identifiers
+            ):
                 if len(words) <= 3:
                     return True
 
             # Scenario B: Specific common short standalone maps like "world map", "realm map"
-            if len(words) == 2 and words[1] in {"map", "maps"} and words[0] in {
-                "world", "realm", "area", "city", "county", "location", "town", "land", "continent"
-            }:
+            if (
+                len(words) == 2
+                and words[1] in {"map", "maps"}
+                and words[0]
+                in {
+                    "world",
+                    "realm",
+                    "area",
+                    "city",
+                    "county",
+                    "location",
+                    "town",
+                    "land",
+                    "continent",
+                }
+            ):
                 return True
 
             # Scenario C: Starts with "map of" or "maps of" (up to 5 words, e.g. "Map of the World")
