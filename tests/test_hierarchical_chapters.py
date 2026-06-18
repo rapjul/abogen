@@ -402,10 +402,17 @@ class TestHierarchicalChapters(unittest.TestCase):
 
         # Test map rules
         self.assertTrue(self.dialog._should_exclude_by_title(make_item("Map")))
+        self.assertTrue(self.dialog._should_exclude_by_title(make_item("Maps")))
         self.assertTrue(self.dialog._should_exclude_by_title(make_item("Map 1")))
+        self.assertTrue(self.dialog._should_exclude_by_title(make_item("Map of the Empire")))
         self.assertFalse(
             self.dialog._should_exclude_by_title(
                 make_item("Chapter 1: The Map Crystal")
+            )
+        )
+        self.assertFalse(
+            self.dialog._should_exclude_by_title(
+                make_item("The Map Crystal")
             )
         )
 

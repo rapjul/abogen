@@ -34,9 +34,20 @@ class TestSelectionHeuristics(unittest.TestCase):
             ),
             ("Chapter 19: The Map Crystal and the Future We Built Together!", False),
             ("Map", True),
+            ("Maps", True),
             ("Map 1", True),
             ("The Map", True),
             ("List of Maps", True),
+            ("World Map", True),
+            ("Map of the Empire", True),
+            ("Maps of London", True),
+            ("Maps of the Known World", True),
+            ("Chapter 1: Map", False),
+            ("Mapping the Cosmos", False),
+            ("The Map Crystal", False),
+            ("Chapter 1: The Map Crystal", False),
+            ("Roadmap to Success", False),
+            ("Our Maps of the Known Worlds", False),
             ("Cover", True),
             ("Chapter 1: The Title", False),
             ("Title Page", True),
@@ -67,7 +78,7 @@ class TestSelectionHeuristics(unittest.TestCase):
         # Case 2: Just "Map" with no text
         title = "Map"
         text = ""
-        # Score = 1.0 (map) + 0.9 (short text) = 1.9. 1.9 < 1.9 is False.
+        # Score = 1.5 (map) + 0.9 (short text) = 2.4. 2.4 < 1.9 is False.
         self.assertFalse(
             should_preselect_chapter(title, text, 0, 10),
             "Standalone Map with no text should be de-selected",
@@ -76,10 +87,46 @@ class TestSelectionHeuristics(unittest.TestCase):
         # Case 3: "The Map Crystal" with long text (no "Chapter" prefix)
         title = "The Map Crystal and the Future We Built Together!"
         text = "Lorum ipsum " * 200
-        # Score = 1.0 (map)
+        # Score = 0.0 (does not match map patterns)
         self.assertTrue(
             should_preselect_chapter(title, text, 0, 10),
             "Long title with Map but no 'Chapter' should be selected",
+        )
+
+        # Case 3b: "The Map Crystal" with very short text
+        title = "The Map Crystal"
+        text = "Short text."
+        # Score = 0.0 (map) + 0.9 (short text) = 0.9. 0.9 < 1.9 is True.
+        self.assertTrue(
+            should_preselect_chapter(title, text, 0, 10),
+            "Short 'The Map Crystal' should be preselected",
+        )
+
+        # Case 3c: "Mapping the Cosmos" with short text
+        title = "Mapping the Cosmos"
+        text = "Short text."
+        # Score = 0.0 + 0.9 = 0.9
+        self.assertTrue(
+            should_preselect_chapter(title, text, 0, 10),
+            "Short 'Mapping the Cosmos' should be preselected",
+        )
+
+        # Case 3d: "Map of the Empire" with short text
+        title = "Map of the Empire"
+        text = "Short text."
+        # Score = 1.5 (map of) + 0.9 (short text) = 2.4. 2.4 < 1.9 is False.
+        self.assertFalse(
+            should_preselect_chapter(title, text, 0, 10),
+            "Short 'Map of the Empire' should be de-selected",
+        )
+
+        # Case 3e: "Our Maps of the Known Worlds" with short text
+        title = "Our Maps of the Known Worlds"
+        text = "Short text."
+        # Score = 0.0 (len 6 > 5 words) + 0.9 (short text) = 0.9. 0.9 < 1.9 is True.
+        self.assertTrue(
+            should_preselect_chapter(title, text, 0, 10),
+            "Longer 'Our Maps of the Known Worlds' should be preselected",
         )
 
         # Case 4: Acknowledgments (short)

@@ -1001,15 +1001,43 @@ class HandlerDialog(QDialog):
         words = title.split()
 
         # 1. Specialized check for Maps
-        # We want to exclude standalone "Map" or "Map 1" but include "Chapter 1: The Map Crystal"
+        # We want to exclude standalone "Map", "Map 1", "The Map" but include "Chapter 1: Map" or "The Map Crystal"
+        # We also ensure "mapping" is never treated as "map" or "maps".
         if "map" in words or "maps" in words:
-            # Exclude if it's a very short title (likely a visual placeholder)
-            if len(words) <= 3:
-                return True
-            # Still exclude explicit lists
+            # Always exclude explicit lists
             if "list of maps" in title or "list of illustrations" in title:
                 return True
-            # For longer titles, we assume it's a real chapter title
+
+            try:
+                map_idx = words.index("map")
+            except ValueError:
+                map_idx = words.index("maps")
+
+            # Check if preceded only by articles
+            preceding_words = words[:map_idx]
+            preceding_articles = {"the", "a", "an"}
+            is_preceded_only_by_articles = all(w in preceding_articles for w in preceding_words)
+
+            # Check if followed only by short alphanumeric identifiers (like numbers or letters)
+            following_words = words[map_idx + 1:]
+            is_followed_only_by_identifiers = all(w.isalnum() and len(w) <= 3 for w in following_words)
+
+            # Scenario A: Starts with Map/Maps (optionally preceded by articles) and followed by nothing or short identifier
+            if is_preceded_only_by_articles and (not following_words or is_followed_only_by_identifiers):
+                if len(words) <= 3:
+                    return True
+
+            # Scenario B: Specific common short standalone maps like "world map", "realm map"
+            if len(words) == 2 and words[1] in {"map", "maps"} and words[0] in {
+                "world", "realm", "area", "city", "county", "location", "town", "land", "continent"
+            }:
+                return True
+
+            # Scenario C: Starts with "map of" or "maps of" (up to 5 words, e.g. "Map of the World")
+            if len(words) >= 2 and words[0] in {"map", "maps"} and words[1] == "of":
+                if len(words) <= 5:
+                    return True
+
             return False
 
         # 2. Exact match exclusions (for very common short names)
