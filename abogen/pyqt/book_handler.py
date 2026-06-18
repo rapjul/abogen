@@ -49,6 +49,7 @@ logging.basicConfig(
 _HTML_TAG_PATTERN = re.compile(r"<[^>]+>")
 _LEADING_DASH_PATTERN = re.compile(r"^\s*[-–—]\s*")
 _LEADING_SIMPLE_DASH_PATTERN = re.compile(r"^\s*-\s*")
+_GAP_PAGE_TITLE_PATTERN = re.compile(r"^Page \d+(?:\s*-.*)?$")
 
 
 class HandlerDialog(QDialog):
@@ -330,8 +331,12 @@ class HandlerDialog(QDialog):
             self.splitter.setVisible(True)
         self._hide_loading_overlay()
 
-    def _preprocess_content(self):
-        """Pre-process content from the document"""
+    def _preprocess_content(self) -> None:
+        """Pre-process content from the document.
+
+        Retrieves document content, populates the chapter/pages list, handles
+        caching, and determines if a PDF contains bookmarks/TOC.
+        """
         # Create cache key from file path, modification time, file type, and replace_single_newlines setting
         try:
             mod_time = os.path.getmtime(self.book_path)
@@ -367,6 +372,10 @@ class HandlerDialog(QDialog):
             self.parser.processed_nav_structure = self.processed_nav_structure
             self.parser.book_metadata = self.book_metadata
 
+            if self.parser.file_type == "pdf":
+                pdf_doc = getattr(self.parser, "pdf_doc", None)
+                self.has_pdf_bookmarks = bool(pdf_doc.get_toc()) if pdf_doc else False
+
             logging.info(f"Using cached content for {os.path.basename(self.book_path)}")
             return
 
@@ -382,6 +391,10 @@ class HandlerDialog(QDialog):
             # Handle empty/failure case
             self.content_texts = {}
             self.content_lengths = {}
+
+        if self.parser.file_type == "pdf":
+            pdf_doc = getattr(self.parser, "pdf_doc", None)
+            self.has_pdf_bookmarks = bool(pdf_doc.get_toc()) if pdf_doc else False
 
         # Cache the processed content
         cache_data = {
@@ -1647,19 +1660,29 @@ class HandlerDialog(QDialog):
         full_text = metadata_tags + "\n\n" + "\n\n".join(chapter_texts)
         return full_text, all_checked_identifiers
 
-    def _get_pdf_selected_text(self):
-        all_checked_identifiers = set()
-        included_text_ids = set()
-        section_titles = []
-        all_content = []
+    def _get_pdf_selected_text(self) -> tuple[str, set[str]]:
+        """Get the combined text of selected pages from a PDF.
+
+        Handles books with and without Table of Contents (TOC) structures.
+        Traverses the tree widget in pre-order to group gap pages under
+        their appropriate chapter headings chronologically without duplication.
+
+        Returns:
+            tuple[str, set[str]]: The combined text containing chapter markers,
+                and the set of all checked page/chapter identifiers.
+        """
+        all_checked_identifiers: set[str] = set()
+        included_text_ids: set[str] = set()
+        section_titles: list[tuple[str, str]] = []
 
         # Add metadata tags at the beginning
-        metadata_tags = self._format_metadata_tags()
+        metadata_tags: str = self._format_metadata_tags()
 
-        pdf_has_no_bookmarks = (
+        pdf_has_no_bookmarks: bool = (
             hasattr(self, "has_pdf_bookmarks") and not self.has_pdf_bookmarks
         )
 
+        # 1. Collect all checked identifiers first
         iterator = QTreeWidgetItemIterator(self.treeWidget)
         while iterator.value():
             item = iterator.value()
@@ -1669,7 +1692,9 @@ class HandlerDialog(QDialog):
                     all_checked_identifiers.add(identifier)
             iterator += 1
 
+        # 2. Extract and format texts
         if pdf_has_no_bookmarks:
+            all_content: list[str] = []
             sorted_page_ids = sorted(
                 [id for id in all_checked_identifiers if id.startswith("page_")],
                 key=lambda x: int(x.split("_")[1]) if x.split("_")[1].isdigit() else 0,
@@ -1685,64 +1710,42 @@ class HandlerDialog(QDialog):
                 all_checked_identifiers,
             )
 
+        # For PDFs with bookmarks, traverse tree in pre-order
         iterator = QTreeWidgetItemIterator(self.treeWidget)
+        current_chapter_idx: int = -1
+
         while iterator.value():
             item = iterator.value()
-            if item.childCount() > 0:
-                parent_checked = item.checkState(0) == Qt.CheckState.Checked
-                parent_id = item.data(0, Qt.ItemDataRole.UserRole)
-                parent_title = item.text(0)
-                checked_children = []
-                for i in range(item.childCount()):
-                    child = item.child(i)
-                    child_id = child.data(0, Qt.ItemDataRole.UserRole)
-                    if (
-                        child.checkState(0) == Qt.CheckState.Checked
-                        and child_id
-                        and child_id not in included_text_ids
-                    ):
-                        checked_children.append((child, child_id))
-                if parent_checked and parent_id and parent_id not in included_text_ids:
-                    combined_text = self.content_texts.get(parent_id, "")
-                    for child, child_id in checked_children:
-                        child_text = self.content_texts.get(child_id, "")
-                        if child_text:
-                            combined_text += "\n\n" + child_text
-                        included_text_ids.add(child_id)
-                    if combined_text.strip():
-                        # Use pre-compiled pattern for better performance
-                        title = _LEADING_SIMPLE_DASH_PATTERN.sub(
-                            "", parent_title
-                        ).strip()
-                        marker = f"<<CHAPTER_MARKER:{title}>>"
-                        section_titles.append((title, marker + "\n" + combined_text))
-                        included_text_ids.add(parent_id)
-                elif not parent_checked and checked_children:
-                    # Use pre-compiled pattern for better performance
-                    title = _LEADING_SIMPLE_DASH_PATTERN.sub("", parent_title).strip()
-                    marker = f"<<CHAPTER_MARKER:{title}>>"
-                    for idx, (child, child_id) in enumerate(checked_children):
-                        text = self.content_texts.get(child_id, "")
-                        if text:
-                            if idx == 0:
-                                section_titles.append((title, marker + "\n" + text))
-                            else:
-                                section_titles.append((title, text))
-                        included_text_ids.add(child_id)
-            elif item.flags() & Qt.ItemFlag.ItemIsUserCheckable:
+            if item.checkState(0) == Qt.CheckState.Checked:
                 identifier = item.data(0, Qt.ItemDataRole.UserRole)
                 if (
                     identifier
+                    and identifier.startswith("page_")
                     and identifier not in included_text_ids
-                    and item.checkState(0) == Qt.CheckState.Checked
                 ):
                     text = self.content_texts.get(identifier, "")
                     if text:
                         title = item.text(0)
-                        # Use pre-compiled pattern for better performance
-                        title = _LEADING_SIMPLE_DASH_PATTERN.sub("", title).strip()
-                        marker = f"<<CHAPTER_MARKER:{title}>>"
-                        section_titles.append((title, marker + "\n" + text))
+                        is_gap_page = bool(_GAP_PAGE_TITLE_PATTERN.match(title))
+
+                        if is_gap_page and current_chapter_idx >= 0:
+                            # Append to current active chapter
+                            chapter_title, chapter_text = section_titles[
+                                current_chapter_idx
+                            ]
+                            section_titles[current_chapter_idx] = (
+                                chapter_title,
+                                chapter_text + "\n\n" + text,
+                            )
+                        else:
+                            # Start a new chapter
+                            cleaned_title = _LEADING_SIMPLE_DASH_PATTERN.sub(
+                                "", title
+                            ).strip()
+                            marker = f"<<CHAPTER_MARKER:{cleaned_title}>>"
+                            section_titles.append((cleaned_title, marker + "\n" + text))
+                            current_chapter_idx = len(section_titles) - 1
+
                         included_text_ids.add(identifier)
             iterator += 1
 
