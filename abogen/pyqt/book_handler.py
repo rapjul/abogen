@@ -17,6 +17,7 @@ from PyQt6.QtCore import (
 from PyQt6.QtGui import QMovie
 from PyQt6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QHBoxLayout,
@@ -57,6 +58,8 @@ class HandlerDialog(QDialog):
     _save_chapters_separately = False
     _merge_chapters_at_end = True
     _save_as_project = False  # New class variable for save_as_project option
+    _chapter_visual_indentation = True
+    _chapter_depth_limit = 99
 
     # Cache for processed book content to avoid reprocessing
     # Key: (book_path, modification_time, file_type)
@@ -130,6 +133,9 @@ class HandlerDialog(QDialog):
         self.save_chapters_separately = HandlerDialog._save_chapters_separately
         self.merge_chapters_at_end = HandlerDialog._merge_chapters_at_end
         self.save_as_project = HandlerDialog._save_as_project
+        self.chapter_visual_indentation = HandlerDialog._chapter_visual_indentation
+        self.chapter_depth_limit = HandlerDialog._chapter_depth_limit
+        self.has_multiple_toc_levels = False
 
         # Initialize metadata dict; will be populated in _preprocess_content by the background loader
         self.book_metadata = {}
@@ -298,6 +304,28 @@ class HandlerDialog(QDialog):
         try:
             # Rebuild tree based on file type
             self._build_tree()
+
+            # Check for multiple levels in the parsed navigation structure
+            self.has_multiple_toc_levels = False
+            if self.processed_nav_structure:
+
+                def check_nested(nodes):
+                    for n in nodes:
+                        if n.get("children"):
+                            return True
+                        if check_nested(n.get("children", [])):
+                            return True
+                    return False
+
+                self.has_multiple_toc_levels = check_nested(
+                    self.processed_nav_structure
+                )
+
+            if (
+                self.has_multiple_toc_levels
+                and getattr(self, "hierarchy_container", None) is not None
+            ):
+                self.hierarchy_container.show()
 
             # Run auto-check if no provided checks are relevant
             if not self._are_provided_checks_relevant():
@@ -678,6 +706,45 @@ class HandlerDialog(QDialog):
             self.on_save_as_project_changed
         )
         leftLayout.addWidget(self.save_as_project_checkbox)
+
+        # Hierarchy configuration container
+        self.hierarchy_container = QWidget(self)
+        h_layout = QVBoxLayout(self.hierarchy_container)
+        h_layout.setContentsMargins(0, 5, 0, 5)
+        h_layout.setSpacing(5)
+
+        self.visual_indent_checkbox = QCheckBox(
+            "Keep visual tree structure in titles", self.hierarchy_container
+        )
+        self.visual_indent_checkbox.setChecked(self.chapter_visual_indentation)
+        self.visual_indent_checkbox.setToolTip(
+            "Format sub-chapters and sub-sub-chapters with tree-drawing indicators "
+            "(e.g., ├─, └─) in the audiobook's chapter markers."
+        )
+        self.visual_indent_checkbox.stateChanged.connect(self.on_visual_indent_changed)
+        h_layout.addWidget(self.visual_indent_checkbox)
+
+        depth_layout = QHBoxLayout()
+        depth_label = QLabel("Chapter depth limit:", self.hierarchy_container)
+        self.depth_limit_combo = QComboBox(self.hierarchy_container)
+        self.depth_limit_combo.addItem("No Limit (All levels)", 99)
+        self.depth_limit_combo.addItem("Level 1 (H1 only)", 1)
+        self.depth_limit_combo.addItem("Level 2 (H1-H2)", 2)
+        self.depth_limit_combo.addItem("Level 3 (H1-H3)", 3)
+        self.depth_limit_combo.setToolTip(
+            "Limit the depth of chapters in the final output. "
+            "Sections deeper than this limit will have their text rolled up into their parent chapter."
+        )
+        idx = self.depth_limit_combo.findData(self.chapter_depth_limit)
+        if idx >= 0:
+            self.depth_limit_combo.setCurrentIndex(idx)
+        self.depth_limit_combo.currentIndexChanged.connect(self.on_depth_limit_changed)
+        depth_layout.addWidget(depth_label)
+        depth_layout.addWidget(self.depth_limit_combo)
+        h_layout.addLayout(depth_layout)
+
+        leftLayout.addWidget(self.hierarchy_container)
+        self.hierarchy_container.hide()  # Hide by default, shown dynamically if multiple TOC levels exist
 
         leftLayout.addWidget(buttons)
 
@@ -1644,10 +1711,88 @@ class HandlerDialog(QDialog):
         parts.reverse()
         return " - ".join(parts)
 
+    def _get_item_depth(self, item: QTreeWidgetItem) -> int:
+        """Calculate the 1-based depth of a QTreeWidgetItem in the tree.
+
+        Top-level items (excluding the dummy Book Metadata) have depth 1.
+
+        Args:
+            item: The QTreeWidgetItem to measure.
+
+        Returns:
+            The 1-based depth level.
+        """
+        depth = 1
+        curr = item.parent()
+        while curr is not None:
+            depth += 1
+            curr = curr.parent()
+        return depth
+
+    def _get_visual_prefix(self, item: QTreeWidgetItem) -> str:
+        """Calculate the visual tree formatting prefix for a QTreeWidgetItem.
+
+        Level 1 items have no prefix. Level 2 and deeper items are prefixed
+        with tree-drawing characters ('├─', '└─', '│  ', '   ') to visualize
+        hierarchy in a flat list without leading spaces.
+
+        Args:
+            item: The QTreeWidgetItem to format.
+
+        Returns:
+            The tree visual prefix string.
+        """
+        if item.parent() is None:
+            return ""
+
+        parts = []
+
+        # Current item's visual marker
+        parent = item.parent()
+        if parent:
+            index = parent.indexOfChild(item)
+            is_last = index == parent.childCount() - 1
+            parts.append("└─ " if is_last else "├─ ")
+
+        # Ancestor visual markers (walk up to top-level parent)
+        curr = parent
+        while curr is not None and curr.parent() is not None:
+            ancestor_parent = curr.parent()
+            ancestor_index = ancestor_parent.indexOfChild(curr)
+            ancestor_is_last = ancestor_index == ancestor_parent.childCount() - 1
+            parts.insert(0, "   " if ancestor_is_last else "│  ")
+            curr = ancestor_parent
+
+        return "".join(parts)
+
+    def _find_closest_valid_ancestor(
+        self,
+        item: QTreeWidgetItem,
+        depth_limit: int,
+        checked_identifiers: set[str],
+    ) -> QTreeWidgetItem | None:
+        """Find the closest ancestor of an item that is checked and within the depth limit.
+
+        Args:
+            item: The QTreeWidgetItem to check.
+            depth_limit: The maximum depth allowed.
+            checked_identifiers: The set of all checked item identifiers.
+
+        Returns:
+            The closest valid parent QTreeWidgetItem, or None if not found.
+        """
+        curr = item.parent()
+        while curr is not None:
+            curr_id = curr.data(0, Qt.ItemDataRole.UserRole)
+            ancestor_depth = self._get_item_depth(curr)
+            if ancestor_depth <= depth_limit and curr_id in checked_identifiers:
+                return curr
+            curr = curr.parent()
+        return None
+
     def _get_markdown_selected_text(self):
         """Get selected text from markdown chapters"""
         all_checked_identifiers = set()
-        chapter_texts = []
 
         # Add metadata tags at the beginning
         metadata_tags = self._format_metadata_tags()
@@ -1669,19 +1814,54 @@ class HandlerDialog(QDialog):
 
         ordered_checked_items.sort(key=lambda x: x[0])
 
-        for order, item, identifier in ordered_checked_items:
-            text = self.content_texts.get(identifier)
-            if text and text.strip():
-                title = self._get_hierarchical_title(item)
+        checked_ids = {identifier for _, _, identifier in ordered_checked_items}
+        accumulated_texts = {}
+
+        # Initialize dictionary for checked items within depth limit
+        for _, item, _ in ordered_checked_items:
+            depth = self._get_item_depth(item)
+            if depth <= self.chapter_depth_limit:
+                accumulated_texts[id(item)] = []
+
+        # Distribute texts
+        for _, item, identifier in ordered_checked_items:
+            text = self.content_texts.get(identifier, "")
+            if not text or not text.strip():
+                continue
+
+            depth = self._get_item_depth(item)
+            if depth <= self.chapter_depth_limit:
+                accumulated_texts[id(item)].append(text)
+            else:
+                ancestor = self._find_closest_valid_ancestor(
+                    item, self.chapter_depth_limit, checked_ids
+                )
+                if ancestor and id(ancestor) in accumulated_texts:
+                    accumulated_texts[id(ancestor)].append(text)
+                else:
+                    accumulated_texts[id(item)] = [text]
+
+        chapter_texts = []
+        for _, item, identifier in ordered_checked_items:
+            if id(item) in accumulated_texts and accumulated_texts[id(item)]:
+                text_content = "\n\n".join(accumulated_texts[id(item)])
+                if self.chapter_visual_indentation:
+                    prefix = self._get_visual_prefix(item)
+                    title = item.text(0)
+                    title = _LEADING_DASH_PATTERN.sub("", title).strip()
+                    if title.endswith(" (Duplicate)"):
+                        title = title[:-12].strip()
+                    title = f"{prefix}{title}"
+                else:
+                    title = self._get_hierarchical_title(item)
                 marker = f"<<CHAPTER_MARKER:{title}>>"
-                chapter_texts.append(marker + "\n" + text)
+                chapter_texts.append(marker + "\n" + text_content)
 
         full_text = metadata_tags + "\n\n" + "\n\n".join(chapter_texts)
         return full_text, all_checked_identifiers
 
     def _get_epub_selected_text(self):
         all_checked_identifiers = set()
-        chapter_texts = []
 
         # Add metadata tags at the beginning
         metadata_tags = self._format_metadata_tags()
@@ -1702,12 +1882,48 @@ class HandlerDialog(QDialog):
 
         ordered_checked_items.sort(key=lambda x: x[0])
 
-        for order, item, identifier in ordered_checked_items:
-            text = self.content_texts.get(identifier)
-            if text and text.strip():
-                title = self._get_hierarchical_title(item)
+        checked_ids = {identifier for _, _, identifier in ordered_checked_items}
+        accumulated_texts = {}
+
+        # Initialize dictionary for checked items within depth limit
+        for _, item, _ in ordered_checked_items:
+            depth = self._get_item_depth(item)
+            if depth <= self.chapter_depth_limit:
+                accumulated_texts[id(item)] = []
+
+        # Distribute texts
+        for _, item, identifier in ordered_checked_items:
+            text = self.content_texts.get(identifier, "")
+            if not text or not text.strip():
+                continue
+
+            depth = self._get_item_depth(item)
+            if depth <= self.chapter_depth_limit:
+                accumulated_texts[id(item)].append(text)
+            else:
+                ancestor = self._find_closest_valid_ancestor(
+                    item, self.chapter_depth_limit, checked_ids
+                )
+                if ancestor and id(ancestor) in accumulated_texts:
+                    accumulated_texts[id(ancestor)].append(text)
+                else:
+                    accumulated_texts[id(item)] = [text]
+
+        chapter_texts = []
+        for _, item, identifier in ordered_checked_items:
+            if id(item) in accumulated_texts and accumulated_texts[id(item)]:
+                text_content = "\n\n".join(accumulated_texts[id(item)])
+                if self.chapter_visual_indentation:
+                    prefix = self._get_visual_prefix(item)
+                    title = item.text(0)
+                    title = _LEADING_DASH_PATTERN.sub("", title).strip()
+                    if title.endswith(" (Duplicate)"):
+                        title = title[:-12].strip()
+                    title = f"{prefix}{title}"
+                else:
+                    title = self._get_hierarchical_title(item)
                 marker = f"<<CHAPTER_MARKER:{title}>>"
-                chapter_texts.append(marker + "\n" + text)
+                chapter_texts.append(marker + "\n" + text_content)
 
         full_text = metadata_tags + "\n\n" + "\n\n".join(chapter_texts)
         return full_text, all_checked_identifiers
@@ -1779,8 +1995,12 @@ class HandlerDialog(QDialog):
                     if text:
                         title = item.text(0)
                         is_gap_page = bool(_GAP_PAGE_TITLE_PATTERN.match(title))
+                        depth = self._get_item_depth(item)
 
-                        if is_gap_page and current_chapter_idx >= 0:
+                        # Treat pages beyond depth limit as gap pages so they merge into active chapter
+                        should_start_new = not is_gap_page and (depth <= self.chapter_depth_limit)
+
+                        if not should_start_new and current_chapter_idx >= 0:
                             # Append to current active chapter
                             chapter_title, chapter_text = section_titles[
                                 current_chapter_idx
@@ -1791,10 +2011,19 @@ class HandlerDialog(QDialog):
                             )
                         else:
                             # Start a new chapter
-                            cleaned_title = self._get_hierarchical_title(item)
+                            if self.chapter_visual_indentation:
+                                prefix = self._get_visual_prefix(item)
+                                cleaned_title = item.text(0)
+                                cleaned_title = _LEADING_DASH_PATTERN.sub("", cleaned_title).strip()
+                                if cleaned_title.endswith(" (Duplicate)"):
+                                    cleaned_title = cleaned_title[:-12].strip()
+                                cleaned_title = f"{prefix}{cleaned_title}"
+                            else:
+                                cleaned_title = self._get_hierarchical_title(item)
                             marker = f"<<CHAPTER_MARKER:{cleaned_title}>>"
                             section_titles.append((cleaned_title, marker + "\n" + text))
                             current_chapter_idx = len(section_titles) - 1
+
 
                         included_text_ids.add(identifier)
             iterator += 1
@@ -1884,3 +2113,40 @@ class HandlerDialog(QDialog):
         if action is not None:
             action.triggered.connect(do_toggle)
         menu.exec(self.treeWidget.mapToGlobal(pos))
+
+    def on_visual_indent_changed(self, state: int) -> None:
+        """Handle change in chapter visual indentation setting.
+
+        Args:
+            state: The checkbox state.
+        """
+        self.chapter_visual_indentation = bool(state)
+        HandlerDialog._chapter_visual_indentation = self.chapter_visual_indentation
+
+    def on_depth_limit_changed(self, index: int) -> None:
+        """Handle change in the chapter depth limit setting.
+
+        Args:
+            index: The index of the selected item in the combobox.
+        """
+        limit = self.depth_limit_combo.itemData(index)
+        if limit is not None:
+            self.chapter_depth_limit = int(limit)
+            HandlerDialog._chapter_depth_limit = self.chapter_depth_limit
+
+    def get_chapter_visual_indentation(self) -> bool:
+        """Get the current chapter visual indentation setting.
+
+        Returns:
+            True if visual indentation is enabled, False otherwise.
+        """
+        return self.chapter_visual_indentation
+
+    def get_chapter_depth_limit(self) -> int:
+        """Get the current chapter depth limit setting.
+
+        Returns:
+            The depth limit integer value.
+        """
+        return self.chapter_depth_limit
+

@@ -1219,6 +1219,8 @@ class abogen(QWidget):
         )
         self.save_chapters_separately = None
         self.merge_chapters_at_end = None
+        self.chapter_visual_indentation = True
+        self.chapter_depth_limit = 99
         self.input_box_cleared_by_queue = False
         self.save_as_project = False
         self.pdf_has_bookmarks = False
@@ -2071,6 +2073,8 @@ class abogen(QWidget):
                 self.save_chapters_separately = dialog.get_save_chapters_separately()
                 self.merge_chapters_at_end = dialog.get_merge_chapters_at_end()
                 self.save_as_project = dialog.get_save_as_project()
+                self.chapter_visual_indentation = dialog.get_chapter_visual_indentation()
+                self.chapter_depth_limit = dialog.get_chapter_depth_limit()
 
                 # Store if the PDF has bookmarks for button text display
                 if book_path.lower().endswith(".pdf"):
@@ -2938,6 +2942,8 @@ class abogen(QWidget):
             save_chapters_separately=getattr(self, "save_chapters_separately", None),
             merge_chapters_at_end=getattr(self, "merge_chapters_at_end", None),
             m4b_aac_mode=getattr(self, "m4b_aac_mode", "aac_lc"),
+            chapter_visual_indentation=getattr(self, "chapter_visual_indentation", True),
+            chapter_depth_limit=getattr(self, "chapter_depth_limit", 99),
         )
 
         # Prevent adding duplicate items to the queue
@@ -2961,6 +2967,10 @@ class abogen(QWidget):
                 == item_queue.merge_chapters_at_end
                 and getattr(queued_item, "m4b_aac_mode", "aac_lc")
                 == item_queue.m4b_aac_mode
+                and getattr(queued_item, "chapter_visual_indentation", True)
+                == item_queue.chapter_visual_indentation
+                and getattr(queued_item, "chapter_depth_limit", 99)
+                == item_queue.chapter_depth_limit
             ):
                 QMessageBox.warning(
                     self, "Duplicate Item", "This item is already in the queue."
@@ -3114,6 +3124,8 @@ class abogen(QWidget):
                     save_chapters_separately=raw_item.get("save_chapters_separately"),
                     merge_chapters_at_end=raw_item.get("merge_chapters_at_end"),
                     m4b_aac_mode=raw_item.get("m4b_aac_mode", "aac_lc"),
+                    chapter_visual_indentation=raw_item.get("chapter_visual_indentation", True),
+                    chapter_depth_limit=raw_item.get("chapter_depth_limit", 99),
                     word_substitutions_enabled=raw_item.get(
                         "word_substitutions_enabled", False
                     ),
@@ -3247,6 +3259,12 @@ class abogen(QWidget):
             )
             self.merge_chapters_at_end = getattr(
                 queued_item, "merge_chapters_at_end", None
+            )
+            self.chapter_visual_indentation = getattr(
+                queued_item, "chapter_visual_indentation", True
+            )
+            self.chapter_depth_limit = getattr(
+                queued_item, "chapter_depth_limit", 99
             )
 
             # CHECK GLOBAL OVERRIDE SETTING

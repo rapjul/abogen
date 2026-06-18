@@ -834,6 +834,12 @@ class QueueManager(QDialog):
             attrs["merge_chapters_at_end"] = getattr(
                 parent, "merge_chapters_at_end", None
             )
+            attrs["chapter_visual_indentation"] = getattr(
+                parent, "chapter_visual_indentation", True
+            )
+            attrs["chapter_depth_limit"] = getattr(
+                parent, "chapter_depth_limit", 99
+            )
         else:
             # fallback: empty values
             attrs = {
@@ -996,6 +1002,8 @@ class QueueManager(QDialog):
         item.total_char_count = computed_char_count
         item.save_chapters_separately = dialog.get_save_chapters_separately()
         item.merge_chapters_at_end = dialog.get_merge_chapters_at_end()
+        item.chapter_visual_indentation = dialog.get_chapter_visual_indentation()
+        item.chapter_depth_limit = dialog.get_chapter_depth_limit()
         return item
 
     def _resolve_document_output_cache_dir(
@@ -1092,6 +1100,10 @@ class QueueManager(QDialog):
             == getattr(second, "save_chapters_separately", None)
             and getattr(first, "merge_chapters_at_end", None)
             == getattr(second, "merge_chapters_at_end", None)
+            and getattr(first, "chapter_visual_indentation", True)
+            == getattr(second, "chapter_visual_indentation", True)
+            and getattr(first, "chapter_depth_limit", 99)
+            == getattr(second, "chapter_depth_limit", 99)
         )
 
     def _resolve_duplicate_decision(

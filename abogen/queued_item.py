@@ -20,3 +20,5 @@ class QueuedItem:
     save_chapters_separately: bool | None = None
     merge_chapters_at_end: bool | None = None
     m4b_aac_mode: str = "aac_lc"
+    chapter_visual_indentation: bool = True
+    chapter_depth_limit: int = 99
