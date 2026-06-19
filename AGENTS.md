@@ -187,13 +187,60 @@ The script is **idempotent** — running it multiple times is safe.
 
 #### Current patches
 
-| Patch file                                  | Package     | Issue                                                                                                                                                                                                                                  |
-| ------------------------------------------- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `mlx_audio_kokoro_sine_gen_broadcast.patch` | `mlx-audio` | `[broadcast_shapes]` error in `SineGen.__call__` when the interpolation upsample cycle produces a length slightly different from `uv` (`565200` vs `565500`), and `noise_amp` shape `(B,T,1)` vs `sine_waves` shape `(B,T,9)` mismatch |
+##### `mlx_audio_kokoro_sine_gen_broadcast.patch` → `mlx-audio` ≥ 0.4.4
+
+**Bug:** `SineGen.__call__` in `mlx_audio/tts/models/kokoro/istftnet.py` crashes with a `[broadcast_shapes]` error for certain text lengths when using the MLX backend on Apple Silicon.
+
+Two separate shape mismatches:
+
+1. **Time-axis length mismatch** — `sine_waves` shape `(B, 565500, 9)` vs `uv`/`noise_amp` shape `(B, 565200, 1)`. The interpolation down-sample → cumsum → up-sample cycle in `_f02sine` introduces ≈300-frame rounding drift.
+2. **Harmonic-dimension mismatch** — `noise_amp` is `(B, T, 1)` (one value per frame) but the original code calls `mx.random.normal(sine_waves.shape)` which is `(B, T, 9)`, so the multiply fails.
+
+**Fix (this patch):**
+
+- Trim `sine_waves[:, :uv_len, :]` to match `uv`'s length before combining.
+- Generate noise with `noise_amp.shape` instead of `sine_waves.shape`; the `(B, T, 1)` tensor already broadcasts across the 9 harmonics.
+
+**Upstream status:** Not yet fixed as of `mlx-audio` 0.4.4 (verified 2026-06-18).
+Track: <https://github.com/Blaizzy/mlx-audio/blob/main/mlx_audio/tts/models/kokoro/istftnet.py>
+
+**How to check if the patch is still needed** (run after any `mlx-audio` upgrade):
+
+```bash
+python -c "
+import sys
+from pathlib import Path
+for p in sys.path:
+    f = Path(p) / 'mlx_audio/tts/models/kokoro/istftnet.py'
+    if f.exists():
+        src = f.read_text()
+        if 'mx.random.normal(sine_waves.shape)' in src:
+            print('PATCH STILL NEEDED (bug present in installed version)')
+        elif 'uv_len' in src or 'mx.random.normal(noise_amp.shape)' in src:
+            print('PATCH NO LONGER NEEDED (fix is now in the release)')
+        else:
+            print('CODE CHANGED SIGNIFICANTLY — manual review required')
+        break
+"
+```
+
+---
 
 #### Adding a new patch
 
 1. Make the fix in the installed venv file.
 2. Generate the patch: `diff -u original.py patched.py > patches/my_fix.patch`
 3. Add an entry to the `PATCHES` list in `scripts/apply_patches.py` with `patch`, `target`, and `sentinel` keys.
+4. Document the patch in a `##### ...` block in this section (bug, fix, upstream status, check command).
+
+#### Retiring a patch
+
+When the upstream package ships the fix in a released version:
+
+1. Run the per-patch check command above — it will print `PATCH NO LONGER NEEDED`.
+2. Bump the minimum version in `pyproject.toml` (e.g. `mlx-audio>=X.Y.Z`) to the fixed release.
+3. Delete the `.patch` file from `patches/`.
+4. Remove the corresponding entry from `PATCHES` in `scripts/apply_patches.py`.
+5. Remove the patch's `#####` documentation block from this section.
+6. Run `uv run apply-patches` and confirm it exits cleanly with no warnings.
 

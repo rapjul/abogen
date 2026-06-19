@@ -56,6 +56,24 @@ def _patch_already_applied(target: Path, sentinel: str) -> bool:
     return sentinel in target.read_text(encoding="utf-8")
 
 
+def _bug_fixed_upstream(target: Path, bug_absent: str) -> bool:
+    """Check whether the upstream package has shipped a fix by looking for the absence
+    of a string that only exists in the buggy version.
+
+    This is used to detect when a patch is no longer needed: if the installed file
+    no longer contains the known-bad code, the upstream package has fixed the bug.
+
+    Args:
+        target: Path to the installed file to inspect.
+        bug_absent: A string that is present in the buggy upstream code but would
+            be absent once the upstream package fixes the bug.
+
+    Returns:
+        ``True`` if the buggy string is gone (fix landed upstream).
+    """
+    return bug_absent not in target.read_text(encoding="utf-8")
+
+
 def _apply_patch(patch_file: Path, target: Path) -> bool:
     """Apply a unified-diff patch to ``target`` using the system ``patch`` command.
 
@@ -69,9 +87,9 @@ def _apply_patch(patch_file: Path, target: Path) -> bool:
     result = subprocess.run(
         [
             "patch",
-            "--forward",         # skip already-applied hunks instead of reversing
+            "--forward",  # skip already-applied hunks instead of reversing
             "--unified",
-            "--strip=1",         # strip one leading path component (a/ b/ prefix)
+            "--strip=1",  # strip one leading path component (a/ b/ prefix)
             str(target),
             str(patch_file),
         ],
@@ -92,16 +110,22 @@ def _apply_patch(patch_file: Path, target: Path) -> bool:
 # ---------------------------------------------------------------------------
 # Patch registry
 # Each entry is a dict with:
-#   patch:    path to the .patch file relative to the repo root
-#   target:   path to the installed file relative to site-packages root
-#   sentinel: a unique string that exists ONLY after the patch is applied
-#             (used to detect whether the patch has already been applied)
+#   patch:       path to the .patch file relative to the repo root
+#   target:      path to the installed file relative to site-packages root
+#   sentinel:    a unique string that exists ONLY after the patch is applied
+#                (used to detect whether the patch has already been applied)
+#   bug_absent:  a string present in the BUGGY upstream code that would
+#                disappear once the upstream package ships the fix;
+#                used to detect when this patch can be retired
 # ---------------------------------------------------------------------------
 PATCHES: list[dict] = [
     {
         "patch": "patches/mlx_audio_kokoro_sine_gen_broadcast.patch",
         "target": "mlx_audio/tts/models/kokoro/istftnet.py",
         "sentinel": "# Trim sine_waves to match uv's time-axis length.",
+        # This exact line is only present in the unfixed upstream source;
+        # its absence signals that mlx-audio has shipped the fix.
+        "bug_absent": "noise = noise_amp * mx.random.normal(sine_waves.shape)",
     },
 ]
 
@@ -109,16 +133,21 @@ PATCHES: list[dict] = [
 def main() -> int:
     """Apply all registered patches and return an exit code.
 
+    Also checks each patch's ``bug_absent`` string to detect when an upstream
+    release has shipped the fix, so the patch can be retired.
+
     Returns:
         0 if all patches applied (or were already applied) successfully,
         1 if any patch failed.
     """
     repo_root = Path(__file__).resolve().parent.parent
     all_ok = True
+    retirement_notices: list[str] = []
 
     for entry in PATCHES:
         patch_file = repo_root / entry["patch"]
         sentinel: str = entry["sentinel"]
+        bug_absent: str | None = entry.get("bug_absent")
 
         if not patch_file.exists():
             print(f"[WARN] Patch file not found: {patch_file}")
@@ -132,6 +161,16 @@ def main() -> int:
             )
             continue
 
+        # Check whether the upstream package has silently fixed the bug.
+        # If the buggy line is gone from a freshly-installed (unpatched) file,
+        # the upstream release now includes the fix and this patch can be removed.
+        if bug_absent and not _patch_already_applied(target, sentinel):
+            if _bug_fixed_upstream(target, bug_absent):
+                retirement_notices.append(
+                    f"  {patch_file.name}: the bug is gone from the upstream release.\n"
+                    f"  You can retire this patch — see §5 Dependency Patches in AGENTS.md."
+                )
+
         if _patch_already_applied(target, sentinel):
             print(f"[OK]   Already applied: {patch_file.name} → {target}")
             continue
@@ -142,6 +181,15 @@ def main() -> int:
         else:
             print(f"[FAIL] Failed:   {patch_file.name} → {target}", file=sys.stderr)
             all_ok = False
+
+    if retirement_notices:
+        print()
+        print("╔══════════════════════════════════════════════════════════════╗")
+        print("║  PATCH RETIREMENT NOTICE                                     ║")
+        print("║  One or more patches may no longer be needed:                ║")
+        print("╚══════════════════════════════════════════════════════════════╝")
+        for notice in retirement_notices:
+            print(notice)
 
     return 0 if all_ok else 1
 
