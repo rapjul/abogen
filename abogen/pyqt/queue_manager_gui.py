@@ -1472,9 +1472,17 @@ class QueueManager(QDialog):
         menu.exec(global_pos)
 
     def accept(self):
-        # Save the override state to config so it persists globally
+        # Save the override state to config so it persists globally.
         self.config["queue_override_settings"] = self.override_chk.isChecked()
         save_config(self.config)
+
+        # Commit the current visual row order (e.g. after a column sort) back to
+        # self.queue so the caller receives items in the order shown in the table.
+        # _queue_items_in_current_view() reads rows top-to-bottom in their
+        # display order, which reflects any active sort indicator.
+        view_items, _ = self._queue_items_in_current_view()
+        if view_items:
+            self.queue[:] = view_items
 
         super().accept()
 
