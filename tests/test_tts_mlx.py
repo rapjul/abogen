@@ -319,14 +319,12 @@ class TestMLXKokoroPipelineCall(unittest.TestCase):
             list(pipeline("text", voice="af_heart*0.5+am_adam*0.5"))
 
         call_kwargs = mock_model.generate.call_args
-        used_voice: str = (
-            call_kwargs.kwargs.get("voice") or call_kwargs.args[1]
-            if call_kwargs.args
-            else ""
+        used_voice = (
+            call_kwargs.kwargs.get("voice")
+            if call_kwargs.kwargs and "voice" in call_kwargs.kwargs
+            else (call_kwargs.args[1] if call_kwargs.args and len(call_kwargs.args) > 1 else "")
         )
-        # The formula should have been reduced to "af_heart"
-        if call_kwargs.kwargs.get("voice"):
-            self.assertEqual(call_kwargs.kwargs["voice"], "af_heart")
+        self.assertEqual(used_voice, "af_heart")
 
     def test_none_audio_segments_are_skipped(self) -> None:
         """Results without an 'audio' attribute should be silently skipped."""

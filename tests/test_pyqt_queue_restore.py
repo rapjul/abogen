@@ -122,7 +122,7 @@ def test_queue_completion_clears_queue(tmp_path: Path, monkeypatch) -> None:
 
     # Create window instance stub
     window: gui_module.abogen = gui_module.abogen.__new__(gui_module.abogen)
-    
+
     file_a = tmp_path / "test_file_a.txt"
     file_a.write_text("Hello A")
 
@@ -174,4 +174,3 @@ def test_queue_completion_clears_queue(tmp_path: Path, monkeypatch) -> None:
     # The save file should have been deleted (since is_completed is True)
     save_file = settings_dir / "last_queue.json"
     assert not save_file.exists()
-

@@ -2073,7 +2073,9 @@ class abogen(QWidget):
                 self.save_chapters_separately = dialog.get_save_chapters_separately()
                 self.merge_chapters_at_end = dialog.get_merge_chapters_at_end()
                 self.save_as_project = dialog.get_save_as_project()
-                self.chapter_visual_indentation = dialog.get_chapter_visual_indentation()
+                self.chapter_visual_indentation = (
+                    dialog.get_chapter_visual_indentation()
+                )
                 self.chapter_depth_limit = dialog.get_chapter_depth_limit()
 
                 # Store if the PDF has bookmarks for button text display
@@ -2942,7 +2944,9 @@ class abogen(QWidget):
             save_chapters_separately=getattr(self, "save_chapters_separately", None),
             merge_chapters_at_end=getattr(self, "merge_chapters_at_end", None),
             m4b_aac_mode=getattr(self, "m4b_aac_mode", "aac_lc"),
-            chapter_visual_indentation=getattr(self, "chapter_visual_indentation", True),
+            chapter_visual_indentation=getattr(
+                self, "chapter_visual_indentation", True
+            ),
             chapter_depth_limit=getattr(self, "chapter_depth_limit", 99),
         )
 
@@ -3124,7 +3128,9 @@ class abogen(QWidget):
                     save_chapters_separately=raw_item.get("save_chapters_separately"),
                     merge_chapters_at_end=raw_item.get("merge_chapters_at_end"),
                     m4b_aac_mode=raw_item.get("m4b_aac_mode", "aac_lc"),
-                    chapter_visual_indentation=raw_item.get("chapter_visual_indentation", True),
+                    chapter_visual_indentation=raw_item.get(
+                        "chapter_visual_indentation", True
+                    ),
                     chapter_depth_limit=raw_item.get("chapter_depth_limit", 99),
                     word_substitutions_enabled=raw_item.get(
                         "word_substitutions_enabled", False
@@ -3263,9 +3269,7 @@ class abogen(QWidget):
             self.chapter_visual_indentation = getattr(
                 queued_item, "chapter_visual_indentation", True
             )
-            self.chapter_depth_limit = getattr(
-                queued_item, "chapter_depth_limit", 99
-            )
+            self.chapter_depth_limit = getattr(queued_item, "chapter_depth_limit", 99)
 
             # CHECK GLOBAL OVERRIDE SETTING
             if not self.config.get("queue_override_settings", False):

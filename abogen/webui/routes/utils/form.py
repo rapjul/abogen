@@ -88,7 +88,12 @@ _SUPPLEMENT_TITLE_PATTERNS: List[tuple[re.Pattern[str], float]] = [
     (re.compile(r"^(the\s+|a\s+|an\s+)?map(s)?(\s+\d+|\s+[a-z])?$"), 1.5),
     (re.compile(r"^map(s)?\s+of\s+\w+(\s+\w+){0,3}$"), 1.5),
     (re.compile(r"\blist\s+of\s+map(s)?\b"), 2.0),
-    (re.compile(r"\b(world|realm|area|city|county|location|town|land|continent)\s+map(s)?\b"), 1.2),
+    (
+        re.compile(
+            r"\b(world|realm|area|city|county|location|town|land|continent)\s+map(s)?\b"
+        ),
+        1.2,
+    ),
 ]
 
 _CONTENT_TITLE_PATTERNS: List[re.Pattern[str]] = [

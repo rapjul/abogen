@@ -837,9 +837,7 @@ class QueueManager(QDialog):
             attrs["chapter_visual_indentation"] = getattr(
                 parent, "chapter_visual_indentation", True
             )
-            attrs["chapter_depth_limit"] = getattr(
-                parent, "chapter_depth_limit", 99
-            )
+            attrs["chapter_depth_limit"] = getattr(parent, "chapter_depth_limit", 99)
         else:
             # fallback: empty values
             attrs = {
