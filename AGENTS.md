@@ -68,7 +68,7 @@ uv tool install --compile-bytecode .[mlx]
 > ```bash
 > uv run apply-patches
 > # or when using a dev venv:
-> python scripts/apply_patches.py
+> python abogen/scripts/apply_patches.py
 > ```
 >
 > Patches live in [`patches/`](./patches/) and are idempotent (safe to re-run).
@@ -168,12 +168,12 @@ For macOS ARM64 systems, `abogen` leverages the MLX framework via `mlx-audio` fo
 
 ### 5. Dependency Patches
 
-Some upstream packages contain bugs that have not yet been fixed in a released version. Rather than maintaining a full fork, `abogen` stores minimal unified-diff patch files in [`patches/`](./patches/) and applies them post-install via [`scripts/apply_patches.py`](./scripts/apply_patches.py).
+Some upstream packages contain bugs that have not yet been fixed in a released version. Rather than maintaining a full fork, `abogen` stores minimal unified-diff patch files in [`patches/`](./patches/) and applies them post-install via [`abogen/apply_patches.py`](./abogen/apply_patches.py).
 
 #### How it works
 
 1. **Patch files** (`patches/*.patch`) — standard unified-diff format targeting installed package files.
-2. **Apply script** (`scripts/apply_patches.py`) — locates each package file via `sys.path`, checks idempotently via a sentinel string, and applies the diff with the system `patch` command.
+2. **Apply script** (`abogen/apply_patches.py`) — locates each package file via `sys.path`, checks idempotently via a sentinel string, and applies the diff with the system `patch` command.
 3. **`uv` entry point** — `apply-patches` is registered in `[project.scripts]` so `uv run apply-patches` works inside any managed environment.
 
 #### When to run
@@ -230,7 +230,7 @@ for p in sys.path:
 
 1. Make the fix in the installed venv file.
 2. Generate the patch: `diff -u original.py patched.py > patches/my_fix.patch`
-3. Add an entry to the `PATCHES` list in `scripts/apply_patches.py` with `patch`, `target`, and `sentinel` keys.
+3. Add an entry to the `PATCHES` list in `abogen/apply_patches.py` with `patch`, `target`, and `sentinel` keys.
 4. Document the patch in a `##### ...` block in this section (bug, fix, upstream status, check command).
 
 #### Retiring a patch
@@ -240,7 +240,7 @@ When the upstream package ships the fix in a released version:
 1. Run the per-patch check command above — it will print `PATCH NO LONGER NEEDED`.
 2. Bump the minimum version in `pyproject.toml` (e.g. `mlx-audio>=X.Y.Z`) to the fixed release.
 3. Delete the `.patch` file from `patches/`.
-4. Remove the corresponding entry from `PATCHES` in `scripts/apply_patches.py`.
+4. Remove the corresponding entry from `PATCHES` in `abogen/apply_patches.py`.
 5. Remove the patch's `#####` documentation block from this section.
 6. Run `uv run apply-patches` and confirm it exits cleanly with no warnings.
 
