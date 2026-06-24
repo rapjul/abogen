@@ -3848,13 +3848,13 @@ class abogen(QWidget):
                 and self.queued_items
                 and not self.queue_cancel_summary_shown
             ):
+                self.queue_cancel_summary_shown = True
                 # Ensure model released before showing cancellation summary
                 try:
                     self.purge_tts_model()
                     QApplication.processEvents()
                 except Exception:
                     pass
-                self.queue_cancel_summary_shown = True
                 self.show_queue_summary(outcome="cancelled")
             self.queue_run_active = False
             self.save_current_queue_state()
@@ -4682,13 +4682,13 @@ class abogen(QWidget):
                     )
                 self.queue_last_outcome = "cancelled"
                 if not self.queue_cancel_summary_shown:
+                    self.queue_cancel_summary_shown = True
                     # Ensure model released before showing cancellation summary
                     try:
                         self.purge_tts_model()
                         QApplication.processEvents()
                     except Exception:
                         pass
-                    self.queue_cancel_summary_shown = True
                     self.show_queue_summary(outcome="cancelled")
 
             prevent_sleep_end()
