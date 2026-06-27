@@ -1864,16 +1864,6 @@ class abogen(QWidget):
         self.progress_bar.hide()
         container_layout.addWidget(self.progress_bar)
 
-        # First separator
-        self.conversion_sep1 = QFrame(self)
-        self.conversion_sep1.setFrameShape(QFrame.Shape.HLine)
-        self.conversion_sep1.setFrameShadow(QFrame.Shadow.Sunken)
-        self.conversion_sep1.setStyleSheet(
-            "background-color: #333; margin-top: 15px; margin-bottom: 5px;"
-        )
-        self.conversion_sep1.hide()
-        container_layout.addWidget(self.conversion_sep1)
-
         # Current book title label
         self.current_book_label = ElidedLabel("", self)
         self.current_book_label.setStyleSheet(
@@ -1882,6 +1872,16 @@ class abogen(QWidget):
         self.current_book_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.current_book_label.hide()
         container_layout.addWidget(self.current_book_label)
+
+        # First separator (placed before chapter progress section)
+        self.conversion_sep1 = QFrame(self)
+        self.conversion_sep1.setFrameShape(QFrame.Shape.HLine)
+        self.conversion_sep1.setFrameShadow(QFrame.Shadow.Sunken)
+        self.conversion_sep1.setStyleSheet(
+            "background-color: #333; margin-top: 15px; margin-bottom: 5px;"
+        )
+        self.conversion_sep1.hide()
+        container_layout.addWidget(self.conversion_sep1)
 
         # Chapter progress section
         self.chapter_progress_label = QLabel("<b>Chapter Progress</b>", self)
@@ -1900,7 +1900,15 @@ class abogen(QWidget):
         self.chapter_progress_bar.hide()
         container_layout.addWidget(self.chapter_progress_bar)
 
-        # Second separator
+        self.current_chapter_label = ElidedLabel("", self)
+        self.current_chapter_label.setStyleSheet(
+            "font-style: italic; color: #777; margin-top: 2px;"
+        )
+        self.current_chapter_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.current_chapter_label.hide()
+        container_layout.addWidget(self.current_chapter_label)
+
+        # Second separator (placed after current chapter label, before ETR/elapsed labels)
         self.conversion_sep2 = QFrame(self)
         self.conversion_sep2.setFrameShape(QFrame.Shape.HLine)
         self.conversion_sep2.setFrameShadow(QFrame.Shadow.Sunken)
@@ -1910,13 +1918,6 @@ class abogen(QWidget):
         self.conversion_sep2.hide()
         container_layout.addWidget(self.conversion_sep2)
 
-        self.current_chapter_label = ElidedLabel("", self)
-        self.current_chapter_label.setStyleSheet(
-            "font-style: italic; color: #777; margin-top: 2px;"
-        )
-        self.current_chapter_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.current_chapter_label.hide()
-        container_layout.addWidget(self.current_chapter_label)
         # ETR Label
         self.etr_label = QLabel("Estimated time remaining: Calculating...", self)
         self.etr_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -2859,7 +2860,7 @@ class abogen(QWidget):
         if completed >= total:
             self.current_chapter_label.setText("All selected chapters processed")
         else:
-            safe_chapter_name = html.escape(str(chapter_name))
+            safe_chapter_name = html.unescape(str(chapter_name))
             self.current_chapter_label.setText(f"Current chapter: {safe_chapter_name}")
         self.chapter_progress_label.show()
         self.chapter_progress_bar.show()
