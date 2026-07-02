@@ -777,7 +777,12 @@ class ConversionThread(QThread):
         if current != untouched_defaults:
             return
 
-        if device == "mps":
+        if self.__dict__.get("use_mlx_backend", False):
+            # MLX Kokoro uses a single Metal dispatch for the entire chunk.
+            # Due to the macOS 2-5s watchdog limit, chunks > 600-700 chars
+            # consistently trigger kIOGPUCommandBufferCallbackErrorTimeout on Apple Silicon.
+            tuned = BatchSizeProfile(150, 320, 600)
+        elif device == "mps":
             total_memory_gb = self._get_total_memory_gb()
             # Kokoro's quality sweet spot is ~100-250 tokens (~400-1000 chars).
             # Chunks beyond ~250 tokens exhibit diminishing prosody quality and
