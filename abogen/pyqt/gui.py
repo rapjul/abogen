@@ -1928,12 +1928,30 @@ class abogen(QWidget):
         self.elapsed_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.elapsed_label.hide()
         container_layout.addWidget(self.elapsed_label)
+
+        # Cancel buttons layout
+        self.cancel_buttons_widget = QWidget(self)
+        cancel_buttons_layout = QHBoxLayout(self.cancel_buttons_widget)
+        cancel_buttons_layout.setContentsMargins(0, 0, 0, 0)
+
         # Cancel button
         self.btn_cancel = QPushButton("Cancel", self)
         self.btn_cancel.setFixedHeight(60)
         self.btn_cancel.clicked.connect(self.cancel_conversion)
-        self.btn_cancel.hide()
-        container_layout.addWidget(self.btn_cancel)
+
+        # Stop queue after current item button
+        self.btn_stop_queue_next = QPushButton("Stop Queue\nAfter Current Item", self)
+        self.btn_stop_queue_next.setFixedHeight(60)
+        self.btn_stop_queue_next.setFixedWidth(140)
+        self.btn_stop_queue_next.setCheckable(True)
+        self.btn_stop_queue_next.clicked.connect(self.stop_queue_after_current_item)
+
+        cancel_buttons_layout.addWidget(self.btn_cancel)
+        cancel_buttons_layout.addWidget(self.btn_stop_queue_next)
+
+        self.cancel_buttons_widget.hide()
+        container_layout.addWidget(self.cancel_buttons_widget)
+
         # Finish buttons
         self.finish_widget = QWidget()
         finish_layout = QVBoxLayout()
@@ -2857,6 +2875,7 @@ class abogen(QWidget):
         # Disable cancel button if progress is >= 98%
         if value >= 98:
             self.btn_cancel.setEnabled(False)
+            self.btn_stop_queue_next.setEnabled(False)
 
         self.progress_bar.repaint()
         QApplication.processEvents()
@@ -3282,6 +3301,7 @@ class abogen(QWidget):
         self.queue_run_active = True
         self.queue_last_outcome = None
         self.queue_cancel_summary_shown = False
+        self.stop_queue_flag = False
         # Set progress bar to 0% (1/M) immediately
         if self.queued_items:
             overall_percent = self._get_queue_progress_format(0)
@@ -3402,6 +3422,14 @@ class abogen(QWidget):
         # Called after each conversion finishes
         self.current_queue_index += 1
         self.save_current_queue_state()
+
+        if getattr(self, "stop_queue_flag", False):
+            self.queue_run_active = False
+            self.stop_queue_flag = False
+            self.show_queue_summary(outcome="stopped")
+            self.enable_disable_queue_buttons()
+            return
+
         if self.current_queue_index < len(self.queued_items):
             self.start_next_queued_item()
         else:
@@ -3533,7 +3561,12 @@ class abogen(QWidget):
         self.queue_row_widget.hide()  # Hide queue row when process starts
         self.progress_bar.show()
         self.btn_cancel.show()
-        QApplication.processEvents()
+        self.cancel_buttons_widget.show()
+        self.btn_stop_queue_next.setVisible(self.queue_run_active)
+        self.btn_stop_queue_next.setEnabled(True)
+        self.btn_stop_queue_next.setChecked(False)
+        self.btn_stop_queue_next.setText("Stop Queue\nAfter Current Item")
+
         self.btn_cancel.setEnabled(False)
 
         # Record memory baseline if starting a new queue
@@ -3560,6 +3593,7 @@ class abogen(QWidget):
                 return
 
             self.btn_cancel.setEnabled(True)
+            self.btn_stop_queue_next.setEnabled(True)
 
             # Override subtitle_mode to "Disabled" if subtitle_combo is disabled
             actual_subtitle_mode = self.get_actual_subtitle_mode()
@@ -3706,6 +3740,7 @@ class abogen(QWidget):
             "completed": "Queue finished",
             "cancelled": "Queue cancelled",
             "failed": "Queue stopped (failure)",
+            "stopped": "Queue stopped (by user)",
         }
         header_text = outcome_label_map.get(outcome, "Queue finished")
         if override_active:
@@ -3873,7 +3908,7 @@ class abogen(QWidget):
             self.chapter_progress_bar.hide()
             self.conversion_sep2.hide()
             self.current_chapter_label.hide()
-            self.btn_cancel.hide()
+            self.cancel_buttons_widget.hide()
             self.is_converting = False
             self.controls_widget.show()
             self.finish_widget.hide()
@@ -3946,7 +3981,7 @@ class abogen(QWidget):
             self.chapter_progress_bar.hide()
             self.conversion_sep2.hide()
             self.current_chapter_label.hide()
-            self.btn_cancel.hide()
+            self.cancel_buttons_widget.hide()
             self.is_converting = False
             self.controls_widget.show()
             self.finish_widget.hide()
@@ -4014,7 +4049,7 @@ class abogen(QWidget):
         self.chapter_progress_label.hide()
         self.conversion_sep2.hide()
         self.current_chapter_label.hide()
-        self.btn_cancel.hide()
+        self.cancel_buttons_widget.hide()
         self.is_converting = False
         elapsed = int(time.time() - self.start_time)
         h, m, s = elapsed // 3600, (elapsed % 3600) // 60, elapsed % 60
@@ -4661,6 +4696,15 @@ class abogen(QWidget):
         self._show_error_message_box("Preview Error", f"Preview error: {msg}")
         self._preview_cleanup()
 
+    def stop_queue_after_current_item(self):
+        """Stop queue after current item"""
+        if self.btn_stop_queue_next.isChecked():
+            self.stop_queue_flag = True
+            self.btn_stop_queue_next.setText("Stopping after\nthis item...")
+        else:
+            self.stop_queue_flag = False
+            self.btn_stop_queue_next.setText("Stop Queue\nAfter Current Item")
+
     def cancel_conversion(self):
         is_thread_running = (
             hasattr(self, "conversion_thread") and self.conversion_thread.isRunning()
@@ -4701,7 +4745,7 @@ class abogen(QWidget):
             self.chapter_progress_label.hide()
             self.chapter_progress_bar.hide()
             self.conversion_sep2.hide()
-            self.btn_cancel.hide()
+            self.cancel_buttons_widget.hide()
             self.controls_widget.show()
             self.queue_row_widget.show()  # Show queue row on cancel
             self.finish_widget.hide()
