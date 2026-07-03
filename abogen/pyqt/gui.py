@@ -3220,6 +3220,8 @@ class abogen(QWidget):
                     ),
                     output_path=raw_item.get("output_path"),
                     logs=raw_item.get("logs"),
+                    chunk_suffix=raw_item.get("chunk_suffix", ""),
+                    save_chunks_in_folder_name=raw_item.get("save_chunks_in_folder_name"),
                 )
 
                 # Determine display name
