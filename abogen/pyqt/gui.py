@@ -3183,46 +3183,16 @@ class abogen(QWidget):
                 # Check if this item is completed
                 is_completed = idx < saved_index
 
-                item = QueuedItem(
-                    file_name=raw_item.get("file_name"),
-                    lang_code=raw_item.get("lang_code"),
-                    speed=raw_item.get("speed"),
-                    voice=raw_item.get("voice"),
-                    save_option=raw_item.get("save_option"),
-                    output_folder=raw_item.get("output_folder"),
-                    subtitle_mode=raw_item.get("subtitle_mode"),
-                    output_format=raw_item.get("output_format"),
-                    total_char_count=raw_item.get("total_char_count"),
-                    replace_single_newlines=raw_item.get(
-                        "replace_single_newlines", True
-                    ),
-                    use_silent_gaps=raw_item.get("use_silent_gaps", False),
-                    subtitle_speed_method=raw_item.get("subtitle_speed_method", "tts"),
-                    save_base_path=raw_item.get("save_base_path"),
-                    save_chapters_separately=raw_item.get("save_chapters_separately"),
-                    merge_chapters_at_end=raw_item.get("merge_chapters_at_end"),
-                    m4b_aac_mode=raw_item.get("m4b_aac_mode", "aac_lc"),
-                    chapter_visual_indentation=raw_item.get(
-                        "chapter_visual_indentation", True
-                    ),
-                    chapter_depth_limit=raw_item.get("chapter_depth_limit", 99),
-                    word_substitutions_enabled=raw_item.get(
-                        "word_substitutions_enabled", False
-                    ),
-                    word_substitutions_list=raw_item.get("word_substitutions_list", ""),
-                    case_sensitive_substitutions=raw_item.get(
-                        "case_sensitive_substitutions", False
-                    ),
-                    replace_all_caps=raw_item.get("replace_all_caps", False),
-                    replace_numerals=raw_item.get("replace_numerals", False),
-                    fix_nonstandard_punctuation=raw_item.get(
-                        "fix_nonstandard_punctuation", False
-                    ),
-                    output_path=raw_item.get("output_path"),
-                    logs=raw_item.get("logs"),
-                    chunk_suffix=raw_item.get("chunk_suffix", ""),
-                    save_chunks_in_folder_name=raw_item.get("save_chunks_in_folder_name"),
-                )
+                import dataclasses
+
+                item_kwargs = {}
+                for field in dataclasses.fields(QueuedItem):
+                    if field.name in raw_item:
+                        item_kwargs[field.name] = raw_item[field.name]
+                    elif field.default == dataclasses.MISSING and field.default_factory == dataclasses.MISSING:
+                        item_kwargs[field.name] = None
+
+                item = QueuedItem(**item_kwargs)
 
                 # Determine display name
                 display_name = file_path.name
