@@ -15,7 +15,6 @@ from PyQt6.QtCore import (
     pyqtSignal,
 )
 from PyQt6.QtGui import QMovie
-from PyQt6.QtWidgets import QSpinBox
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -26,6 +25,7 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QMenu,
     QPushButton,
+    QSpinBox,
     QSplitter,
     QTextEdit,
     QTreeWidget,
