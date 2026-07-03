@@ -710,6 +710,10 @@ def test_run_configuration_chapter_flags_follow_current_behavior(monkeypatch) ->
 
 def test_resolve_output_parent_dir_save_to_desktop(monkeypatch) -> None:
     worker = ConversionThread.__new__(ConversionThread)
+    try:
+        super(ConversionThread, worker).__init__()
+    except Exception:
+        pass
     worker.save_option = "Save to Desktop"
     worker.output_folder = None
 
@@ -722,6 +726,10 @@ def test_resolve_output_parent_dir_save_to_desktop(monkeypatch) -> None:
 
 def test_resolve_output_parent_dir_next_to_input() -> None:
     worker = ConversionThread.__new__(ConversionThread)
+    try:
+        super(ConversionThread, worker).__init__()
+    except Exception:
+        pass
     worker.save_option = "Save next to input file"
     worker.output_folder = "/tmp/ignored"
 

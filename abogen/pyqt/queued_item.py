@@ -31,6 +31,8 @@ class QueuedItem:
     logs: list | None = None
     chapter_visual_indentation: bool = True
     chapter_depth_limit: int = 99
+    chunk_suffix: str = ""
+    save_chunks_in_folder_name: str | None = None
 
     def __post_init__(self):
         if self.logs is None:

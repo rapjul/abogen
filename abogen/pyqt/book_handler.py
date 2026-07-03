@@ -15,6 +15,7 @@ from PyQt6.QtCore import (
     pyqtSignal,
 )
 from PyQt6.QtGui import QMovie
+from PyQt6.QtWidgets import QSpinBox
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -747,6 +748,32 @@ class HandlerDialog(QDialog):
             self.on_merge_chapters_changed
         )
         leftLayout.addWidget(self.merge_chapters_checkbox)
+
+        self.split_book_checkbox = QCheckBox("Split book into multiple chunks", self)
+        self.split_book_checkbox.setToolTip("Divide the selected items into smaller, separate books for quicker conversion.")
+        self.split_chapters_spinbox = QSpinBox(self)
+        self.split_chapters_spinbox.setMinimum(1)
+        self.split_chapters_spinbox.setMaximum(1000)
+        self.split_chapters_spinbox.setValue(10)
+        self.split_chapters_spinbox.setSuffix(f" {item_type} per chunk")
+        self.split_chapters_spinbox.setEnabled(False)
+        self.split_book_checkbox.stateChanged.connect(
+            lambda state: self.split_chapters_spinbox.setEnabled(state == Qt.CheckState.Checked.value)
+        )
+
+        split_layout = QHBoxLayout()
+        split_layout.addWidget(self.split_book_checkbox)
+        split_layout.addWidget(self.split_chapters_spinbox)
+        split_layout.addStretch()
+        leftLayout.addLayout(split_layout)
+
+        self.save_chunks_in_folder_checkbox = QCheckBox("Save chunks in a folder named after the story", self)
+        self.save_chunks_in_folder_checkbox.setToolTip("Keeps all the chunks grouped together in a single folder.")
+        self.save_chunks_in_folder_checkbox.setEnabled(False)
+        self.split_book_checkbox.stateChanged.connect(
+            lambda state: self.save_chunks_in_folder_checkbox.setEnabled(state == Qt.CheckState.Checked.value)
+        )
+        leftLayout.addWidget(self.save_chunks_in_folder_checkbox)
 
         self.save_as_project_checkbox = QCheckBox(
             "Save in a project folder with metadata", self
@@ -1736,11 +1763,46 @@ class HandlerDialog(QDialog):
             pass
 
         if self.parser.file_type == "epub":
-            return self._get_epub_selected_text()
+            full_text, identifiers = self._get_epub_selected_text()
         elif self.parser.file_type == "markdown":
-            return self._get_markdown_selected_text()
+            full_text, identifiers = self._get_markdown_selected_text()
         else:
-            return self._get_pdf_selected_text()
+            full_text, identifiers = self._get_pdf_selected_text()
+
+        if not self.get_split_book():
+            return [(full_text, "")], identifiers
+
+        import re
+        parts = full_text.split("<<CHAPTER_MARKER:")
+
+        if len(parts) <= 1:
+            return [(full_text, "")], identifiers
+
+        metadata_block = parts[0]
+        # Clean title using regex removing {To Ch...}
+        metadata_block = re.sub(r'(<<METADATA_TITLE:[^>]+?)\s*\{To Ch[^}]*\}', r'\1', metadata_block)
+        metadata_block = re.sub(r'(<<METADATA_ALBUM:[^>]+?)\s*\{To Ch[^}]*\}', r'\1', metadata_block)
+
+        chapters = ["<<CHAPTER_MARKER:" + p for p in parts[1:]]
+
+        chunk_size = self.get_split_chapters_count()
+        chunks = []
+
+        for i in range(0, len(chapters), chunk_size):
+            chunk_chapters = chapters[i:i + chunk_size]
+            chunk_text = metadata_block + "".join(chunk_chapters)
+
+            start_ch = i + 1
+            end_ch = min(i + chunk_size, len(chapters))
+
+            if start_ch == end_ch:
+                suffix = f" {{Ch {start_ch}}}"
+            else:
+                suffix = f" {{Ch {start_ch}-{end_ch}}}"
+
+            chunks.append((chunk_text, suffix))
+
+        return chunks, identifiers
 
     def _format_metadata_tags(self):
         """Format metadata tags for insertion at the beginning of the text"""
@@ -2222,6 +2284,19 @@ class HandlerDialog(QDialog):
 
     def get_merge_chapters_at_end(self):
         return self.merge_chapters_at_end
+
+    def get_split_book(self):
+        return self.split_book_checkbox.isChecked()
+
+    def get_split_chapters_count(self):
+        return self.split_chapters_spinbox.value()
+
+    def get_chapter_depth_limit(self):
+        return self.chapter_depth_limit
+
+    def get_save_chunks_in_folder(self):
+        return self.save_chunks_in_folder_checkbox.isChecked()
+
 
     def get_save_as_project(self):
         return self.save_as_project

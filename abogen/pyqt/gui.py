@@ -2052,7 +2052,7 @@ class abogen(QWidget):
             if result != QDialog.DialogCode.Accepted:
                 return False
             try:
-                chapters_text, all_checked_hrefs = dialog.get_selected_text()
+                chunks, all_checked_hrefs = dialog.get_selected_text()
                 if not all_checked_hrefs:
                     # Determine file type for error message
                     if book_path.lower().endswith(".pdf"):
@@ -2078,16 +2078,22 @@ class abogen(QWidget):
                     dialog.get_chapter_visual_indentation()
                 )
                 self.chapter_depth_limit = dialog.get_chapter_depth_limit()
+                self.save_chunks_in_folder = getattr(dialog, "get_save_chunks_in_folder", lambda: False)()
 
                 # Store if the PDF has bookmarks for button text display
                 if book_path.lower().endswith(".pdf"):
                     self.pdf_has_bookmarks = getattr(dialog, "has_pdf_bookmarks", False)
 
-                cleaned_text = clean_text(chapters_text)
-                computed_char_count = calculate_text_length(cleaned_text)
-                self.char_count = computed_char_count
+                self.selected_files_to_queue = []
+                total_char_count = 0
+                for chunk_text, chunk_suffix in chunks:
+                    cleaned_text = clean_text(chunk_text)
+                    c_count = calculate_text_length(cleaned_text)
+                    total_char_count += c_count
+
+                self.char_count = total_char_count
                 if isinstance(getattr(self, "_char_count_cache", None), dict):
-                    self._char_count_cache[book_path] = computed_char_count
+                    self._char_count_cache[book_path] = total_char_count
 
                 # Use "abogen" prefix for cache files
                 # Extract base name without extension
@@ -2188,17 +2194,28 @@ class abogen(QWidget):
                 else:
                     cache_dir = get_user_cache_path()
 
-                fd, tmp = tempfile.mkstemp(
-                    prefix=f"{base_name}_", suffix=".txt", dir=cache_dir
-                )
-                os.close(fd)
-                with open(tmp, "w", encoding="utf-8") as f:
-                    f.write(chapters_text)
-                self.selected_file = tmp
+                first = True
+                for chunk_text, chunk_suffix in chunks:
+                    fd, tmp = tempfile.mkstemp(
+                        prefix=f"{base_name}_", suffix=".txt", dir=cache_dir
+                    )
+                    os.close(fd)
+                    with open(tmp, "w", encoding="utf-8") as f:
+                        f.write(chunk_text)
+                    self.selected_files_to_queue.append((tmp, chunk_suffix))
+
+                    # Update char count cache for each file
+                    cleaned_chunk = clean_text(chunk_text)
+                    c_count = calculate_text_length(cleaned_chunk)
+                    if isinstance(getattr(self, "_char_count_cache", None), dict):
+                        self._char_count_cache[tmp] = c_count
+
+                    if first:
+                        self.selected_file = tmp
+                        first = False
+
                 self.selected_book_path = book_path
                 self.displayed_file_path = book_path
-                if isinstance(getattr(self, "_char_count_cache", None), dict):
-                    self._char_count_cache[tmp] = computed_char_count
                 # Only set file info if dialog was accepted
                 self.input_box.set_file_info(book_path)
                 return True
@@ -2907,86 +2924,141 @@ class abogen(QWidget):
 
     def add_to_queue(self):
         # For epub/pdf, always use the converted txt file (selected_file)
+        files_to_queue = []
         if self.selected_file_type in ["epub", "pdf", "md", "markdown"]:
-            file_to_queue = self.selected_file
-            # Use the original file path for save location
-            save_base_path = (
-                self.displayed_file_path if self.displayed_file_path else file_to_queue
-            )
+            if hasattr(self, "selected_files_to_queue") and self.selected_files_to_queue:
+                files_to_queue = self.selected_files_to_queue
+            else:
+                files_to_queue = [(self.selected_file, "")]
         else:
-            file_to_queue = (
+            files_to_queue = [((
                 self.displayed_file_path
                 if self.displayed_file_path
                 else self.selected_file
-            )
-            save_base_path = file_to_queue  # For non-EPUB, it's the same
+            ), "")]
 
-        if not file_to_queue:
+        if not files_to_queue or not files_to_queue[0][0]:
             self.input_box.set_error("Please add a file.")
             return
+
         actual_subtitle_mode = self.get_actual_subtitle_mode()
         voice_formula = self.get_voice_formula()
         selected_lang = self.get_selected_lang(voice_formula)
 
-        item_queue = QueuedItem(
-            file_name=file_to_queue,
-            lang_code=selected_lang,
-            speed=self.speed_slider.value() / 100.0,
-            voice=voice_formula,
-            save_option=self.save_option,
-            output_folder=self.selected_output_folder,
-            subtitle_mode=actual_subtitle_mode,
-            output_format=self.selected_format,
-            total_char_count=self.char_count,
-            replace_single_newlines=self.replace_single_newlines,
-            use_silent_gaps=self.use_silent_gaps,
-            subtitle_speed_method=self.subtitle_speed_method,
-            save_base_path=save_base_path,
-            save_chapters_separately=getattr(self, "save_chapters_separately", None),
-            merge_chapters_at_end=getattr(self, "merge_chapters_at_end", None),
-            m4b_aac_mode=getattr(self, "m4b_aac_mode", "aac_lc"),
-            chapter_visual_indentation=getattr(
-                self, "chapter_visual_indentation", True
-            ),
-            chapter_depth_limit=getattr(self, "chapter_depth_limit", 99),
-        )
+        import re
+        def get_chunk_range(suffix):
+            if not suffix: return None
+            m = re.search(r'\{Ch (\d+)(?:-(\d+))?\}', suffix)
+            if m:
+                start = int(m.group(1))
+                end = int(m.group(2)) if m.group(2) else start
+                return (start, end)
+            return None
 
-        # Prevent adding duplicate items to the queue
-        for queued_item in self.queued_items:
-            if (
-                queued_item.file_name == item_queue.file_name
-                and queued_item.lang_code == item_queue.lang_code
-                and queued_item.speed == item_queue.speed
-                and queued_item.voice == item_queue.voice
-                and queued_item.save_option == item_queue.save_option
-                and queued_item.output_folder == item_queue.output_folder
-                and queued_item.subtitle_mode == item_queue.subtitle_mode
-                and queued_item.output_format == item_queue.output_format
-                and getattr(queued_item, "replace_single_newlines", True)
-                == item_queue.replace_single_newlines
-                and getattr(queued_item, "save_base_path", None)
-                == item_queue.save_base_path
-                and getattr(queued_item, "save_chapters_separately", None)
-                == item_queue.save_chapters_separately
-                and getattr(queued_item, "merge_chapters_at_end", None)
-                == item_queue.merge_chapters_at_end
-                and getattr(queued_item, "m4b_aac_mode", "aac_lc")
-                == item_queue.m4b_aac_mode
-                and getattr(queued_item, "chapter_visual_indentation", True)
-                == item_queue.chapter_visual_indentation
-                and getattr(queued_item, "chapter_depth_limit", 99)
-                == item_queue.chapter_depth_limit
-            ):
-                QMessageBox.warning(
-                    self, "Duplicate Item", "This item is already in the queue."
+        added_any = False
+
+        for file_to_queue, chunk_suffix in files_to_queue:
+            save_base_path = (
+                self.displayed_file_path if self.displayed_file_path else file_to_queue
+            )
+
+            c_count = self.char_count
+            if isinstance(getattr(self, "_char_count_cache", None), dict) and file_to_queue in self._char_count_cache:
+                c_count = self._char_count_cache[file_to_queue]
+
+            folder_name = os.path.splitext(os.path.basename(save_base_path))[0] if getattr(self, "save_chunks_in_folder", False) else None
+
+            item_queue = QueuedItem(
+                file_name=file_to_queue,
+                lang_code=selected_lang,
+                speed=self.speed_slider.value() / 100.0,
+                voice=voice_formula,
+                save_option=self.save_option,
+                output_folder=self.selected_output_folder,
+                subtitle_mode=actual_subtitle_mode,
+                output_format=self.selected_format,
+                total_char_count=c_count,
+                replace_single_newlines=self.replace_single_newlines,
+                use_silent_gaps=self.use_silent_gaps,
+                subtitle_speed_method=self.subtitle_speed_method,
+                save_base_path=save_base_path,
+                save_chapters_separately=getattr(self, "save_chapters_separately", None),
+                merge_chapters_at_end=getattr(self, "merge_chapters_at_end", None),
+                m4b_aac_mode=getattr(self, "m4b_aac_mode", "aac_lc"),
+                chapter_visual_indentation=getattr(
+                    self, "chapter_visual_indentation", True
+                ),
+                chapter_depth_limit=getattr(self, "chapter_depth_limit", 99),
+                chunk_suffix=chunk_suffix,
+                save_chunks_in_folder_name=folder_name,
+            )
+
+            # Check overlaps and duplicates in queue
+            overlapping_indices = []
+            item_range = get_chunk_range(item_queue.chunk_suffix)
+
+            for q_idx, queued_item in enumerate(self.queued_items):
+                if getattr(queued_item, "save_base_path", None) == item_queue.save_base_path:
+                    q_range = get_chunk_range(getattr(queued_item, "chunk_suffix", ""))
+                    if item_range and q_range:
+                        if max(item_range[0], q_range[0]) <= min(item_range[1], q_range[1]):
+                            overlapping_indices.append(q_idx)
+                    elif not item_range and not q_range:
+                        if queued_item.file_name == item_queue.file_name:
+                            overlapping_indices.append(q_idx)
+
+            if overlapping_indices:
+                reply = QMessageBox.question(
+                    self,
+                    "Duplicate or Overlapping Item",
+                    f"The item '{chunk_suffix}' overlaps with an existing item in the queue.\nDo you want to replace it?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.Yes,
                 )
-                return
+                if reply == QMessageBox.StandardButton.Yes:
+                    # Remove in reverse order
+                    for idx in sorted(overlapping_indices, reverse=True):
+                        self.queued_items.pop(idx)
+                else:
+                    continue
 
-        self.enqueue(item_queue)
-        # Clear input after adding to queue
-        self.input_box.clear_input()
-        self.input_box_cleared_by_queue = True  # Set flag
-        self.enable_disable_queue_buttons()
+            # Check if already converted on disk
+            from abogen.utils import sanitize_filename
+            try:
+                with open(file_to_queue, 'r', encoding='utf-8') as f:
+                    chunk_text_start = f.read(4096)
+            except Exception:
+                chunk_text_start = ""
+
+            title_match = re.search(r'<<METADATA_TITLE:([^>]+)>>', chunk_text_start)
+            if title_match and self.selected_output_folder:
+                chunk_title = sanitize_filename(title_match.group(1))
+
+                check_dir = self.selected_output_folder
+                if folder_name:
+                    check_dir = os.path.join(check_dir, folder_name)
+
+                expected_m4b = os.path.join(check_dir, f"{chunk_title}.m4b")
+                expected_mp3 = os.path.join(check_dir, f"{chunk_title}.mp3")
+
+                if os.path.exists(expected_m4b) or os.path.exists(expected_mp3):
+                    reply = QMessageBox.question(
+                        self,
+                        "Already Converted",
+                        f"The chunk '{chunk_suffix}' appears to have already been converted.\nDo you want to reconvert it (overwrite)?",
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                        QMessageBox.StandardButton.Yes,
+                    )
+                    if reply == QMessageBox.StandardButton.No:
+                        continue
+
+            self.enqueue(item_queue)
+            added_any = True
+
+        if added_any:
+            self.input_box.clear_input()
+            self.input_box_cleared_by_queue = True
+            self.enable_disable_queue_buttons()
 
     def clear_queue(self):
         # Warn user if more than 1 item in the queue before clearing
@@ -3271,6 +3343,7 @@ class abogen(QWidget):
                 queued_item, "chapter_visual_indentation", True
             )
             self.chapter_depth_limit = getattr(queued_item, "chapter_depth_limit", 99)
+            self.save_chunks_in_folder_name = getattr(queued_item, "save_chunks_in_folder_name", None)
 
             # CHECK GLOBAL OVERRIDE SETTING
             if not self.config.get("queue_override_settings", False):
@@ -3578,10 +3651,11 @@ class abogen(QWidget):
             self.conversion_thread.fix_nonstandard_punctuation = (
                 self.fix_nonstandard_punctuation
             )
-            # Pass separate_chapters_format setting
             self.conversion_thread.separate_chapters_format = (
                 self.separate_chapters_format
             )
+            # Pass save_chunks_in_folder_name setting
+            self.conversion_thread.save_chunks_in_folder_name = getattr(self, "save_chunks_in_folder_name", None)
             # Pass subtitle format setting
             self.conversion_thread.subtitle_format = self.config.get(
                 "subtitle_format", "ass_centered_narrow"

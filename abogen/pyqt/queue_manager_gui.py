@@ -874,12 +874,13 @@ class QueueManager(QDialog):
                 unsupported.append(os.path.basename(file_path) or file_path)
                 continue
 
-            item: Any | None = None
+            new_items = []
             if file_kind == "document":
-                item = self._create_document_queue_item(file_path, current_attrs)
-                if item is None:
+                items = self._create_document_queue_item(file_path, current_attrs)
+                if not items:
                     cancelled_documents.append(os.path.basename(file_path) or file_path)
                     continue
+                new_items.extend(items)
             else:
                 item = self._create_text_or_subtitle_queue_item(
                     file_path, current_attrs
@@ -898,13 +899,16 @@ class QueueManager(QDialog):
                             e,
                         )
 
-            if self._is_duplicate_candidate(item, pending_items):
-                decision = self._resolve_duplicate_decision(file_path, duplicate_policy)
-                if decision == "skip":
-                    duplicates.append(os.path.basename(file_path) or file_path)
-                    continue
+                new_items.append(item)
 
-            pending_items.append(item)
+            for item in new_items:
+                if self._is_duplicate_candidate(item, pending_items):
+                    decision = self._resolve_duplicate_decision(file_path, duplicate_policy)
+                    if decision == "skip":
+                        duplicates.append(os.path.basename(file_path) or file_path)
+                        continue
+
+                pending_items.append(item)
 
         self.queue.extend(pending_items)
 
@@ -970,7 +974,7 @@ class QueueManager(QDialog):
         )
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return None
-        chapters_text, selected_identifiers = dialog.get_selected_text()
+        chunks, selected_identifiers = dialog.get_selected_text()
         if not selected_identifiers:
             QMessageBox.warning(
                 self,
@@ -980,29 +984,38 @@ class QueueManager(QDialog):
             return None
 
         self._document_checked_chapters[file_path] = set(selected_identifiers)
-        computed_char_count = calculate_text_length(clean_text(chapters_text))
+        
+        items = []
+        folder_name = os.path.splitext(os.path.basename(file_path))[0] if dialog.get_save_chunks_in_folder() else None
 
-        cache_dir = self._resolve_document_output_cache_dir(file_path, dialog)
-        fd, tmp_path = tempfile.mkstemp(
-            prefix=f"{os.path.splitext(os.path.basename(file_path))[0]}_",
-            suffix=".txt",
-            dir=cache_dir,
-        )
-        os.close(fd)
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            f.write(chapters_text)
-
-        item: Any = SimpleNamespace()
-        item.file_name = tmp_path
-        item.save_base_path = file_path
-        for attr, value in current_attrs.items():
-            setattr(item, attr, value)
-        item.total_char_count = computed_char_count
-        item.save_chapters_separately = dialog.get_save_chapters_separately()
-        item.merge_chapters_at_end = dialog.get_merge_chapters_at_end()
-        item.chapter_visual_indentation = dialog.get_chapter_visual_indentation()
-        item.chapter_depth_limit = dialog.get_chapter_depth_limit()
-        return item
+        for chunk_text, chunk_suffix in chunks:
+            computed_char_count = calculate_text_length(clean_text(chunk_text))
+            
+            cache_dir = self._resolve_document_output_cache_dir(file_path, dialog)
+            fd, tmp_path = tempfile.mkstemp(
+                prefix=f"{os.path.splitext(os.path.basename(file_path))[0]}_",
+                suffix=".txt",
+                dir=cache_dir,
+            )
+            os.close(fd)
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                f.write(chunk_text)
+    
+            item: Any = SimpleNamespace()
+            item.file_name = tmp_path
+            item.save_base_path = file_path
+            for attr, value in current_attrs.items():
+                setattr(item, attr, value)
+            item.total_char_count = computed_char_count
+            item.save_chapters_separately = dialog.get_save_chapters_separately()
+            item.merge_chapters_at_end = dialog.get_merge_chapters_at_end()
+            item.chapter_visual_indentation = dialog.get_chapter_visual_indentation()
+            item.chapter_depth_limit = dialog.get_chapter_depth_limit()
+            item.chunk_suffix = chunk_suffix
+            item.save_chunks_in_folder_name = folder_name
+            items.append(item)
+            
+        return items
 
     def _resolve_document_output_cache_dir(
         self, file_path: str, dialog: HandlerDialog

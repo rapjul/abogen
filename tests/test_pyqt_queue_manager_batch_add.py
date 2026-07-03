@@ -67,7 +67,7 @@ def test_add_files_from_paths_mixed_batch_adds_text_subtitle_and_document(
         item.total_char_count = 222
         item.save_chapters_separately = True
         item.merge_chapters_at_end = False
-        return item
+        return [item]
 
     monkeypatch.setattr(manager, "_create_document_queue_item", _fake_document_item)
     monkeypatch.setattr(

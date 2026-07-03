@@ -1434,10 +1434,18 @@ class ConversionThread(QThread):
     def _resolve_output_parent_dir(self, base_path):
         """Resolve the output parent directory using current save settings."""
         if self.save_option == "Save to Desktop":
-            return user_desktop_dir()
-        if self.save_option == "Save next to input file":
-            return os.path.dirname(base_path)
-        return self.output_folder or os.getcwd()
+            parent = user_desktop_dir()
+        elif self.save_option == "Save next to input file":
+            parent = os.path.dirname(base_path)
+        else:
+            parent = self.output_folder or os.getcwd()
+            
+        folder_name = getattr(self, "save_chunks_in_folder_name", None)
+        if folder_name:
+            parent = os.path.join(parent, folder_name)
+            os.makedirs(parent, exist_ok=True)
+            
+        return parent
 
     def _find_unique_output_suffix(
         self,
