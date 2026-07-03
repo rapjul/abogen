@@ -226,7 +226,7 @@ class MLXKokoroPipeline:
         if model is not None:
             self._model = model
         else:
-            from mlx_audio.tts.utils import load_model
+            from mlx_audio.tts.utils import load_model  # type: ignore
 
             self._model = load_model(quantization.model_path)
 
