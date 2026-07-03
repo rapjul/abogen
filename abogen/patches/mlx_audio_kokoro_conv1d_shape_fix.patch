@@ -1,0 +1,19 @@
+--- a/mlx_audio/tts/models/base.py
++++ b/mlx_audio/tts/models/base.py
+@@ -26,10 +26,13 @@
+     if len(shape) != 3:
+         return False
+ 
+-    out_channels, kH, KW = shape
++    out_channels, dim1, dim2 = shape
+ 
+-    # Check if out_channels is the largest, and kH and KW are the same
+-    if (out_channels >= kH) and (out_channels >= KW) and (kH == KW):
++    # MLX shape: (out_channels, kernel_size, in_channels)
++    # PyTorch shape: (out_channels, in_channels, kernel_size)
++    # In Kokoro, in_channels (e.g. 512) >= kernel_size (e.g. 3)
++    # So if dim2 >= dim1, it is already in MLX shape.
++    if dim2 >= dim1:
+         return True
+     else:
+         return False

@@ -1799,8 +1799,8 @@ class ConversionThread(QThread):
 
                 # If a new model was created, emit it for the GUI to cache
                 if shared_kmodel is None and hasattr(tts, "model") and tts.model:
-                    # Apply FP16 optimization if on GPU
-                    if device in ("cuda", "mps"):
+                    # Apply FP16 optimization if on CUDA
+                    if device == "cuda":
                         try:
                             tts.model = tts.model.half()
                             self.log_updated.emit(

@@ -127,6 +127,13 @@ PATCHES: list[dict] = [
         # its absence signals that mlx-audio has shipped the fix.
         "bug_absent": "noise = noise_amp * mx.random.normal(sine_waves.shape)",
     },
+    {
+        "patch": "patches/mlx_audio_kokoro_conv1d_shape_fix.patch",
+        "target": "mlx_audio/tts/models/base.py",
+        "sentinel": "# MLX shape: (out_channels, kernel_size, in_channels)",
+        # The buggy code contains 'kH == KW' check.
+        "bug_absent": "and (kH == KW):",
+    },
 ]
 
 

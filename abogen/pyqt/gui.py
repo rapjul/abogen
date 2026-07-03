@@ -2216,6 +2216,7 @@ class abogen(QWidget):
 
                 self.selected_book_path = book_path
                 self.displayed_file_path = book_path
+
                 # Only set file info if dialog was accepted
                 self.input_box.set_file_info(book_path)
                 return True

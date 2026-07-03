@@ -187,7 +187,7 @@ The script is **idempotent** — running it multiple times is safe.
 
 #### Current patches
 
-##### `mlx_audio_kokoro_sine_gen_broadcast.patch` → `mlx-audio` ≥ 0.4.4
+##### `mlx_audio_kokoro_sine_gen_broadcast.patch` → `mlx-audio` ≥ 0.4.3, ≤ 0.4.5
 
 **Bug:** `SineGen.__call__` in `mlx_audio/tts/models/kokoro/istftnet.py` crashes with a `[broadcast_shapes]` error for certain text lengths when using the MLX backend on Apple Silicon.
 
@@ -223,6 +223,36 @@ for p in sys.path:
         break
 "
 ```
+
+##### `mlx_audio_kokoro_conv1d_shape_fix.patch` → `mlx-audio` ≥ 0.4.3, ≤ 0.4.5
+
+**Bug:** `check_array_shape` in `mlx_audio/tts/models/base.py` incorrectly identifies the shape of 1D convolutional weights (like `weight_v`) when loading PyTorch models on MLX. It assumes that `kH == KW` which is only true for 2D or symmetric convolutions, causing Kokoro models to fail to initialize with `Expected shape (512, 3, 512) but received shape (512, 512, 3)`.
+
+**Fix (this patch):**
+- Modifies `check_array_shape` to correctly detect if the weight array is already in MLX format by comparing the middle dimension (`kernel_size`) to the last dimension (`in_channels`).
+
+**Upstream status:** Not yet fixed as of `mlx-audio` 0.4.2.
+
+**How to check if the patch is still needed** (run after any `mlx-audio` upgrade):
+
+```bash
+python -c "
+import sys
+from pathlib import Path
+for p in sys.path:
+    f = Path(p) / 'mlx_audio/tts/models/base.py'
+    if f.exists():
+        src = f.read_text()
+        if 'and (kH == KW):' in src:
+            print('PATCH STILL NEEDED (bug present in installed version)')
+        elif 'dim2 >= dim1:' in src:
+            print('PATCH NO LONGER NEEDED (fix is now in the release)')
+        else:
+            print('CODE CHANGED SIGNIFICANTLY — manual review required')
+        break
+"
+```
+
 
 ---
 
