@@ -86,7 +86,7 @@ requires-dist = [
     { name = "kokoro", marker = "sys_platform == 'darwin'", git = "https://github.com/hexgrad/kokoro.git" },
     { name = "markdown", specifier = ">=3.9" },
     { name = "misaki", extras = ["en"], specifier = ">=0.9.4" },
-    { name = "mlx-audio", marker = "sys_platform == 'darwin' and extra == 'mlx'", specifier = "==0.4.2" },
+    { name = "mlx-audio", marker = "sys_platform == 'darwin' and extra == 'mlx'" },
     { name = "mutagen", specifier = ">=1.47.0" },
     { name = "num2words", specifier = ">=0.5.13" },
     { name = "numpy", specifier = ">=1.24.0" },
