@@ -1440,12 +1440,14 @@ class ConversionThread(QThread):
             parent = os.path.dirname(base_path)
         else:
             parent = self.output_folder or os.getcwd()
-            
+
         folder_name = getattr(self, "save_chunks_in_folder_name", None)
         if folder_name:
-            parent = os.path.join(parent, folder_name)
+            # Check if parent directory path already ends with folder_name to prevent double-nesting
+            if os.path.basename(os.path.normpath(parent)) != folder_name:
+                parent = os.path.join(parent, folder_name)
             os.makedirs(parent, exist_ok=True)
-            
+
         return parent
 
     def _find_unique_output_suffix(

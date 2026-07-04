@@ -2986,7 +2986,18 @@ class abogen(QWidget):
             if isinstance(getattr(self, "_char_count_cache", None), dict) and file_to_queue in self._char_count_cache:
                 c_count = self._char_count_cache[file_to_queue]
 
-            folder_name = os.path.splitext(os.path.basename(save_base_path))[0] if getattr(self, "save_chunks_in_folder", False) else None
+            folder_name = None
+            if getattr(self, "save_chunks_in_folder", False):
+                import re
+                proper_name = Path(save_base_path).stem
+                proper_name = re.sub(r"\(\d+\)$", "", proper_name.strip()).strip()
+                proper_name = proper_name.replace(";", "_")
+                folder_name = proper_name
+
+            # Incorporate subfolder into output_folder if present
+            item_output_folder = self.selected_output_folder
+            if folder_name and item_output_folder:
+                item_output_folder = str(Path(item_output_folder) / folder_name)
 
             item_queue = QueuedItem(
                 file_name=file_to_queue,
@@ -2994,7 +3005,7 @@ class abogen(QWidget):
                 speed=self.speed_slider.value() / 100.0,
                 voice=voice_formula,
                 save_option=self.save_option,
-                output_folder=self.selected_output_folder,
+                output_folder=item_output_folder,
                 subtitle_mode=actual_subtitle_mode,
                 output_format=self.selected_format,
                 total_char_count=c_count,
@@ -3220,9 +3231,17 @@ class abogen(QWidget):
                 )
                 if original_path:
                     orig_path_obj = Path(original_path)
-                    if orig_path_obj.suffix.lower() == ".epub":
+                    if orig_path_obj.suffix.lower() in (".epub", ".pdf", ".md", ".markdown"):
                         # Strip extension to show book title
                         display_name = orig_path_obj.stem
+
+                import re
+                display_name = re.sub(r"\(\d+\)$", "", display_name.strip()).strip()
+
+                # Append chunk suffix if present to show division/chunk info
+                chunk_suffix = raw_item.get("chunk_suffix", "")
+                if chunk_suffix:
+                    display_name += f" {chunk_suffix}"
 
                 display_name = display_name.replace("_", " ")
 

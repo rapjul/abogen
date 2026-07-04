@@ -527,9 +527,23 @@ class QueueManager(QDialog):
                 row = self.listwidget.rowCount()
                 self.listwidget.insertRow(row)
 
-                file_item = QTableWidgetItem(
-                    os.path.basename(display_file_path) or display_file_path
-                )
+                # Determine display name for table row
+                display_name = os.path.basename(display_file_path) or display_file_path
+                # Strip extension for documents to match main window display style
+                if display_file_path.lower().endswith((".epub", ".pdf", ".md", ".markdown")):
+                    display_name = os.path.splitext(display_name)[0]
+                
+                import re
+                display_name = re.sub(r"\(\d+\)$", "", display_name.strip()).strip()
+                
+                # Append chunk suffix if present
+                chunk_suffix = getattr(item, "chunk_suffix", "")
+                if chunk_suffix:
+                    display_name += f" {chunk_suffix}"
+                
+                display_name = display_name.replace("_", " ")
+
+                file_item = QTableWidgetItem(display_name)
                 file_item.setToolTip(tooltip)
                 file_item.setIcon(icon)
                 file_item.setData(
@@ -986,7 +1000,14 @@ class QueueManager(QDialog):
         self._document_checked_chapters[file_path] = set(selected_identifiers)
         
         items = []
-        folder_name = os.path.splitext(os.path.basename(file_path))[0] if dialog.get_save_chunks_in_folder() else None
+        folder_name = None
+        if dialog.get_save_chunks_in_folder():
+            from pathlib import Path
+            proper_name = Path(file_path).stem
+            import re
+            proper_name = re.sub(r"\(\d+\)$", "", proper_name.strip()).strip()
+            proper_name = proper_name.replace(";", "_")
+            folder_name = proper_name
 
         for chunk_text, chunk_suffix in chunks:
             computed_char_count = calculate_text_length(clean_text(chunk_text))
@@ -1006,6 +1027,12 @@ class QueueManager(QDialog):
             item.save_base_path = file_path
             for attr, value in current_attrs.items():
                 setattr(item, attr, value)
+
+            # Incorporate subfolder into output_folder if present
+            if folder_name and getattr(item, "output_folder", None):
+                from pathlib import Path
+                item.output_folder = str(Path(item.output_folder) / folder_name)
+
             item.total_char_count = computed_char_count
             item.save_chapters_separately = dialog.get_save_chapters_separately()
             item.merge_chapters_at_end = dialog.get_merge_chapters_at_end()
