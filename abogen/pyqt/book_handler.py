@@ -2379,8 +2379,16 @@ class HandlerDialog(QDialog):
     def get_merge_chapters_at_end(self):
         return self.merge_chapters_at_end
 
-    def get_split_book(self):
-        return self.split_book_checkbox.isChecked()
+    def get_split_book(self) -> bool:
+        """Get whether the book should be split.
+
+        Returns:
+            bool: True if split checkbox is checked, False otherwise.
+        """
+        try:
+            return self.split_book_checkbox.isChecked()
+        except (AttributeError, RuntimeError):
+            return False
 
     def get_split_chapters_count(self) -> int:
         """Get the number of chapters per chunk, forced to be a multiple of 10.

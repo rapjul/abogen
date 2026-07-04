@@ -3488,17 +3488,8 @@ class abogen(QWidget):
         except RuntimeError:
             stop_flag = self.__dict__.get("stop_queue_flag", False)
 
-        # Check if conversion thread is still alive to prevent race condition
-        try:
-            conversion_thread = getattr(self, "conversion_thread", None)
-            is_thread_running = (
-                conversion_thread is not None and conversion_thread.isRunning()
-            )
-        except RuntimeError:
-            is_thread_running = False
-
-        # Proceed only if stop flag is not set and thread is alive
-        if stop_flag and is_thread_running:
+        # Proceed only if stop flag is set
+        if stop_flag:
             self.queue_run_active = False
             self.stop_queue_flag = False
             self.show_queue_summary(outcome="stopped")
