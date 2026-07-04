@@ -85,6 +85,39 @@ class TestBookHandlerRegression(unittest.TestCase):
         # Cleanup
         dialog.close()
 
+    def test_split_chapters_spinbox_multiples_of_10(self) -> None:
+        """Test that the split chapters spinbox limits values to multiples of 10."""
+        dialog = HandlerDialog(self.sample_epub_path)
+
+        # Check default configuration
+        self.assertEqual(dialog.split_chapters_spinbox.minimum(), 10)
+        self.assertEqual(dialog.split_chapters_spinbox.maximum(), 100)
+        self.assertEqual(dialog.split_chapters_spinbox.singleStep(), 10)
+        self.assertEqual(dialog.split_chapters_spinbox.value(), 10)
+
+        # Test value rounding to multiples of 10
+        dialog.split_chapters_spinbox.setValue(14)
+        dialog.split_chapters_spinbox.editingFinished.emit()
+        self.assertEqual(dialog.split_chapters_spinbox.value(), 10)
+        self.assertEqual(dialog.get_split_chapters_count(), 10)
+
+        dialog.split_chapters_spinbox.setValue(17)
+        dialog.split_chapters_spinbox.editingFinished.emit()
+        self.assertEqual(dialog.split_chapters_spinbox.value(), 20)
+        self.assertEqual(dialog.get_split_chapters_count(), 20)
+
+        # Test bounds checking
+        dialog.split_chapters_spinbox.setValue(5)
+        dialog.split_chapters_spinbox.editingFinished.emit()
+        self.assertEqual(dialog.get_split_chapters_count(), 10)
+
+        dialog.split_chapters_spinbox.setValue(120)
+        dialog.split_chapters_spinbox.editingFinished.emit()
+        self.assertEqual(dialog.get_split_chapters_count(), 100)
+
+        # Cleanup
+        dialog.close()
+
 
 if __name__ == "__main__":
     unittest.main()

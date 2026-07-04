@@ -363,6 +363,20 @@ class HandlerDialog(QDialog):
             self.splitter.setVisible(True)
         self._hide_loading_overlay()
 
+    def _on_split_chapters_editing_finished(self) -> None:
+        """Ensure the split chapters spinbox value is a multiple of 10.
+
+        This method is triggered when editing the spinbox value finishes. It
+        retrieves the value, rounds it to the nearest multiple of 10, clamps
+        it between 10 and 100, and updates the spinbox.
+        """
+        val: int = self.split_chapters_spinbox.value()
+        remainder: int = val % 10
+        if remainder != 0:
+            new_val: int = int(round(val / 10.0) * 10)
+            new_val = max(10, min(100, new_val))
+            self.split_chapters_spinbox.setValue(new_val)
+
     def _update_ui_labels(self) -> None:
         """Update dialog labels, button text, and tooltips based on detected document structure.
 
@@ -750,15 +764,23 @@ class HandlerDialog(QDialog):
         leftLayout.addWidget(self.merge_chapters_checkbox)
 
         self.split_book_checkbox = QCheckBox("Split book into multiple chunks", self)
-        self.split_book_checkbox.setToolTip("Divide the selected items into smaller, separate books for quicker conversion.")
+        self.split_book_checkbox.setToolTip(
+            "Divide the selected items into smaller, separate books for quicker conversion."
+        )
         self.split_chapters_spinbox = QSpinBox(self)
-        self.split_chapters_spinbox.setMinimum(1)
-        self.split_chapters_spinbox.setMaximum(1000)
+        self.split_chapters_spinbox.setMinimum(10)
+        self.split_chapters_spinbox.setMaximum(100)
+        self.split_chapters_spinbox.setSingleStep(10)
         self.split_chapters_spinbox.setValue(10)
         self.split_chapters_spinbox.setSuffix(f" {item_type} per chunk")
         self.split_chapters_spinbox.setEnabled(False)
+        self.split_chapters_spinbox.editingFinished.connect(
+            self._on_split_chapters_editing_finished
+        )
         self.split_book_checkbox.stateChanged.connect(
-            lambda state: self.split_chapters_spinbox.setEnabled(state == Qt.CheckState.Checked.value)
+            lambda state: self.split_chapters_spinbox.setEnabled(
+                state == Qt.CheckState.Checked.value
+            )
         )
 
         split_layout = QHBoxLayout()
@@ -767,11 +789,17 @@ class HandlerDialog(QDialog):
         split_layout.addStretch()
         leftLayout.addLayout(split_layout)
 
-        self.save_chunks_in_folder_checkbox = QCheckBox("Save chunks in a folder named after the story", self)
-        self.save_chunks_in_folder_checkbox.setToolTip("Keeps all the chunks grouped together in a single folder.")
+        self.save_chunks_in_folder_checkbox = QCheckBox(
+            "Save chunks in a folder named after the story", self
+        )
+        self.save_chunks_in_folder_checkbox.setToolTip(
+            "Keeps all the chunks grouped together in a single folder."
+        )
         self.save_chunks_in_folder_checkbox.setEnabled(False)
         self.split_book_checkbox.stateChanged.connect(
-            lambda state: self.save_chunks_in_folder_checkbox.setEnabled(state == Qt.CheckState.Checked.value)
+            lambda state: self.save_chunks_in_folder_checkbox.setEnabled(
+                state == Qt.CheckState.Checked.value
+            )
         )
         leftLayout.addWidget(self.save_chunks_in_folder_checkbox)
 
@@ -1773,6 +1801,7 @@ class HandlerDialog(QDialog):
             return [(full_text, "")], identifiers
 
         import re
+
         parts = full_text.split("<<CHAPTER_MARKER:")
 
         if len(parts) <= 1:
@@ -1780,8 +1809,12 @@ class HandlerDialog(QDialog):
 
         metadata_block = parts[0]
         # Clean title using regex removing {To Ch...}
-        metadata_block = re.sub(r'(<<METADATA_TITLE:[^>]+?)\s*\{To Ch[^}]*\}', r'\1', metadata_block)
-        metadata_block = re.sub(r'(<<METADATA_ALBUM:[^>]+?)\s*\{To Ch[^}]*\}', r'\1', metadata_block)
+        metadata_block = re.sub(
+            r"(<<METADATA_TITLE:[^>]+?)\s*\{To Ch[^}]*\}", r"\1", metadata_block
+        )
+        metadata_block = re.sub(
+            r"(<<METADATA_ALBUM:[^>]+?)\s*\{To Ch[^}]*\}", r"\1", metadata_block
+        )
 
         chapters = ["<<CHAPTER_MARKER:" + p for p in parts[1:]]
 
@@ -1789,7 +1822,7 @@ class HandlerDialog(QDialog):
         chunks = []
 
         for i in range(0, len(chapters), chunk_size):
-            chunk_chapters = chapters[i:i + chunk_size]
+            chunk_chapters = chapters[i : i + chunk_size]
             chunk_text = metadata_block + "".join(chunk_chapters)
 
             start_ch = i + 1
@@ -2288,15 +2321,22 @@ class HandlerDialog(QDialog):
     def get_split_book(self):
         return self.split_book_checkbox.isChecked()
 
-    def get_split_chapters_count(self):
-        return self.split_chapters_spinbox.value()
+    def get_split_chapters_count(self) -> int:
+        """Get the number of chapters per chunk, forced to be a multiple of 10.
+
+        Returns:
+            int: The number of chapters per chunk, clamped between 10 and 100,
+                 and rounded to the nearest multiple of 10.
+        """
+        val: int = self.split_chapters_spinbox.value()
+        new_val: int = int(round(val / 10.0) * 10)
+        return max(10, min(100, new_val))
 
     def get_chapter_depth_limit(self):
         return self.chapter_depth_limit
 
     def get_save_chunks_in_folder(self):
         return self.save_chunks_in_folder_checkbox.isChecked()
-
 
     def get_save_as_project(self):
         return self.save_as_project
