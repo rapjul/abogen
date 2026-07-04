@@ -530,17 +530,20 @@ class QueueManager(QDialog):
                 # Determine display name for table row
                 display_name = os.path.basename(display_file_path) or display_file_path
                 # Strip extension for documents to match main window display style
-                if display_file_path.lower().endswith((".epub", ".pdf", ".md", ".markdown")):
+                if display_file_path.lower().endswith(
+                    (".epub", ".pdf", ".md", ".markdown")
+                ):
                     display_name = os.path.splitext(display_name)[0]
-                
+
                 import re
+
                 display_name = re.sub(r"\(\d+\)$", "", display_name.strip()).strip()
-                
+
                 # Append chunk suffix if present
                 chunk_suffix = getattr(item, "chunk_suffix", "")
                 if chunk_suffix:
                     display_name += f" {chunk_suffix}"
-                
+
                 display_name = display_name.replace("_", " ")
 
                 file_item = QTableWidgetItem(display_name)
@@ -917,7 +920,9 @@ class QueueManager(QDialog):
 
             for item in new_items:
                 if self._is_duplicate_candidate(item, pending_items):
-                    decision = self._resolve_duplicate_decision(file_path, duplicate_policy)
+                    decision = self._resolve_duplicate_decision(
+                        file_path, duplicate_policy
+                    )
                     if decision == "skip":
                         duplicates.append(os.path.basename(file_path) or file_path)
                         continue
@@ -998,20 +1003,22 @@ class QueueManager(QDialog):
             return None
 
         self._document_checked_chapters[file_path] = set(selected_identifiers)
-        
+
         items = []
         folder_name = None
         if dialog.get_save_chunks_in_folder():
             from pathlib import Path
+
             proper_name = Path(file_path).stem
             import re
+
             proper_name = re.sub(r"\(\d+\)$", "", proper_name.strip()).strip()
             proper_name = proper_name.replace(";", "_")
             folder_name = proper_name
 
         for chunk_text, chunk_suffix in chunks:
             computed_char_count = calculate_text_length(clean_text(chunk_text))
-            
+
             cache_dir = self._resolve_document_output_cache_dir(file_path, dialog)
             fd, tmp_path = tempfile.mkstemp(
                 prefix=f"{os.path.splitext(os.path.basename(file_path))[0]}_",
@@ -1021,7 +1028,7 @@ class QueueManager(QDialog):
             os.close(fd)
             with open(tmp_path, "w", encoding="utf-8") as f:
                 f.write(chunk_text)
-    
+
             item: Any = SimpleNamespace()
             item.file_name = tmp_path
             item.save_base_path = file_path
@@ -1031,6 +1038,7 @@ class QueueManager(QDialog):
             # Incorporate subfolder into output_folder if present
             if folder_name and getattr(item, "output_folder", None):
                 from pathlib import Path
+
                 item.output_folder = str(Path(item.output_folder) / folder_name)
 
             item.total_char_count = computed_char_count
@@ -1041,7 +1049,7 @@ class QueueManager(QDialog):
             item.chunk_suffix = chunk_suffix
             item.save_chunks_in_folder_name = folder_name
             items.append(item)
-            
+
         return items
 
     def _resolve_document_output_cache_dir(

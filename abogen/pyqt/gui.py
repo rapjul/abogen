@@ -2096,7 +2096,9 @@ class abogen(QWidget):
                     dialog.get_chapter_visual_indentation()
                 )
                 self.chapter_depth_limit = dialog.get_chapter_depth_limit()
-                self.save_chunks_in_folder = getattr(dialog, "get_save_chunks_in_folder", lambda: False)()
+                self.save_chunks_in_folder = getattr(
+                    dialog, "get_save_chunks_in_folder", lambda: False
+                )()
 
                 # Store if the PDF has bookmarks for button text display
                 if book_path.lower().endswith(".pdf"):
@@ -2946,16 +2948,24 @@ class abogen(QWidget):
         # For epub/pdf, always use the converted txt file (selected_file)
         files_to_queue = []
         if self.selected_file_type in ["epub", "pdf", "md", "markdown"]:
-            if hasattr(self, "selected_files_to_queue") and self.selected_files_to_queue:
+            if (
+                hasattr(self, "selected_files_to_queue")
+                and self.selected_files_to_queue
+            ):
                 files_to_queue = self.selected_files_to_queue
             else:
                 files_to_queue = [(self.selected_file, "")]
         else:
-            files_to_queue = [((
-                self.displayed_file_path
-                if self.displayed_file_path
-                else self.selected_file
-            ), "")]
+            files_to_queue = [
+                (
+                    (
+                        self.displayed_file_path
+                        if self.displayed_file_path
+                        else self.selected_file
+                    ),
+                    "",
+                )
+            ]
 
         if not files_to_queue or not files_to_queue[0][0]:
             self.input_box.set_error("Please add a file.")
@@ -2966,9 +2976,11 @@ class abogen(QWidget):
         selected_lang = self.get_selected_lang(voice_formula)
 
         import re
+
         def get_chunk_range(suffix):
-            if not suffix: return None
-            m = re.search(r'\{Ch (\d+)(?:-(\d+))?\}', suffix)
+            if not suffix:
+                return None
+            m = re.search(r"\{Ch (\d+)(?:-(\d+))?\}", suffix)
             if m:
                 start = int(m.group(1))
                 end = int(m.group(2)) if m.group(2) else start
@@ -2983,12 +2995,16 @@ class abogen(QWidget):
             )
 
             c_count = self.char_count
-            if isinstance(getattr(self, "_char_count_cache", None), dict) and file_to_queue in self._char_count_cache:
+            if (
+                isinstance(getattr(self, "_char_count_cache", None), dict)
+                and file_to_queue in self._char_count_cache
+            ):
                 c_count = self._char_count_cache[file_to_queue]
 
             folder_name = None
             if getattr(self, "save_chunks_in_folder", False):
                 import re
+
                 proper_name = Path(save_base_path).stem
                 proper_name = re.sub(r"\(\d+\)$", "", proper_name.strip()).strip()
                 proper_name = proper_name.replace(";", "_")
@@ -3013,7 +3029,9 @@ class abogen(QWidget):
                 use_silent_gaps=self.use_silent_gaps,
                 subtitle_speed_method=self.subtitle_speed_method,
                 save_base_path=save_base_path,
-                save_chapters_separately=getattr(self, "save_chapters_separately", None),
+                save_chapters_separately=getattr(
+                    self, "save_chapters_separately", None
+                ),
                 merge_chapters_at_end=getattr(self, "merge_chapters_at_end", None),
                 m4b_aac_mode=getattr(self, "m4b_aac_mode", "aac_lc"),
                 chapter_visual_indentation=getattr(
@@ -3029,10 +3047,15 @@ class abogen(QWidget):
             item_range = get_chunk_range(item_queue.chunk_suffix)
 
             for q_idx, queued_item in enumerate(self.queued_items):
-                if getattr(queued_item, "save_base_path", None) == item_queue.save_base_path:
+                if (
+                    getattr(queued_item, "save_base_path", None)
+                    == item_queue.save_base_path
+                ):
                     q_range = get_chunk_range(getattr(queued_item, "chunk_suffix", ""))
                     if item_range and q_range:
-                        if max(item_range[0], q_range[0]) <= min(item_range[1], q_range[1]):
+                        if max(item_range[0], q_range[0]) <= min(
+                            item_range[1], q_range[1]
+                        ):
                             overlapping_indices.append(q_idx)
                     elif not item_range and not q_range:
                         if queued_item.file_name == item_queue.file_name:
@@ -3055,13 +3078,14 @@ class abogen(QWidget):
 
             # Check if already converted on disk
             from abogen.utils import sanitize_filename
+
             try:
-                with open(file_to_queue, 'r', encoding='utf-8') as f:
+                with open(file_to_queue, "r", encoding="utf-8") as f:
                     chunk_text_start = f.read(4096)
             except Exception:
                 chunk_text_start = ""
 
-            title_match = re.search(r'<<METADATA_TITLE:([^>]+)>>', chunk_text_start)
+            title_match = re.search(r"<<METADATA_TITLE:([^>]+)>>", chunk_text_start)
             if title_match and self.selected_output_folder:
                 chunk_title = sanitize_filename(title_match.group(1))
 
@@ -3219,7 +3243,10 @@ class abogen(QWidget):
                 for field in dataclasses.fields(QueuedItem):
                     if field.name in raw_item:
                         item_kwargs[field.name] = raw_item[field.name]
-                    elif field.default == dataclasses.MISSING and field.default_factory == dataclasses.MISSING:
+                    elif (
+                        field.default == dataclasses.MISSING
+                        and field.default_factory == dataclasses.MISSING
+                    ):
                         item_kwargs[field.name] = None
 
                 item = QueuedItem(**item_kwargs)
@@ -3231,11 +3258,17 @@ class abogen(QWidget):
                 )
                 if original_path:
                     orig_path_obj = Path(original_path)
-                    if orig_path_obj.suffix.lower() in (".epub", ".pdf", ".md", ".markdown"):
+                    if orig_path_obj.suffix.lower() in (
+                        ".epub",
+                        ".pdf",
+                        ".md",
+                        ".markdown",
+                    ):
                         # Strip extension to show book title
                         display_name = orig_path_obj.stem
 
                 import re
+
                 display_name = re.sub(r"\(\d+\)$", "", display_name.strip()).strip()
 
                 # Append chunk suffix if present to show division/chunk info
@@ -3355,7 +3388,9 @@ class abogen(QWidget):
                 queued_item, "chapter_visual_indentation", True
             )
             self.chapter_depth_limit = getattr(queued_item, "chapter_depth_limit", 99)
-            self.save_chunks_in_folder_name = getattr(queued_item, "save_chunks_in_folder_name", None)
+            self.save_chunks_in_folder_name = getattr(
+                queued_item, "save_chunks_in_folder_name", None
+            )
 
             # CHECK GLOBAL OVERRIDE SETTING
             if not self.config.get("queue_override_settings", False):
@@ -3697,7 +3732,9 @@ class abogen(QWidget):
                 self.separate_chapters_format
             )
             # Pass save_chunks_in_folder_name setting
-            self.conversion_thread.save_chunks_in_folder_name = getattr(self, "save_chunks_in_folder_name", None)
+            self.conversion_thread.save_chunks_in_folder_name = getattr(
+                self, "save_chunks_in_folder_name", None
+            )
             # Pass subtitle format setting
             self.conversion_thread.subtitle_format = self.config.get(
                 "subtitle_format", "ass_centered_narrow"

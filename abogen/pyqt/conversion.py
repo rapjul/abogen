@@ -1197,7 +1197,9 @@ class ConversionThread(QThread):
         # Set split pattern based on language and subtitle mode
         self.split_pattern = self._get_split_pattern(lang_code, subtitle_mode)
         self.voice_cache = {}  # Cache for loaded voices
-        self._split_pattern_printed = False  # Track if split pattern was logged for this conversion
+        self._split_pattern_printed = (
+            False  # Track if split pattern was logged for this conversion
+        )
 
     def _get_m4b_aac_mode(self) -> str:
         mode = (

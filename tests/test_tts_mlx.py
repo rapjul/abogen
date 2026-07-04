@@ -322,7 +322,11 @@ class TestMLXKokoroPipelineCall(unittest.TestCase):
         used_voice = (
             call_kwargs.kwargs.get("voice")
             if call_kwargs.kwargs and "voice" in call_kwargs.kwargs
-            else (call_kwargs.args[1] if call_kwargs.args and len(call_kwargs.args) > 1 else "")
+            else (
+                call_kwargs.args[1]
+                if call_kwargs.args and len(call_kwargs.args) > 1
+                else ""
+            )
         )
         self.assertEqual(used_voice, "af_heart")
 
