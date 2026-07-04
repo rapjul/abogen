@@ -2236,6 +2236,7 @@ class abogen(QWidget):
 
                 self.selected_book_path = book_path
                 self.displayed_file_path = book_path
+                self.book_metadata = book_metadata
 
                 # Only set file info if dialog was accepted
                 self.input_box.set_file_info(book_path)
@@ -3005,10 +3006,14 @@ class abogen(QWidget):
             if getattr(self, "save_chunks_in_folder", False):
                 import re
 
-                proper_name = Path(save_base_path).stem
+                from abogen.subtitle_utils import sanitize_name_for_os
+
+                book_metadata = getattr(self, "book_metadata", {}) or {}
+                proper_name = book_metadata.get("title") or Path(save_base_path).stem
+
                 proper_name = re.sub(r"\(\d+\)$", "", proper_name.strip()).strip()
                 proper_name = proper_name.replace(";", "_")
-                folder_name = proper_name
+                folder_name = sanitize_name_for_os(proper_name, is_folder=True)
 
             # Incorporate subfolder into output_folder if present
             item_output_folder = self.selected_output_folder
@@ -3077,7 +3082,7 @@ class abogen(QWidget):
                     continue
 
             # Check if already converted on disk
-            from abogen.utils import sanitize_filename
+            from abogen.subtitle_utils import sanitize_name_for_os
 
             try:
                 with open(file_to_queue, "r", encoding="utf-8") as f:
@@ -3087,7 +3092,7 @@ class abogen(QWidget):
 
             title_match = re.search(r"<<METADATA_TITLE:([^>]+)>>", chunk_text_start)
             if title_match and self.selected_output_folder:
-                chunk_title = sanitize_filename(title_match.group(1))
+                chunk_title = sanitize_name_for_os(title_match.group(1), is_folder=False)
 
                 check_dir = self.selected_output_folder
                 if folder_name:

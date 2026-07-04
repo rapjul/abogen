@@ -1007,14 +1007,16 @@ class QueueManager(QDialog):
         items = []
         folder_name = None
         if dialog.get_save_chunks_in_folder():
-            from pathlib import Path
-
-            proper_name = Path(file_path).stem
             import re
+            from pathlib import Path
+            from abogen.subtitle_utils import sanitize_name_for_os
+
+            book_metadata = getattr(dialog, "book_metadata", {}) or {}
+            proper_name = book_metadata.get("title") or Path(file_path).stem
 
             proper_name = re.sub(r"\(\d+\)$", "", proper_name.strip()).strip()
             proper_name = proper_name.replace(";", "_")
-            folder_name = proper_name
+            folder_name = sanitize_name_for_os(proper_name, is_folder=True)
 
         for chunk_text, chunk_suffix in chunks:
             computed_char_count = calculate_text_length(clean_text(chunk_text))
