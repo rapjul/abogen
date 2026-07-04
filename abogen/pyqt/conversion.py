@@ -1197,6 +1197,7 @@ class ConversionThread(QThread):
         # Set split pattern based on language and subtitle mode
         self.split_pattern = self._get_split_pattern(lang_code, subtitle_mode)
         self.voice_cache = {}  # Cache for loaded voices
+        self._split_pattern_printed = False  # Track if split pattern was logged for this conversion
 
     def _get_m4b_aac_mode(self) -> str:
         mode = (
@@ -1675,9 +1676,31 @@ class ConversionThread(QThread):
 
     def run(self):  # pyright: ignore[reportGeneralTypeIssues]
         _install_phonemizer_warning_filter()
+        is_subtitle_input = self._is_subtitle_input_file()
+        use_spacy = (
+            getattr(self, "use_spacy_segmentation", False)
+            and self.subtitle_mode not in ["Disabled", "Line"]
+            and not is_subtitle_input
+        )
+        if use_spacy:
+            if self.subtitle_mode == "Sentence + Comma":
+                spacing_pattern = r"\s*" if self.lang_code in ["z", "j"] else r"\s+"
+                active_split_pattern = r"(?<=[{}]){}|\n+".format(
+                    self.PUNCTUATION_COMMAS, spacing_pattern
+                )
+            else:
+                active_split_pattern = "\n"
+        else:
+            active_split_pattern = self.split_pattern
+
         print(
             f"\nVoice: {self.voice}\nLanguage: {self.lang_code}\nSpeed: {self.speed}\nGPU: {self.use_gpu}\nFile: {self.file_name}\nSubtitle mode: {self.subtitle_mode}\nOutput format: {self.output_format}\nSave option: {self.save_option}\n"
         )
+        try:
+            print(f"Using split pattern: {active_split_pattern!r}")
+        except Exception:
+            print("Using split pattern: (unprintable)")
+
         try:
             hf_tracker.set_log_callback(lambda msg: self.log_updated.emit(msg))
             input_file, processing_file, base_path = self._resolve_run_paths()
@@ -2458,13 +2481,6 @@ class ConversionThread(QThread):
                         text_segments = (
                             spacy_sentences if spacy_sentences else [segment_text]
                         )
-
-                        # Print active split pattern used by the TTS engine once for this batch
-                        try:
-                            print(f"Using split pattern: {active_split_pattern!r}")
-                        except Exception:
-                            # Print must never break processing
-                            print("Using split pattern: (unprintable)")
 
                         for text_segment in text_segments:
                             for result in self._iter_tts_results_with_safe_fallback(

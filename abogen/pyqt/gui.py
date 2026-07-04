@@ -3423,7 +3423,23 @@ class abogen(QWidget):
         self.current_queue_index += 1
         self.save_current_queue_state()
 
-        if getattr(self, "stop_queue_flag", False):
+        # Check stop flag (handle RuntimeError from deleted self.stop_queue_flag)
+        try:
+            stop_flag = getattr(self, "stop_queue_flag", False)
+        except RuntimeError:
+            stop_flag = self.__dict__.get("stop_queue_flag", False)
+
+        # Check if conversion thread is still alive to prevent race condition
+        try:
+            conversion_thread = getattr(self, "conversion_thread", None)
+            is_thread_running = (
+                conversion_thread is not None and conversion_thread.isRunning()
+            )
+        except RuntimeError:
+            is_thread_running = False
+
+        # Proceed only if stop flag is not set and thread is alive
+        if stop_flag and is_thread_running:
             self.queue_run_active = False
             self.stop_queue_flag = False
             self.show_queue_summary(outcome="stopped")
