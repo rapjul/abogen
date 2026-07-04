@@ -1821,19 +1821,77 @@ class HandlerDialog(QDialog):
         chunk_size = self.get_split_chapters_count()
         chunks = []
 
-        for i in range(0, len(chapters), chunk_size):
-            chunk_chapters = chapters[i : i + chunk_size]
-            chunk_text = metadata_block + "".join(chunk_chapters)
+        def is_marked(ch_text):
+            m = re.match(r"<<CHAPTER_MARKER:(.*?)>>", ch_text)
+            if not m:
+                return False
+            return bool(re.search(r'\d', m.group(1)))
 
-            start_ch = i + 1
-            end_ch = min(i + chunk_size, len(chapters))
+        total_chapters = len(chapters)
+        marked_count = sum(1 for c in chapters if is_marked(c))
+        use_pure_counting = marked_count < (total_chapters / 2)
 
-            if start_ch == end_ch:
-                suffix = f" {{Ch {start_ch}}}"
-            else:
-                suffix = f" {{Ch {start_ch}-{end_ch}}}"
+        if use_pure_counting:
+            for i in range(0, len(chapters), chunk_size):
+                chunk_chapters = chapters[i : i + chunk_size]
+                start_ch = i + 1
+                end_ch = min(i + chunk_size, len(chapters))
 
-            chunks.append((chunk_text, suffix))
+                if start_ch == end_ch:
+                    suffix = f" {{Ch {start_ch}}}"
+                else:
+                    suffix = f" {{Ch {start_ch}-{end_ch}}}"
+
+                chunk_metadata = re.sub(
+                    r"(<<METADATA_TITLE:[^>]+)>>", rf"\1{suffix}>>", metadata_block
+                )
+                chunk_text = chunk_metadata + "".join(chunk_chapters)
+                chunks.append((chunk_text, suffix))
+        else:
+            current_chunk_chapters = []
+            chunk_start_ch = None
+            chunk_end_ch = None
+            numbered_count = 0
+
+            for ch in chapters:
+                current_chunk_chapters.append(ch)
+                if is_marked(ch):
+                    numbered_count += 1
+
+                    if chunk_start_ch is None:
+                        chunk_start_ch = numbered_count
+                    chunk_end_ch = numbered_count
+
+                    if numbered_count % chunk_size == 0:
+                        if chunk_start_ch == chunk_end_ch:
+                            suffix = f" {{Ch {chunk_start_ch}}}"
+                        else:
+                            suffix = f" {{Ch {chunk_start_ch}-{chunk_end_ch}}}"
+
+                        chunk_metadata = re.sub(
+                            r"(<<METADATA_TITLE:[^>]+)>>", rf"\1{suffix}>>", metadata_block
+                        )
+                        chunk_text = chunk_metadata + "".join(current_chunk_chapters)
+                        chunks.append((chunk_text, suffix))
+
+                        current_chunk_chapters = []
+                        chunk_start_ch = None
+                        chunk_end_ch = None
+
+            if current_chunk_chapters:
+                if chunk_start_ch is None and chunk_end_ch is None:
+                    suffix = " {Extras}"
+                else:
+                    if chunk_start_ch == chunk_end_ch:
+                        suffix = f" {{Ch {chunk_start_ch}}}"
+                    else:
+                        suffix = f" {{Ch {chunk_start_ch}-{chunk_end_ch}}}"
+
+                chunk_metadata = re.sub(
+                    r"(<<METADATA_TITLE:[^>]+)>>", rf"\1{suffix}>>", metadata_block
+                )
+                chunk_text = chunk_metadata + "".join(current_chunk_chapters)
+                chunks.append((chunk_text, suffix))
 
         return chunks, identifiers
 
@@ -1909,11 +1967,14 @@ class HandlerDialog(QDialog):
             except Exception as e:
                 logging.warning(f"Failed to save cover image: {e}")
 
+        # Determine album name based on whether book is split
+        album_name = title if self.get_split_book() else f"{title} ({chapter_text})"
+
         # Format metadata tags
         metadata_tags = [
             f"<<METADATA_TITLE:{title}>>",
             f"<<METADATA_ARTIST:{authors_text}>>",
-            f"<<METADATA_ALBUM:{title} ({chapter_text})>>",
+            f"<<METADATA_ALBUM:{album_name}>>",
             f"<<METADATA_YEAR:{year}>>",
             f"<<METADATA_ALBUM_ARTIST:{album_artist}>>",
             "<<METADATA_COMPOSER:Narrator>>",
