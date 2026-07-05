@@ -306,3 +306,68 @@ def test_create_document_queue_item_strips_to_ch_suffix(
     assert item.output_folder == expected_folder
     assert item.save_chunks_in_folder_name == "My Great Story"
 
+
+def test_queue_manager_reordering_preserves_multi_selection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test that moving multiple items in the queue manager preserves the selection on the moved items."""
+    import sys
+    from PyQt6.QtCore import QItemSelectionModel
+    from PyQt6.QtWidgets import QApplication
+    from abogen.pyqt.queue_manager_gui import QueueManager
+    from abogen.pyqt.queued_item import QueuedItem
+    app = QApplication.instance() or QApplication(sys.argv)
+    assert app is not None
+
+    def make_item(name: str) -> QueuedItem:
+        return QueuedItem(
+            file_name=name,
+            lang_code="en-us",
+            speed=1.0,
+            voice="af_heart",
+            save_option="Save next to input file",
+            output_folder=None,
+            subtitle_mode="Disabled",
+            output_format="wav",
+            total_char_count=100,
+        )
+
+    item1 = make_item("file1.txt")
+    item2 = make_item("file2.txt")
+    item3 = make_item("file3.txt")
+    item4 = make_item("file4.txt")
+
+    manager = QueueManager(parent=None, queue=[item1, item2, item3, item4])
+
+    assert manager.listwidget.rowCount() == 4
+
+    selection_model = manager.listwidget.selectionModel()
+    model = manager.listwidget.model()
+    assert selection_model is not None
+    assert model is not None
+
+    manager.listwidget.clearSelection()
+    selection_model.select(
+        model.index(1, 0),
+        QItemSelectionModel.SelectionFlag.Select | QItemSelectionModel.SelectionFlag.Rows,
+    )
+    selection_model.select(
+        model.index(2, 0),
+        QItemSelectionModel.SelectionFlag.Select | QItemSelectionModel.SelectionFlag.Rows,
+    )
+
+    assert manager._get_selected_rows() == [1, 2]
+
+    # Move selected items up
+    manager.move_selected_up()
+
+    # The queue should be reordered: item2, item3, item1, item4
+    assert manager.queue[0].file_name == "file2.txt"
+    assert manager.queue[1].file_name == "file3.txt"
+    assert manager.queue[2].file_name == "file1.txt"
+    assert manager.queue[3].file_name == "file4.txt"
+
+    # Multi-selection should be preserved on the moved items (now at rows 0 and 1)
+    assert manager._get_selected_rows() == [0, 1]
+
+

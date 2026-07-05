@@ -648,7 +648,12 @@ class QueueManager(QDialog):
             self.listwidget.setSortingEnabled(False)
         self.listwidget.clear_sort_indicator()
 
-    def _restore_selection_by_keys(self, keys):
+    def _restore_selection_by_keys(self, keys: list[int]) -> None:
+        """Restore row selection based on the given queue item keys.
+
+        Args:
+            keys: A list of integer keys identifying the items to select.
+        """
         selection_model = self.listwidget.selectionModel()
         if selection_model is None:
             return
@@ -673,9 +678,18 @@ class QueueManager(QDialog):
                 )
                 selected_rows.append(row)
         if selected_rows:
-            self.listwidget.setCurrentCell(selected_rows[0], 0)
+            first_index = model.index(selected_rows[0], 0)
+            selection_model.setCurrentIndex(
+                first_index,
+                QItemSelectionModel.SelectionFlag.NoUpdate,
+            )
 
-    def _restore_selection(self, selected_rows):
+    def _restore_selection(self, selected_rows: list[int]) -> None:
+        """Restore row selection based on a list of row indices.
+
+        Args:
+            selected_rows: A list of row indices to select.
+        """
         selection_model = self.listwidget.selectionModel()
         if selection_model is None:
             return
@@ -692,7 +706,11 @@ class QueueManager(QDialog):
                 | QItemSelectionModel.SelectionFlag.Rows,
             )
         if valid_rows:
-            self.listwidget.setCurrentCell(valid_rows[0], 0)
+            first_index = model.index(valid_rows[0], 0)
+            selection_model.setCurrentIndex(
+                first_index,
+                QItemSelectionModel.SelectionFlag.NoUpdate,
+            )
 
     def _reorder_queue_using_current_view(self, reorder_fn):
         selected_rows = self._get_selected_rows()
