@@ -130,7 +130,7 @@ PATCHES: list[dict] = [
     {
         "patch": "patches/mlx_audio_kokoro_conv1d_shape_fix.patch",
         "target": "mlx_audio/tts/models/base.py",
-        "sentinel": "# MLX shape: (out_channels, kernel_size, in_channels)",
+        "sentinel": "# If both dimensions are small (< 16), it is a pool layer",
         # The buggy code contains 'kH == KW' check.
         "bug_absent": "and (kH == KW):",
     },

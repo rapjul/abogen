@@ -1,6 +1,6 @@
 --- a/mlx_audio/tts/models/base.py
 +++ b/mlx_audio/tts/models/base.py
-@@ -26,10 +26,13 @@
+@@ -25,13 +25,23 @@
      if len(shape) != 3:
          return False
  
@@ -9,11 +9,22 @@
  
 -    # Check if out_channels is the largest, and kH and KW are the same
 -    if (out_channels >= kH) and (out_channels >= KW) and (kH == KW):
-+    # MLX shape: (out_channels, kernel_size, in_channels)
-+    # PyTorch shape: (out_channels, in_channels, kernel_size)
-+    # In Kokoro, in_channels (e.g. 512) >= kernel_size (e.g. 3)
-+    # So if dim2 >= dim1, it is already in MLX shape.
-+    if dim2 >= dim1:
++    if dim1 == dim2:
          return True
++
++    # Determine which dimension is the channels and which is the kernel size.
++    # In Kokoro/istftnet:
++    # - Channels are either 1, or >= 128 (e.g., 256, 512)
++    # - Kernel size is 1 or 3
++    # If one of the dimensions is large (>= 16), it represents the channels.
++    # In MLX, channels are at the end (dim2).
++    if max(dim1, dim2) >= 16:
++        return dim2 > dim1
++    # If both dimensions are small (< 16), it is a pool layer (1 and 3).
++    # In MLX, kernel_size is in the middle (dim1), and channels is at the end (dim2).
      else:
-         return False
+-        return False
++        return dim1 > dim2
+ 
+ 
+ def adjust_speed(audio_array, speed_factor):
