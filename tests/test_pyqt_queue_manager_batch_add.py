@@ -240,3 +240,69 @@ def test_add_more_files_remembers_and_syncs_last_folder(
     assert parent_gui.last_input_folder == str(selected_dir)
     assert parent_config["last_input_folder"] == str(selected_dir)
     assert saved_configs[-1]["last_input_folder"] == str(selected_dir)
+
+
+def test_create_document_queue_item_strips_to_ch_suffix(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Test that the subfolder name has '{To Ch...}' patterns stripped."""
+    manager = _build_manager(
+        current_attrs={
+            **_default_attrs(),
+            "output_folder": str(tmp_path / "out"),
+        }
+    )
+
+    class FakeDialog:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            self.book_metadata = {"title": "My Great Story {To Ch. Count of 136}"}
+
+        def exec(self) -> int:
+            return 1  # Accepted
+
+        def get_selected_text(self) -> tuple[list[tuple[str, str]], list[str]]:
+            return [("some text", " {Ch 1-10}")], ["id1"]
+
+        def get_save_chunks_in_folder(self) -> bool:
+            return True
+
+        def get_save_chapters_separately(self) -> bool:
+            return False
+
+        def get_merge_chapters_at_end(self) -> bool:
+            return False
+
+        def get_chapter_visual_indentation(self) -> bool:
+            return True
+
+        def get_chapter_depth_limit(self) -> int:
+            return 99
+
+    monkeypatch.setattr(queue_manager_module, "HandlerDialog", FakeDialog)
+    monkeypatch.setattr(manager, "_document_file_type", lambda p: "epub")
+    monkeypatch.setattr(
+        manager, "_resolve_document_output_cache_dir", lambda p, d: str(tmp_path)
+    )
+
+    import os
+    import tempfile
+
+    fake_text_file = tmp_path / "temp_chunk.txt"
+    monkeypatch.setattr(
+        tempfile, "mkstemp", lambda **kwargs: (999, str(fake_text_file))
+    )
+    monkeypatch.setattr(os, "close", lambda fd: None)
+
+    # Mock open if needed, but since it writes to fake_text_file which is in tmp_path, it's fine to write to disk.
+    items = manager._create_document_queue_item(
+        str(tmp_path / "book.epub"), manager.get_current_attributes()
+    )
+
+    assert items is not None
+    assert len(items) == 1
+    item = items[0]
+    # Check that output_folder is subfolder My Great Story without suffix
+    expected_folder = str(tmp_path / "out" / "My Great Story")
+    assert item.output_folder == expected_folder
+    assert item.save_chunks_in_folder_name == "My Great Story"
+

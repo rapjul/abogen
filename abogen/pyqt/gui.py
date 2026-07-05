@@ -3011,6 +3011,9 @@ class abogen(QWidget):
                 book_metadata = getattr(self, "book_metadata", {}) or {}
                 proper_name = book_metadata.get("title") or Path(save_base_path).stem
 
+                # Remove {To Ch...} suffix from proper name when creating subfolder.
+                # This handles cases like `{To Ch 37}` or `{To Ch. Count of 136}`.
+                proper_name = re.sub(r"\s*\{To Ch[^}]*\}", "", proper_name)
                 proper_name = re.sub(r"\(\d+\)$", "", proper_name.strip()).strip()
                 proper_name = proper_name.replace(";", "_")
                 folder_name = sanitize_name_for_os(proper_name, is_folder=True)
