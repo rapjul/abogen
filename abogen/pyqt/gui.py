@@ -2981,7 +2981,7 @@ class abogen(QWidget):
         def get_chunk_range(suffix):
             if not suffix:
                 return None
-            m = re.search(r"\{Ch (\d+)(?:-(\d+))?\}", suffix)
+            m = re.search(r"\{Ch (\d+)(?:[-–](\d+))?\}", suffix)
             if m:
                 start = int(m.group(1))
                 end = int(m.group(2)) if m.group(2) else start

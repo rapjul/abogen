@@ -261,7 +261,7 @@ def test_create_document_queue_item_strips_to_ch_suffix(
             return 1  # Accepted
 
         def get_selected_text(self) -> tuple[list[tuple[str, str]], list[str]]:
-            return [("some text", " {Ch 1-10}")], ["id1"]
+            return [("some text", " {Ch 1–10}")], ["id1"]
 
         def get_save_chunks_in_folder(self) -> bool:
             return True

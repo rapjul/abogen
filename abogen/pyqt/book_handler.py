@@ -1840,7 +1840,7 @@ class HandlerDialog(QDialog):
                 if start_ch == end_ch:
                     suffix = f" {{Ch {start_ch}}}"
                 else:
-                    suffix = f" {{Ch {start_ch}-{end_ch}}}"
+                    suffix = f" {{Ch {start_ch}–{end_ch}}}"
 
                 chunk_metadata = re.sub(
                     r"(<<METADATA_TITLE:[^>]+)>>", rf"\1{suffix}>>", metadata_block
@@ -1866,7 +1866,7 @@ class HandlerDialog(QDialog):
                         if chunk_start_ch == chunk_end_ch:
                             suffix = f" {{Ch {chunk_start_ch}}}"
                         else:
-                            suffix = f" {{Ch {chunk_start_ch}-{chunk_end_ch}}}"
+                            suffix = f" {{Ch {chunk_start_ch}–{chunk_end_ch}}}"
 
                         chunk_metadata = re.sub(
                             r"(<<METADATA_TITLE:[^>]+)>>", rf"\1{suffix}>>", metadata_block
@@ -1885,7 +1885,7 @@ class HandlerDialog(QDialog):
                     if chunk_start_ch == chunk_end_ch:
                         suffix = f" {{Ch {chunk_start_ch}}}"
                     else:
-                        suffix = f" {{Ch {chunk_start_ch}-{chunk_end_ch}}}"
+                        suffix = f" {{Ch {chunk_start_ch}–{chunk_end_ch}}}"
 
                 chunk_metadata = re.sub(
                     r"(<<METADATA_TITLE:[^>]+)>>", rf"\1{suffix}>>", metadata_block
