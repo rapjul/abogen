@@ -2207,6 +2207,7 @@ class ConversionThread(QThread):
             else:
                 # If not merging, set merged_out_file and related variables to None
                 merged_out_file = None
+                merged_subtitle_file = None
                 ffmpeg_proc = None
                 merged_out_path = None
                 subtitle_entries = []
