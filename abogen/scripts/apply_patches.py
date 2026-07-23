@@ -138,7 +138,7 @@ PATCHES: list[dict] = [
         "patch": "patches/mlx_audio_kokoro_proj_shape_fix.patch",
         "target": "mlx_audio/tts/models/kokoro/kokoro.py",
         "sentinel": "# Check F0_proj shape conditionally",
-        "bug_absent": "sanitized_weights[key] = state_dict.transpose(0, 2, 1)",
+        "bug_absent": "else state_dict.transpose(0, 2, 1)",
     },
 ]
 
