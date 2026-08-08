@@ -14,12 +14,20 @@ from PyQt6.QtCore import (
     QThread,
     pyqtSignal,
 )
-from PyQt6.QtGui import QMovie
+from PyQt6.QtGui import (
+    QColor,
+    QKeySequence,
+    QMovie,
+    QShortcut,
+    QTextCharFormat,
+    QTextCursor,
+)
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -162,6 +170,12 @@ class HandlerDialog(QDialog):
         self.content_lengths = {}
         # Also maintain refs for structure
         self.processed_nav_structure = []
+
+        # Internal state tracking for chapter preview, editing, and search
+        self._current_identifier = None
+        self._is_editing_enabled = False
+        self._active_search_matches = []
+        self._active_match_idx = -1
 
         # Add a placeholder "Book Metadata" item so the tree isn't empty immediately
         info_item = QTreeWidgetItem(self.treeWidget, ["Book Metadata"])
@@ -653,13 +667,138 @@ class HandlerDialog(QDialog):
         return bool(self.checked_chapters.intersection(all_identifiers))
 
     def _setup_ui(self):
+        # Preview Text Editor
         self.previewEdit = QTextEdit(self)
         self.previewEdit.setReadOnly(True)
         self.previewEdit.setMinimumWidth(300)
         self.previewEdit.setStyleSheet("QTextEdit { border: none; }")
+        self.previewEdit.textChanged.connect(self._on_preview_text_edited)
+
+        # Chapter Information Stats Frame (Right Column Header)
+        self.chapter_info_frame = QFrame(self)
+        self.chapter_info_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        self.chapter_info_frame.setStyleSheet(
+            "QFrame { background-color: rgba(128, 128, 128, 0.08); border-radius: 4px; padding: 4px; }"
+        )
+        info_layout = QHBoxLayout(self.chapter_info_frame)
+        info_layout.setContentsMargins(6, 4, 6, 4)
+
+        self.chapter_stats_label = QLabel(self.chapter_info_frame)
+        self.chapter_stats_label.setText("<b>No chapter selected</b>")
+        self.chapter_stats_label.setWordWrap(True)
+        info_layout.addWidget(self.chapter_stats_label, 1)
+
+        self.toggle_edit_btn = QPushButton("Edit Text", self.chapter_info_frame)
+        self.toggle_edit_btn.setToolTip(
+            "Toggle direct manual text editing in the preview pane"
+        )
+        self.toggle_edit_btn.clicked.connect(self.toggle_edit_mode)
+        info_layout.addWidget(self.toggle_edit_btn, 0)
+
+        self.toggle_fr_btn = QPushButton("Find & Replace", self.chapter_info_frame)
+        self.toggle_fr_btn.setToolTip("Open Find & Replace panel (Ctrl+F)")
+        self.toggle_fr_btn.clicked.connect(self.toggle_find_replace_panel)
+        info_layout.addWidget(self.toggle_fr_btn, 0)
+
+        self.chapter_info_frame.hide()
+
+        # Find & Replace Panel (Collapsible QFrame)
+        self.find_replace_frame = QFrame(self)
+        self.find_replace_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        self.find_replace_frame.setStyleSheet(
+            "QFrame { background-color: rgba(128, 128, 128, 0.05); border-radius: 4px; padding: 6px; }"
+        )
+        fr_layout = QVBoxLayout(self.find_replace_frame)
+        fr_layout.setContentsMargins(6, 6, 6, 6)
+        fr_layout.setSpacing(4)
+
+        # Row 1: Find input + match count + prev/next + close
+        row1 = QHBoxLayout()
+        self.fr_find_input = QLineEdit(self.find_replace_frame)
+        self.fr_find_input.setPlaceholderText("Find text or pattern...")
+        self.fr_find_input.textChanged.connect(self._on_find_text_changed)
+
+        self.fr_match_count_label = QLabel("0 matches", self.find_replace_frame)
+        self.fr_match_count_label.setStyleSheet("color: #666; font-size: 12px;")
+
+        self.fr_prev_btn = QPushButton("▲ Prev", self.find_replace_frame)
+        self.fr_prev_btn.setFixedWidth(65)
+        self.fr_prev_btn.clicked.connect(self._find_prev_match)
+
+        self.fr_next_btn = QPushButton("▼ Next", self.find_replace_frame)
+        self.fr_next_btn.setFixedWidth(65)
+        self.fr_next_btn.clicked.connect(self._find_next_match)
+
+        self.fr_close_btn = QPushButton("✕", self.find_replace_frame)
+        self.fr_close_btn.setFixedWidth(30)
+        self.fr_close_btn.clicked.connect(lambda: self.find_replace_frame.hide())
+
+        row1.addWidget(self.fr_find_input, 1)
+        row1.addWidget(self.fr_match_count_label, 0)
+        row1.addWidget(self.fr_prev_btn, 0)
+        row1.addWidget(self.fr_next_btn, 0)
+        row1.addWidget(self.fr_close_btn, 0)
+        fr_layout.addLayout(row1)
+
+        # Row 2: Replace input + Replace + Replace All + Save to Substitutions
+        row2 = QHBoxLayout()
+        self.fr_replace_input = QLineEdit(self.find_replace_frame)
+        self.fr_replace_input.setPlaceholderText("Replace with...")
+
+        self.fr_replace_btn = QPushButton("Replace", self.find_replace_frame)
+        self.fr_replace_btn.clicked.connect(self._perform_replace_single)
+
+        self.fr_replace_all_btn = QPushButton("Replace All", self.find_replace_frame)
+        self.fr_replace_all_btn.clicked.connect(self._perform_replace_all)
+
+        self.fr_save_sub_btn = QPushButton(
+            "Save to Word Substitutions", self.find_replace_frame
+        )
+        self.fr_save_sub_btn.setToolTip(
+            "Save this Find/Replace rule into global Word Substitutions"
+        )
+        self.fr_save_sub_btn.clicked.connect(self._save_to_word_substitutions)
+
+        row2.addWidget(self.fr_replace_input, 1)
+        row2.addWidget(self.fr_replace_btn, 0)
+        row2.addWidget(self.fr_replace_all_btn, 0)
+        row2.addWidget(self.fr_save_sub_btn, 0)
+        fr_layout.addLayout(row2)
+
+        # Row 3: Options (Match Case, Whole Word, Regular Expression)
+        row3 = QHBoxLayout()
+        self.fr_match_case_cb = QCheckBox("Match Case", self.find_replace_frame)
+        self.fr_match_case_cb.stateChanged.connect(
+            lambda _: self._on_find_text_changed()
+        )
+
+        self.fr_whole_word_cb = QCheckBox("Whole Word", self.find_replace_frame)
+        self.fr_whole_word_cb.stateChanged.connect(
+            lambda _: self._on_find_text_changed()
+        )
+
+        self.fr_use_regex_cb = QCheckBox("Regular Expression", self.find_replace_frame)
+        self.fr_use_regex_cb.stateChanged.connect(
+            lambda _: self._on_find_text_changed()
+        )
+
+        row3.addWidget(self.fr_match_case_cb)
+        row3.addWidget(self.fr_whole_word_cb)
+        row3.addWidget(self.fr_use_regex_cb)
+        row3.addStretch(1)
+        fr_layout.addLayout(row3)
+
+        # Row 4: Error/Warning Label
+        self.fr_error_label = QLabel("", self.find_replace_frame)
+        self.fr_error_label.setStyleSheet(
+            "color: #d9534f; font-weight: bold; font-size: 11px;"
+        )
+        fr_layout.addWidget(self.fr_error_label)
+
+        self.find_replace_frame.hide()
 
         self.previewInfoLabel = QLabel(
-            '*Note: You can modify the content later using the "Edit" button in the input box or by accessing the temporary files directory through settings (if not saved in a project folder).',
+            '*Note: You can modify the content using "Edit Text" or "Find & Replace". All text changes are retained and used directly for audiobook generation.',
             self,
         )
         self.previewInfoLabel.setWordWrap(True)
@@ -669,6 +808,8 @@ class HandlerDialog(QDialog):
 
         previewLayout = QVBoxLayout()
         previewLayout.setContentsMargins(0, 0, 0, 0)
+        previewLayout.addWidget(self.chapter_info_frame, 0)
+        previewLayout.addWidget(self.find_replace_frame, 0)
         previewLayout.addWidget(self.previewEdit, 1)
         previewLayout.addWidget(self.previewInfoLabel, 0)
 
@@ -731,6 +872,28 @@ class HandlerDialog(QDialog):
         )
         leftLayout.addWidget(self.count_label)
 
+        # Filter & Preset Actions Bar
+        filter_layout = QHBoxLayout()
+        self.filter_combo = QComboBox(self)
+        self.filter_combo.addItems(["Filter: All", "Selected Only", "Unchecked Only"])
+        self.filter_combo.setToolTip("Filter visible chapters by selection state")
+        self.filter_combo.currentIndexChanged.connect(self.apply_tree_filter)
+
+        self.uncheck_short_btn = QPushButton("<500 Chars", self)
+        self.uncheck_short_btn.setToolTip(
+            "Uncheck short chapters with less than 500 characters"
+        )
+        self.uncheck_short_btn.clicked.connect(self.uncheck_short_chapters)
+
+        self.invert_sel_btn = QPushButton("Invert", self)
+        self.invert_sel_btn.setToolTip("Invert current selection")
+        self.invert_sel_btn.clicked.connect(self.invert_selection)
+
+        filter_layout.addWidget(self.filter_combo, 1)
+        filter_layout.addWidget(self.uncheck_short_btn, 0)
+        filter_layout.addWidget(self.invert_sel_btn, 0)
+        leftLayout.addLayout(filter_layout)
+
         self.search_bar = QLineEdit(self)
         self.search_bar.setPlaceholderText("Search chapters...")
         self.search_bar.textChanged.connect(self.filter_tree)
@@ -738,6 +901,10 @@ class HandlerDialog(QDialog):
 
         leftLayout.addWidget(self.treeWidget)
         self.treeWidget.installEventFilter(self)
+
+        # Keyboard Shortcut: Ctrl+F / Cmd+F to open Find & Replace
+        self.find_shortcut = QShortcut(QKeySequence("Ctrl+F"), self)
+        self.find_shortcut.activated.connect(self.toggle_find_replace_panel)
 
         checkbox_text = (
             "Save each chapter separately"
@@ -871,12 +1038,433 @@ class HandlerDialog(QDialog):
         mainLayout.addWidget(self.splitter)
         self.setLayout(mainLayout)
 
+    def _get_playback_speed(self) -> float:
+        """Get the active TTS playback speed factor for audio duration estimation.
+
+        Returns:
+            float: Speed multiplier (e.g. 1.0, 1.25).
+        """
+        try:
+            parent = self.parent()
+            if parent is not None:
+                if hasattr(parent, "speed_slider"):
+                    return float(parent.speed_slider.value() / 100.0)
+                if hasattr(parent, "speed"):
+                    return float(parent.speed)
+
+            from abogen.utils import load_config
+
+            cfg = load_config()
+            return float(cfg.get("speed", 1.0))
+        except Exception:
+            return 1.0
+
+    def _format_estimated_duration(self, word_count: int) -> str:
+        """Format estimated spoken audio duration for a given word count.
+
+        Args:
+            word_count: Total words in text.
+
+        Returns:
+            str: Formatted duration string (e.g., '~14m 30s' or '~1h 05m').
+        """
+        speed = self._get_playback_speed()
+        base_wpm = 150.0 * max(0.1, speed)
+        total_seconds = int((word_count / base_wpm) * 60)
+
+        if total_seconds < 60:
+            return f"~{total_seconds}s"
+
+        minutes = total_seconds // 60
+        seconds = total_seconds % 60
+        if minutes < 60:
+            return f"~{minutes}m {seconds:02d}s"
+
+        hours = minutes // 60
+        minutes = minutes % 60
+        return f"~{hours}h {minutes:02d}m"
+
+    def _update_chapter_info_header(
+        self, current: QTreeWidgetItem | None, text: str | None
+    ) -> None:
+        """Update the chapter information stats header above the text preview pane.
+
+        Args:
+            current: Currently selected QTreeWidgetItem or None.
+            text: Chapter text string or None.
+        """
+        if not hasattr(self, "chapter_stats_label") or self.chapter_stats_label is None:
+            return
+
+        if (
+            not current
+            or text is None
+            or current.data(0, Qt.ItemDataRole.UserRole) == "info:bookinfo"
+        ):
+            self.chapter_info_frame.hide()
+            return
+
+        self.chapter_info_frame.show()
+
+        char_count = len(text)
+        words = text.split()
+        word_count = len(words)
+        paragraphs = len([p for p in text.split("\n\n") if p.strip()])
+        duration_str = self._format_estimated_duration(word_count)
+        speed = self._get_playback_speed()
+
+        title = current.text(0)
+        self.chapter_stats_label.setText(
+            f"<b>{title}</b> &nbsp;|&nbsp; "
+            f"<b>Chars:</b> {char_count:,} &nbsp;|&nbsp; "
+            f"<b>Words:</b> {word_count:,} &nbsp;|&nbsp; "
+            f"<b>Paragraphs:</b> {paragraphs} &nbsp;|&nbsp; "
+            f"<b>Est. Audio:</b> {duration_str} ({speed:.2f}x speed)"
+        )
+
+    def toggle_edit_mode(self) -> None:
+        """Toggle direct text editing mode in the chapter preview pane."""
+        self._is_editing_enabled = not self._is_editing_enabled
+        self.previewEdit.setReadOnly(not self._is_editing_enabled)
+
+        if self._is_editing_enabled:
+            self.toggle_edit_btn.setText("Editing (Active)")
+            self.toggle_edit_btn.setStyleSheet(
+                "QPushButton { background-color: #28a745; color: white; font-weight: bold; }"
+            )
+            self.previewEdit.setFocus()
+        else:
+            self.toggle_edit_btn.setText("Edit Text")
+            self.toggle_edit_btn.setStyleSheet("")
+
+    def _on_preview_text_edited(self) -> None:
+        """Handle direct text edit events in previewEdit and update stored chapter text."""
+        if not self._is_editing_enabled or not self._current_identifier:
+            return
+        if self._current_identifier == "info:bookinfo":
+            return
+
+        new_text = self.previewEdit.toPlainText()
+        self.content_texts[self._current_identifier] = new_text
+        self.content_lengths[self._current_identifier] = len(new_text)
+
+        current = self.treeWidget.currentItem()
+        self._update_chapter_info_header(current, new_text)
+        self._update_count_label()
+
+    def toggle_find_replace_panel(self) -> None:
+        """Toggle visibility of the Find & Replace panel."""
+        is_visible = not self.find_replace_frame.isHidden()
+        if is_visible:
+            self.find_replace_frame.hide()
+        else:
+            self.find_replace_frame.show()
+            self.fr_find_input.setFocus()
+            self.fr_find_input.selectAll()
+            self._on_find_text_changed()
+
+    def _on_find_text_changed(self) -> None:
+        """Execute search when find text or search option checkboxes change."""
+        self._search_matches()
+
+    def _search_matches(self) -> None:
+        """Find and highlight matches in the active chapter text preview."""
+        self._active_search_matches = []
+        self._active_match_idx = -1
+
+        if not hasattr(self, "fr_find_input") or self.find_replace_frame.isHidden():
+            self.previewEdit.setExtraSelections([])
+            return
+
+        find_text = self.fr_find_input.text()
+        self.fr_error_label.setText("")
+
+        if not find_text:
+            self.fr_match_count_label.setText("0 matches")
+            self.previewEdit.setExtraSelections([])
+            return
+
+        doc_text = self.previewEdit.toPlainText()
+        use_regex = self.fr_use_regex_cb.isChecked()
+        match_case = self.fr_match_case_cb.isChecked()
+        whole_word = self.fr_whole_word_cb.isChecked()
+
+        matches = []
+        if use_regex:
+            try:
+                flags = 0 if match_case else re.IGNORECASE
+                pattern = re.compile(find_text, flags)
+                for m in pattern.finditer(doc_text):
+                    matches.append((m.start(), m.end()))
+            except re.error as e:
+                self.fr_error_label.setText(f"Invalid regex: {e.msg}")
+                self.fr_match_count_label.setText("0 matches")
+                self.previewEdit.setExtraSelections([])
+                return
+        else:
+            pattern_str = re.escape(find_text)
+            if whole_word:
+                pattern_str = rf"\b{pattern_str}\b"
+            flags = 0 if match_case else re.IGNORECASE
+            try:
+                pattern = re.compile(pattern_str, flags)
+                for m in pattern.finditer(doc_text):
+                    matches.append((m.start(), m.end()))
+            except Exception as e:
+                self.fr_error_label.setText(f"Search error: {e}")
+                self.fr_match_count_label.setText("0 matches")
+                self.previewEdit.setExtraSelections([])
+                return
+
+        self._active_search_matches = matches
+        if matches:
+            self._active_match_idx = 0
+            self.fr_match_count_label.setText(f"1 of {len(matches)} matches")
+        else:
+            self.fr_match_count_label.setText("0 matches")
+
+        self._update_find_highlights()
+
+    def _update_find_highlights(self) -> None:
+        """Update QTextEdit extra selections to highlight all search matches."""
+        extra_selections = []
+        doc = self.previewEdit.document()
+
+        for idx, (start, end) in enumerate(self._active_search_matches):
+            cursor = QTextCursor(doc)
+            cursor.setPosition(start)
+            cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+
+            selection = QTextEdit.ExtraSelection()
+            selection.cursor = cursor
+
+            fmt = QTextCharFormat()
+            if idx == self._active_match_idx:
+                fmt.setBackground(QColor("#f0ad4e"))  # Active match orange
+                fmt.setForeground(QColor("#ffffff"))
+            else:
+                fmt.setBackground(QColor("#fff3cd"))  # Highlight yellow
+                fmt.setForeground(QColor("#000000"))
+
+            selection.format = fmt
+            extra_selections.append(selection)
+
+        self.previewEdit.setExtraSelections(extra_selections)
+
+        if 0 <= self._active_match_idx < len(self._active_search_matches):
+            start, end = self._active_search_matches[self._active_match_idx]
+            cursor = QTextCursor(doc)
+            cursor.setPosition(start)
+            self.previewEdit.setTextCursor(cursor)
+
+    def _find_next_match(self) -> None:
+        """Move cursor to the next match."""
+        if not self._active_search_matches:
+            return
+        self._active_match_idx = (self._active_match_idx + 1) % len(
+            self._active_search_matches
+        )
+        self.fr_match_count_label.setText(
+            f"{self._active_match_idx + 1} of {len(self._active_search_matches)} matches"
+        )
+        self._update_find_highlights()
+
+    def _find_prev_match(self) -> None:
+        """Move cursor to the previous match."""
+        if not self._active_search_matches:
+            return
+        self._active_match_idx = (self._active_match_idx - 1) % len(
+            self._active_search_matches
+        )
+        self.fr_match_count_label.setText(
+            f"{self._active_match_idx + 1} of {len(self._active_search_matches)} matches"
+        )
+        self._update_find_highlights()
+
+    def _perform_replace_single(self) -> None:
+        """Replace the active match in the current chapter text."""
+        if not self._active_search_matches or self._active_match_idx < 0:
+            return
+        if not self._current_identifier or self._current_identifier == "info:bookinfo":
+            return
+
+        start, end = self._active_search_matches[self._active_match_idx]
+        text = self.previewEdit.toPlainText()
+        replace_text = self.fr_replace_input.text()
+
+        if self.fr_use_regex_cb.isChecked():
+            try:
+                flags = 0 if self.fr_match_case_cb.isChecked() else re.IGNORECASE
+                pattern = re.compile(self.fr_find_input.text(), flags)
+                match = pattern.search(text, start)
+                if match:
+                    replacement = match.expand(replace_text)
+                    new_text = text[:start] + replacement + text[end:]
+                else:
+                    new_text = text[:start] + replace_text + text[end:]
+            except Exception:
+                new_text = text[:start] + replace_text + text[end:]
+        else:
+            new_text = text[:start] + replace_text + text[end:]
+
+        self.previewEdit.setPlainText(new_text)
+        self.content_texts[self._current_identifier] = new_text
+        self.content_lengths[self._current_identifier] = len(new_text)
+
+        current = self.treeWidget.currentItem()
+        self._update_chapter_info_header(current, new_text)
+        self._update_count_label()
+        self._search_matches()
+
+    def _perform_replace_all(self) -> None:
+        """Replace all match occurrences in the current chapter text."""
+        if not self._current_identifier or self._current_identifier == "info:bookinfo":
+            return
+
+        find_text = self.fr_find_input.text()
+        replace_text = self.fr_replace_input.text()
+        if not find_text:
+            return
+
+        text = self.previewEdit.toPlainText()
+        use_regex = self.fr_use_regex_cb.isChecked()
+        match_case = self.fr_match_case_cb.isChecked()
+        whole_word = self.fr_whole_word_cb.isChecked()
+
+        try:
+            if use_regex:
+                flags = 0 if match_case else re.IGNORECASE
+                pattern = re.compile(find_text, flags)
+                new_text = pattern.sub(replace_text, text)
+            else:
+                pattern_str = re.escape(find_text)
+                if whole_word:
+                    pattern_str = rf"\b{pattern_str}\b"
+                flags = 0 if match_case else re.IGNORECASE
+                pattern = re.compile(pattern_str, flags)
+                new_text = pattern.sub(replace_text, text)
+        except Exception as e:
+            self.fr_error_label.setText(f"Replace failed: {e}")
+            return
+
+        self.previewEdit.setPlainText(new_text)
+        self.content_texts[self._current_identifier] = new_text
+        self.content_lengths[self._current_identifier] = len(new_text)
+
+        current = self.treeWidget.currentItem()
+        self._update_chapter_info_header(current, new_text)
+        self._update_count_label()
+        self._search_matches()
+
+    def _save_to_word_substitutions(self) -> None:
+        """Save the current find & replace pair into global Word Substitutions."""
+        find_text = self.fr_find_input.text().strip()
+        replace_text = self.fr_replace_input.text().strip()
+
+        if not find_text:
+            self.fr_error_label.setText("Enter a search term to save substitution.")
+            return
+
+        try:
+            from abogen.utils import load_config, save_config
+
+            cfg = load_config()
+            sub_list = cfg.get("word_substitutions_list", "")
+            new_rule = f"{find_text}|{replace_text}"
+
+            lines = [line.strip() for line in sub_list.split("\n") if line.strip()]
+            if new_rule not in lines:
+                lines.append(new_rule)
+                updated_sub_list = "\n".join(lines)
+                cfg["word_substitutions_list"] = updated_sub_list
+                cfg["word_substitutions_enabled"] = True
+                save_config(cfg)
+                self.fr_error_label.setStyleSheet(
+                    "QLabel { color: #28a745; font-weight: bold; }"
+                )
+                self.fr_error_label.setText(
+                    f"Saved substitution: '{find_text}' ➔ '{replace_text}'"
+                )
+            else:
+                self.fr_error_label.setStyleSheet(
+                    "QLabel { color: #888; font-style: italic; }"
+                )
+                self.fr_error_label.setText("Substitution rule already exists.")
+        except Exception as e:
+            self.fr_error_label.setStyleSheet(
+                "QLabel { color: #d9534f; font-weight: bold; }"
+            )
+            self.fr_error_label.setText(f"Failed to save substitution: {e}")
+
+    def uncheck_short_chapters(self) -> None:
+        """Uncheck chapters that contain less than 500 characters of text."""
+        self._block_signals = True
+        iterator = QTreeWidgetItemIterator(self.treeWidget)
+        while iterator.value():
+            item = iterator.value()
+            if item is None:
+                iterator += 1
+                continue
+            if item.flags() & Qt.ItemFlag.ItemIsUserCheckable:
+                identifier = item.data(0, Qt.ItemDataRole.UserRole)
+                text = self.content_texts.get(identifier, "") if identifier else ""
+                if len(text) < 500:
+                    item.setCheckState(0, Qt.CheckState.Unchecked)
+            iterator += 1
+        self._block_signals = False
+        self._update_checked_set_from_tree()
+
+    def invert_selection(self) -> None:
+        """Invert the check state of all available chapters in the tree."""
+        self._block_signals = True
+        iterator = QTreeWidgetItemIterator(self.treeWidget)
+        while iterator.value():
+            item = iterator.value()
+            if item is None:
+                iterator += 1
+                continue
+            if item.flags() & Qt.ItemFlag.ItemIsUserCheckable:
+                current_state = item.checkState(0)
+                new_state = (
+                    Qt.CheckState.Unchecked
+                    if current_state == Qt.CheckState.Checked
+                    else Qt.CheckState.Checked
+                )
+                item.setCheckState(0, new_state)
+            iterator += 1
+        self._block_signals = False
+        self._update_checked_set_from_tree()
+
+    def apply_tree_filter(self, index: int) -> None:
+        """Filter tree items by selection state.
+
+        Args:
+            index: Filter index (0=All, 1=Selected Only, 2=Unchecked Only).
+        """
+        iterator = QTreeWidgetItemIterator(self.treeWidget)
+        while iterator.value():
+            item = iterator.value()
+            if item is None:
+                iterator += 1
+                continue
+
+            if index == 0:
+                item.setHidden(False)
+            elif index == 1:
+                item.setHidden(item.checkState(0) != Qt.CheckState.Checked)
+            elif index == 2:
+                item.setHidden(item.checkState(0) != Qt.CheckState.Unchecked)
+            iterator += 1
+
     def _update_count_label(self):
         if not hasattr(self, "count_label") or not self.count_label:
             return
 
         count = 0
         total = 0
+        total_chars = 0
+        total_words = 0
+
         iterator = QTreeWidgetItemIterator(self.treeWidget)
         while iterator.value():
             item = iterator.value()
@@ -887,9 +1475,18 @@ class HandlerDialog(QDialog):
                 total += 1
                 if item.checkState(0) == Qt.CheckState.Checked:
                     count += 1
+                    identifier = item.data(0, Qt.ItemDataRole.UserRole)
+                    if identifier and identifier in self.content_texts:
+                        ch_text = self.content_texts[identifier]
+                        total_chars += len(ch_text)
+                        total_words += len(ch_text.split())
             iterator += 1
 
-        self.count_label.setText(f"{count} of {total} items selected")
+        duration_str = self._format_estimated_duration(total_words)
+        speed = self._get_playback_speed()
+        self.count_label.setText(
+            f"{count} of {total} selected ({total_chars:,} chars, {duration_str} at {speed:.2f}x)"
+        )
 
     def filter_tree(self, text):
         search_text = text.lower()
@@ -928,18 +1525,29 @@ class HandlerDialog(QDialog):
             )
 
             if is_check_key or is_uncheck_key:
+                selected_items = self.treeWidget.selectedItems()
                 current_item = self.treeWidget.currentItem()
-                if current_item and (
-                    current_item.flags() & Qt.ItemFlag.ItemIsUserCheckable
-                ):
+                if not selected_items and current_item:
+                    selected_items = [current_item]
+
+                if selected_items:
                     state = (
                         Qt.CheckState.Checked
                         if is_check_key
                         else Qt.CheckState.Unchecked
                     )
-                    current_item.setCheckState(0, state)
+                    self._block_signals = True
+                    for item in selected_items:
+                        if item and (item.flags() & Qt.ItemFlag.ItemIsUserCheckable):
+                            item.setCheckState(0, state)
 
-                    next_item = self.treeWidget.itemBelow(current_item)
+                    self._sync_parent_checkbox_states()
+                    self._block_signals = False
+                    self._update_checked_set_from_tree()
+
+                    # Move focus to the item below the last selected item if available
+                    last_item = selected_items[-1]
+                    next_item = self.treeWidget.itemBelow(last_item)
                     if next_item:
                         self.treeWidget.setCurrentItem(next_item)
                 return True
@@ -954,9 +1562,13 @@ class HandlerDialog(QDialog):
                         in (Qt.CheckState.Unchecked, Qt.CheckState.PartiallyChecked)
                         else Qt.CheckState.Unchecked
                     )
+                    self._block_signals = True
                     for item in selected_items:
-                        if item.flags() & Qt.ItemFlag.ItemIsUserCheckable:
+                        if item and (item.flags() & Qt.ItemFlag.ItemIsUserCheckable):
                             item.setCheckState(0, new_state)
+                    self._sync_parent_checkbox_states()
+                    self._block_signals = False
+                    self._update_checked_set_from_tree()
                 return True
 
         return super().eventFilter(obj, event)
@@ -1471,33 +2083,40 @@ class HandlerDialog(QDialog):
 
     def update_preview(self, current):
         if not current:
+            self._current_identifier = None
             self.previewEdit.clear()
+            self._update_chapter_info_header(None, None)
             return
 
         identifier = current.data(0, Qt.ItemDataRole.UserRole)
+        self._current_identifier = identifier
 
         if identifier == "info:bookinfo":
+            self._update_chapter_info_header(None, None)
             self._display_book_info()
             return
 
-        text = None
-        if self.parser.file_type == "epub":
-            text = self.content_texts.get(identifier)
-        else:
-            text = self.content_texts.get(identifier)
+        text = self.content_texts.get(identifier)
 
         if text is None:
             title = current.text(0)
-            self.previewEdit.setPlainText(
-                f"{title}\n\n(No content available for this item)"
-            )
+            cleaned_text = f"{title}\n\n(No content available for this item)"
+            self.previewEdit.setPlainText(cleaned_text)
         elif not text.strip():
             title = current.text(0)
-            self.previewEdit.setPlainText(f"{title}\n\n(This item is empty)")
+            cleaned_text = f"{title}\n\n(This item is empty)"
+            self.previewEdit.setPlainText(cleaned_text)
         else:
             # Apply clean_text to preview so replace_single_newlines setting is respected
             cleaned_text = clean_text(text)
             self.previewEdit.setPlainText(cleaned_text)
+
+        self._update_chapter_info_header(current, text or "")
+        if (
+            hasattr(self, "find_replace_frame")
+            and not self.find_replace_frame.isHidden()
+        ):
+            self._search_matches()
 
     def _display_book_info(self):
         self.previewEdit.clear()
@@ -1825,7 +2444,7 @@ class HandlerDialog(QDialog):
             m = re.match(r"<<CHAPTER_MARKER:(.*?)>>", ch_text)
             if not m:
                 return False
-            return bool(re.search(r'\d', m.group(1)))
+            return bool(re.search(r"\d", m.group(1)))
 
         total_chapters = len(chapters)
         marked_count = sum(1 for c in chapters if is_marked(c))
@@ -1869,7 +2488,9 @@ class HandlerDialog(QDialog):
                             suffix = f" {{Ch {chunk_start_ch}–{chunk_end_ch}}}"
 
                         chunk_metadata = re.sub(
-                            r"(<<METADATA_TITLE:[^>]+)>>", rf"\1{suffix}>>", metadata_block
+                            r"(<<METADATA_TITLE:[^>]+)>>",
+                            rf"\1{suffix}>>",
+                            metadata_block,
                         )
                         chunk_text = chunk_metadata + "".join(current_chunk_chapters)
                         chunks.append((chunk_text, suffix))
@@ -2400,9 +3021,6 @@ class HandlerDialog(QDialog):
         val: int = self.split_chapters_spinbox.value()
         new_val: int = int(round(val / 10.0) * 10)
         return max(10, min(100, new_val))
-
-    def get_chapter_depth_limit(self):
-        return self.chapter_depth_limit
 
     def get_save_chunks_in_folder(self):
         return self.save_chunks_in_folder_checkbox.isChecked()
