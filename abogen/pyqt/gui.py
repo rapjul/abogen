@@ -3,7 +3,6 @@ import base64
 import gc
 import hashlib  # Added for cache path generation
 import html
-import json
 import logging
 import os
 import platform
@@ -13,6 +12,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
+from typing import Any, Callable
 
 import psutil
 from PyQt6.QtCore import (
@@ -29,6 +29,7 @@ from PyQt6.QtCore import (
     QTimer,
     QUrl,
     pyqtSignal,
+    pyqtSlot,
 )
 from PyQt6.QtGui import (
     QAction,
@@ -101,11 +102,14 @@ from abogen.subtitle_utils import (
     clean_text,
 )
 from abogen.utils import (
-    LoadPipelineThread,
+    atomic_write_json,
+    consume_config_load_warning,
     get_gpu_acceleration,
     get_resource_path,
     get_user_cache_path,
+    load_json_with_backup,
     load_config,
+    load_numpy_kpipeline,
     prevent_sleep_end,
     prevent_sleep_start,
     reveal_in_file_manager,
@@ -197,6 +201,57 @@ class ThreadSafeLogSignal(QObject):
 
     def emit_log(self, message):
         self.log_signal.emit(message)
+
+
+class PipelineLoadThread(QThread):
+    """Load conversion dependencies without touching Qt widgets off-thread."""
+
+    loaded = pyqtSignal(object, object, str, bool, object)
+
+    def __init__(
+        self,
+        *,
+        use_gpu_requested: bool,
+        mlx_only: bool,
+        parent: QObject | None = None,
+    ) -> None:
+        """Initialize a background dependency loader.
+
+        Args:
+            use_gpu_requested: Whether the user requested GPU acceleration.
+            mlx_only: Whether to avoid importing PyTorch/Kokoro on the fast path.
+            parent: Optional Qt parent controlling worker lifetime.
+        """
+        super().__init__(parent)
+        self.use_gpu_requested = use_gpu_requested
+        self.mlx_only = mlx_only
+
+    def run(self) -> None:
+        """Load dependencies and report the result through a queued Qt signal."""
+        try:
+            if self.mlx_only:
+                import numpy as np
+
+                self.loaded.emit(
+                    np,
+                    None,
+                    "MLX acceleration available; skipped PyTorch/Kokoro startup.",
+                    True,
+                    None,
+                )
+                return
+
+            gpu_message, gpu_available = get_gpu_acceleration(self.use_gpu_requested)
+            np_module, kpipeline_class = load_numpy_kpipeline()
+            self.loaded.emit(
+                np_module,
+                kpipeline_class,
+                gpu_message,
+                gpu_available,
+                None,
+            )
+        except Exception as error:
+            self.loaded.emit(None, None, "", False, str(error))
 
 
 class IconProvider(QFileIconProvider):
@@ -1207,6 +1262,7 @@ class abogen(QWidget):
     def __init__(self):
         super().__init__()
         self.config = load_config()
+        self._config_recovery_warning = consume_config_load_warning()
         self.apply_theme(self.config.get("theme", "system"))
         migrate_subtitle_format(self.config)
         self.check_updates = self.config.get("check_updates", True)
@@ -1227,6 +1283,9 @@ class abogen(QWidget):
         self.conversion_thread: ConversionThread | None = None
         self.preview_thread: VoicePreviewThread | None = None
         self.play_audio_thread: PlayAudioThread | None = None
+        self.conversion_pipeline_load_thread: PipelineLoadThread | None = None
+        self.preview_pipeline_load_thread: PipelineLoadThread | None = None
+        self._conversion_pipeline_callback = None
         self._show_update_check_result = False
         # Max log lines
         self.log_window_max_lines = self.config.get("log_window_max_lines", 2000)
@@ -1326,6 +1385,8 @@ class abogen(QWidget):
         self.queue_cancel_summary_shown = False
 
         self.initUI()
+        if self._config_recovery_warning:
+            QTimer.singleShot(0, self._show_config_recovery_warning)
         self.set_speed_slider_from_config(self.config.get("speed", 1.00))
         self.update_speed_label()
         # Set initial selection: prefer profile, else voice
@@ -1374,6 +1435,58 @@ class abogen(QWidget):
 
         # Set hf_tracker callbacks
         hf_tracker.set_log_callback(self.update_log)
+
+    def _show_config_recovery_warning(self) -> None:
+        """Tell the user when settings were recovered or reset after corruption."""
+        if not self._config_recovery_warning:
+            return
+        QMessageBox.warning(
+            self,
+            "Settings Recovery",
+            self._config_recovery_warning,
+        )
+        self._config_recovery_warning = None
+
+    @pyqtSlot(object, object, str, bool, object)
+    def _dispatch_conversion_pipeline_loaded(
+        self,
+        np_module: Any,
+        kpipeline_class: Any,
+        gpu_message: str,
+        gpu_available: bool,
+        error: Any,
+    ) -> None:
+        """Run the pending conversion setup callback on the GUI thread.
+
+        Args:
+            np_module: Loaded NumPy module.
+            kpipeline_class: Loaded Kokoro pipeline class, or ``None`` for MLX.
+            gpu_message: Human-readable backend availability status.
+            gpu_available: Whether the requested fallback GPU is available.
+            error: Loading error text, or ``None`` on success.
+        """
+        callback: Callable[[Any, Any, str, bool, Any], None] | None = (
+            self._conversion_pipeline_callback
+        )
+        self._conversion_pipeline_callback = None
+        if callback is not None:
+            callback(
+                np_module,
+                kpipeline_class,
+                gpu_message,
+                gpu_available,
+                error,
+            )
+
+    @pyqtSlot()
+    def _clear_conversion_pipeline_loader(self) -> None:
+        """Release the completed conversion dependency loader."""
+        self.conversion_pipeline_load_thread = None
+
+    @pyqtSlot()
+    def _clear_preview_pipeline_loader(self) -> None:
+        """Release the completed preview dependency loader."""
+        self.preview_pipeline_load_thread = None
 
     def initUI(self) -> None:
         """Initialize and layout the main user interface.
@@ -3095,7 +3208,9 @@ class abogen(QWidget):
 
             title_match = re.search(r"<<METADATA_TITLE:([^>]+)>>", chunk_text_start)
             if title_match and self.selected_output_folder:
-                chunk_title = sanitize_name_for_os(title_match.group(1), is_folder=False)
+                chunk_title = sanitize_name_for_os(
+                    title_match.group(1), is_folder=False
+                )
 
                 check_dir = self.selected_output_folder
                 if folder_name:
@@ -3179,6 +3294,7 @@ class abogen(QWidget):
 
             settings_dir = Path(get_user_settings_dir())
             save_file = settings_dir / "last_queue.json"
+            backup_file = save_file.with_name(f"{save_file.name}.bak")
 
             # If there are no items, or they have all been converted, remove the last queue file
             is_completed = not self.queued_items or (
@@ -3189,6 +3305,8 @@ class abogen(QWidget):
             if is_completed:
                 if save_file.exists():
                     save_file.unlink()
+                if backup_file.exists():
+                    backup_file.unlink()
                 return
 
             # Prepare items list serialization
@@ -3206,8 +3324,7 @@ class abogen(QWidget):
                 "queue_run_active": self.queue_run_active,
             }
 
-            with open(save_file, "w", encoding="utf-8") as f:
-                json.dump(state, f, indent=4)
+            atomic_write_json(save_file, state, indent=4)
         except Exception as e:
             logger.error(f"Failed to save current queue state: {e}")
 
@@ -3218,12 +3335,22 @@ class abogen(QWidget):
 
             settings_dir = Path(get_user_settings_dir())
             save_file = settings_dir / "last_queue.json"
+            backup_file = save_file.with_name(f"{save_file.name}.bak")
 
             if not save_file.exists():
                 return
 
-            with open(save_file, "r", encoding="utf-8") as f:
-                state = json.load(f)
+            state, used_backup = load_json_with_backup(save_file)
+            if not isinstance(state, dict):
+                raise TypeError("The saved queue must contain a JSON object")
+            if used_backup:
+                QMessageBox.warning(
+                    self,
+                    "Queue Recovery",
+                    "The current queue recovery file was damaged or incomplete. "
+                    "Abogen restored the previous valid queue from "
+                    "last_queue.json.bak.",
+                )
 
             raw_items = state.get("queued_items", [])
             saved_index = state.get("current_queue_index", 0)
@@ -3231,6 +3358,8 @@ class abogen(QWidget):
             if not raw_items:
                 if save_file.exists():
                     save_file.unlink()
+                if backup_file.exists():
+                    backup_file.unlink()
                 return
 
             # Validate files and determine items
@@ -3307,6 +3436,8 @@ class abogen(QWidget):
                 # No valid items could be restored
                 if save_file.exists():
                     save_file.unlink()
+                if backup_file.exists():
+                    backup_file.unlink()
                 if missing_files:
                     QMessageBox.warning(
                         self,
@@ -3348,9 +3479,18 @@ class abogen(QWidget):
                 # Remove the last_queue.json file if discarded
                 if save_file.exists():
                     save_file.unlink()
+                if backup_file.exists():
+                    backup_file.unlink()
 
         except Exception as e:
             logger.error(f"Error checking or restoring queue: {e}")
+            QMessageBox.warning(
+                self,
+                "Queue Recovery Error",
+                "Abogen found a queue recovery file but could not read it or "
+                "its backup. The files were left in place so they can be "
+                f"inspected manually.\n\n{type(e).__name__}: {e}",
+            )
 
     def start_queue(self):
         self.current_queue_index = 0  # Start from the first item
@@ -3654,13 +3794,29 @@ class abogen(QWidget):
         except Exception:
             file_size_str = "Unknown"
 
-        # pipeline_loaded_callback remains unchanged
-        def pipeline_loaded_callback(np_module, kpipeline_class, error):
+        def pipeline_loaded_callback(
+            np_module: Any,
+            kpipeline_class: Any,
+            gpu_message: str,
+            gpu_available: bool,
+            error: Any,
+        ) -> None:
+            """Finish conversion setup after dependencies load.
+
+            Args:
+                np_module: Loaded NumPy module.
+                kpipeline_class: Kokoro pipeline class, or ``None`` for MLX.
+                gpu_message: Human-readable backend availability status.
+                gpu_available: Whether the selected acceleration path is available.
+                error: Loading error text, or ``None`` on success.
+            """
             if error:
                 self.update_log((f"Error loading numpy or KPipeline: {error}", "red"))
                 prevent_sleep_end()
                 return
 
+            self.gpu_ok = gpu_available
+            self.update_log((gpu_message, gpu_available))
             self.btn_cancel.setEnabled(True)
             self.btn_stop_queue_next.setEnabled(True)
 
@@ -3774,19 +3930,28 @@ class abogen(QWidget):
             self.conversion_thread.start()
             QApplication.processEvents()
 
-        # Run GPU acceleration and module loading in a background thread
-        def gpu_and_load():
-            self.update_log("Checking GPU acceleration...")
-            # Pass the use_gpu setting from the checkbox
-            gpu_msg, gpu_ok = get_gpu_acceleration(self.gpu_checkbox.isChecked())
-            # Store gpu_ok status to use when creating the conversion thread
-            self.gpu_ok = gpu_ok
-            self.update_log((gpu_msg, gpu_ok))
-            self.update_log("Loading modules...")
-            load_thread = LoadPipelineThread(pipeline_loaded_callback)
-            load_thread.start()
+        from abogen.tts_mlx import is_mlx_available
 
-        threading.Thread(target=gpu_and_load, daemon=True).start()
+        mlx_only = self.use_mlx_backend and is_mlx_available()
+        self.update_log(
+            "Loading MLX dependencies..."
+            if mlx_only
+            else "Checking GPU acceleration and loading modules..."
+        )
+        self._conversion_pipeline_callback = pipeline_loaded_callback
+        self.conversion_pipeline_load_thread = PipelineLoadThread(
+            use_gpu_requested=self.gpu_checkbox.isChecked(),
+            mlx_only=mlx_only,
+            parent=self,
+        )
+        self.conversion_pipeline_load_thread.loaded.connect(
+            self._dispatch_conversion_pipeline_loaded,
+            Qt.ConnectionType.QueuedConnection,
+        )
+        self.conversion_pipeline_load_thread.finished.connect(
+            self._clear_conversion_pipeline_loader
+        )
+        self.conversion_pipeline_load_thread.start()
 
     def show_queue_summary(self, outcome="completed"):
         """Show a summary dialog after queue finishes."""
@@ -4572,13 +4737,38 @@ class abogen(QWidget):
             )
             self.loading_movie.start()
 
-        def pipeline_loaded_callback(np_module, kpipeline_class, error):
-            self._on_pipeline_loaded_for_preview(np_module, kpipeline_class, error)
+        self.preview_pipeline_load_thread = PipelineLoadThread(
+            use_gpu_requested=self.use_gpu,
+            mlx_only=False,
+            parent=self,
+        )
+        self.preview_pipeline_load_thread.loaded.connect(
+            self._on_pipeline_loaded_for_preview,
+            Qt.ConnectionType.QueuedConnection,
+        )
+        self.preview_pipeline_load_thread.finished.connect(
+            self._clear_preview_pipeline_loader
+        )
+        self.preview_pipeline_load_thread.start()
 
-        load_thread = LoadPipelineThread(pipeline_loaded_callback)
-        load_thread.start()
+    @pyqtSlot(object, object, str, bool, object)
+    def _on_pipeline_loaded_for_preview(
+        self,
+        np_module: Any,
+        kpipeline_class: Any,
+        gpu_message: str,
+        gpu_available: bool,
+        error: Any,
+    ) -> None:
+        """Create the preview worker after dependencies load on a Qt thread.
 
-    def _on_pipeline_loaded_for_preview(self, np_module, kpipeline_class, error):
+        Args:
+            np_module: Loaded NumPy module.
+            kpipeline_class: Loaded Kokoro pipeline class.
+            gpu_message: Human-readable GPU availability status.
+            gpu_available: Whether GPU acceleration can be used.
+            error: Loading error text, or ``None`` on success.
+        """
         # stop loading animation and restore icon on error
         if error:
             self.loading_movie.stop()
@@ -4617,11 +4807,10 @@ class abogen(QWidget):
             lang = self.selected_voice[0]
             voice = self.selected_voice
 
-        # use same gpu/cpu logic as in conversion
-        gpu_msg, gpu_ok = get_gpu_acceleration(self.use_gpu)
+        self.update_log((gpu_message, gpu_available))
 
         self.preview_thread = VoicePreviewThread(
-            np_module, kpipeline_class, lang, voice, speed, gpu_ok
+            np_module, kpipeline_class, lang, voice, speed, gpu_available
         )
         self.preview_thread.finished.connect(self._play_preview_audio)
         self.preview_thread.error.connect(self._preview_error)
@@ -4942,6 +5131,14 @@ class abogen(QWidget):
             save_config(self.config)
 
     def cleanup_conversion_thread(self):
+        """Stop conversion work and wait for dependency loading to finish."""
+        if (
+            self.conversion_pipeline_load_thread is not None
+            and self.conversion_pipeline_load_thread.isRunning()
+        ):
+            self.conversion_pipeline_load_thread.requestInterruption()
+            self.conversion_pipeline_load_thread.wait()
+
         # Stop conversion thread
         if (
             hasattr(self, "conversion_thread")
@@ -4952,6 +5149,14 @@ class abogen(QWidget):
             self.conversion_thread.wait()
 
     def cleanup_preview_threads(self):
+        """Stop preview dependency loading, generation, and playback workers."""
+        if (
+            self.preview_pipeline_load_thread is not None
+            and self.preview_pipeline_load_thread.isRunning()
+        ):
+            self.preview_pipeline_load_thread.requestInterruption()
+            self.preview_pipeline_load_thread.wait()
+
         # Stop preview generation thread
         if (
             hasattr(self, "preview_thread")

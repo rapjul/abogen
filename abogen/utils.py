@@ -10,10 +10,14 @@ import sys
 import warnings
 from collections import deque
 from functools import lru_cache
+from pathlib import Path
 from threading import Thread
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
+from uuid import uuid4
 
 from dotenv import find_dotenv, load_dotenv
+
+logger = logging.getLogger(__name__)
 
 _INLINE_WHITESPACE_RE = re.compile(r"[^\S\n]+")
 _PARAGRAPH_BREAK_RE = re.compile(r"\n{3,}")
@@ -38,6 +42,8 @@ def _load_environment() -> None:
 _load_environment()
 
 warnings.filterwarnings("ignore")
+
+_config_load_warning: Optional[str] = None
 
 
 def detect_encoding(file_path):
@@ -614,20 +620,190 @@ def create_process(cmd, stdin=None, text=True, capture_output=False):
     return proc
 
 
-def load_config():
+def _json_backup_path(path: Path) -> Path:
+    """Return the backup path used for an application JSON file.
+
+    Args:
+        path: Primary JSON file path.
+
+    Returns:
+        Path ending in ``.bak`` beside the primary file.
+    """
+    return path.with_name(f"{path.name}.bak")
+
+
+def _read_json_file(path: Path) -> Any:
+    """Read and decode a JSON file.
+
+    Args:
+        path: JSON file to read.
+
+    Returns:
+        Decoded JSON value.
+
+    Raises:
+        OSError: If the file cannot be read.
+        json.JSONDecodeError: If the file contains invalid JSON.
+    """
+    with path.open("r", encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def load_json_with_backup(path: Path) -> tuple[Any, bool]:
+    """Load JSON, falling back to its last known-good backup.
+
+    Args:
+        path: Primary JSON file path.
+
+    Returns:
+        A tuple containing the decoded value and whether the backup was used.
+
+    Raises:
+        RuntimeError: If neither the primary file nor its backup can be read.
+    """
     try:
-        with open(get_user_config_path(), "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
+        return _read_json_file(path), False
+    except Exception as primary_error:
+        backup_path = _json_backup_path(path)
+        try:
+            return _read_json_file(backup_path), True
+        except Exception as backup_error:
+            raise RuntimeError(
+                f"Could not read {path.name} or its backup: "
+                f"{primary_error}; backup: {backup_error}"
+            ) from primary_error
+
+
+def atomic_write_json(
+    path: Path,
+    value: Any,
+    *,
+    indent: int = 2,
+    keep_backup: bool = True,
+) -> None:
+    """Durably replace a JSON file without exposing a partial write.
+
+    A valid existing file is copied to ``<name>.bak`` before the new temporary
+    file is atomically moved into place. Invalid existing data is never allowed
+    to overwrite a known-good backup.
+
+    Args:
+        path: Destination JSON file path.
+        value: JSON-serializable value to persist.
+        indent: Number of spaces used to format the JSON output.
+        keep_backup: Whether to retain the previous valid file as ``.bak``.
+
+    Raises:
+        OSError: If the temporary or destination file cannot be written.
+        TypeError: If ``value`` is not JSON serializable.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+    backup_path = _json_backup_path(path)
+    backup_temporary_path: Optional[Path] = None
+
+    try:
+        with temporary_path.open("w", encoding="utf-8") as handle:
+            json.dump(value, handle, indent=indent)
+            handle.flush()
+            os.fsync(handle.fileno())
+
+        if keep_backup and path.exists():
+            try:
+                _read_json_file(path)
+            except Exception:
+                logger.warning(
+                    "Not replacing JSON backup because %s is not valid JSON", path
+                )
+            else:
+                backup_temporary_path = backup_path.with_name(
+                    f".{backup_path.name}.{uuid4().hex}.tmp"
+                )
+                shutil.copy2(path, backup_temporary_path)
+                backup_temporary_path.replace(backup_path)
+                backup_temporary_path = None
+
+        temporary_path.replace(path)
+        if keep_backup and not backup_path.exists():
+            backup_temporary_path = backup_path.with_name(
+                f".{backup_path.name}.{uuid4().hex}.tmp"
+            )
+            shutil.copy2(path, backup_temporary_path)
+            backup_temporary_path.replace(backup_path)
+            backup_temporary_path = None
+    finally:
+        if temporary_path.exists():
+            temporary_path.unlink()
+        if backup_temporary_path is not None and backup_temporary_path.exists():
+            backup_temporary_path.unlink()
+
+
+def consume_config_load_warning() -> Optional[str]:
+    """Return and clear the most recent configuration recovery warning.
+
+    Returns:
+        Warning text for the GUI, or ``None`` when no recovery occurred.
+    """
+    global _config_load_warning
+    warning = _config_load_warning
+    _config_load_warning = None
+    return warning
+
+
+def load_config() -> Dict[str, Any]:
+    """Load application settings and recover from a backup when necessary.
+
+    Returns:
+        Settings dictionary, or an empty dictionary when no usable file exists.
+    """
+    global _config_load_warning
+    config_path = Path(get_user_config_path())
+    if not config_path.exists() and not _json_backup_path(config_path).exists():
+        return {}
+
+    try:
+        config, used_backup = load_json_with_backup(config_path)
+        if not isinstance(config, dict):
+            raise TypeError("The settings file must contain a JSON object")
+        if used_backup:
+            _config_load_warning = (
+                "The settings file was damaged or incomplete. Abogen recovered "
+                "your previous settings from config.json.bak."
+            )
+            logger.warning(_config_load_warning)
+            try:
+                atomic_write_json(config_path, config)
+            except Exception as recovery_error:
+                logger.error(
+                    "Recovered settings could not be written back to %s: %s",
+                    config_path,
+                    recovery_error,
+                )
+        return config
+    except Exception as error:
+        _config_load_warning = (
+            "Abogen could not read config.json or its backup and started with "
+            "default settings. Your damaged files were left in place."
+        )
+        logger.error("%s Details: %s", _config_load_warning, error)
         return {}
 
 
-def save_config(config):
+def save_config(config: Dict[str, Any]) -> bool:
+    """Atomically save application settings with a last-known-good backup.
+
+    Args:
+        config: Settings dictionary to persist.
+
+    Returns:
+        ``True`` when the file was saved successfully; otherwise ``False``.
+    """
     try:
-        with open(get_user_config_path(), "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=2)
-    except Exception:
-        pass
+        atomic_write_json(Path(get_user_config_path()), config)
+        return True
+    except Exception as error:
+        logger.error("Failed to save application settings: %s", error)
+        return False
 
 
 def calculate_text_length(text):
@@ -748,16 +924,3 @@ def load_numpy_kpipeline():
     from kokoro import KPipeline  # type: ignore[import-not-found]
 
     return np, KPipeline
-
-
-class LoadPipelineThread(Thread):
-    def __init__(self, callback):
-        super().__init__()
-        self.callback = callback
-
-    def run(self):
-        try:
-            np_module, kpipeline_class = load_numpy_kpipeline()
-            self.callback(np_module, kpipeline_class, None)
-        except Exception as e:
-            self.callback(None, None, str(e))
