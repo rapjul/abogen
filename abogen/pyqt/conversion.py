@@ -1805,6 +1805,29 @@ class ConversionThread(QThread):
 
             # Fall back to the standard PyTorch KPipeline.
             if tts is None:
+                if self.KPipeline is None:
+                    self.log_updated.emit(
+                        (
+                            "MLX was unavailable; loading the PyTorch/Kokoro fallback...",
+                            "orange",
+                        )
+                    )
+                    from abogen.utils import get_gpu_acceleration, load_numpy_kpipeline
+
+                    self.np, self.KPipeline = load_numpy_kpipeline()
+                    gpu_message, gpu_available = get_gpu_acceleration(self.use_gpu)
+                    self.use_gpu = gpu_available
+                    self.log_updated.emit((gpu_message, gpu_available))
+                    device = (
+                        "mps"
+                        if gpu_available
+                        and platform.system() == "Darwin"
+                        and platform.machine() == "arm64"
+                        else "cuda"
+                        if gpu_available
+                        else "cpu"
+                    )
+
                 # --- PERSISTENCE: Reuse shared PyTorch model if available ---
                 shared_kmodel = None
                 if (
