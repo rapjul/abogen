@@ -79,7 +79,7 @@ requires-dist = [
     { name = "chardet", specifier = ">=5.2.0" },
     { name = "charset-normalizer", specifier = ">=3.4.1" },
     { name = "ebooklib", specifier = ">=0.19" },
-    { name = "flask", specifier = ">=3.0.3" },
+    { name = "flask", specifier = ">=3.1.0" },
     { name = "gpustat", specifier = ">=1.1.1" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "kokoro", marker = "sys_platform != 'darwin'", specifier = ">=0.9.4", index = "https://pypi.org/simple" },

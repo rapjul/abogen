@@ -23,7 +23,7 @@ keywords = [
   "voice-synthesis",
 ]
 dependencies = [
-  "Flask>=3.0.3",
+  "Flask>=3.1.0",
   "Markdown>=3.9",
   "PyMuPDF>=1.25.5",
   "PyQt6>=6.5.0",
