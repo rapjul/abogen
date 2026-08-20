@@ -1730,6 +1730,20 @@ class ConversionThread(QThread):
             from abogen.tts_mlx import is_mlx_available
 
             use_mlx = getattr(self, "use_mlx_backend", is_mlx_available())
+            is_voice_blend = isinstance(self.voice, str) and (
+                "*" in self.voice or "+" in self.voice
+            )
+            if is_voice_blend and use_mlx:
+                self.log_updated.emit(
+                    (
+                        f"Voice blending formula detected ('{self.voice}'). The MLX backend "
+                        "does not support voice mixing; falling back to the PyTorch/Kokoro pipeline "
+                        "for accurate multi-voice synthesis.",
+                        "orange",
+                    )
+                )
+                use_mlx = False
+
             tts = None
             if use_mlx:
                 try:

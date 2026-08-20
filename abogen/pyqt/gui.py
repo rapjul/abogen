@@ -1647,6 +1647,7 @@ class abogen(QWidget):
         self.btn_voice_formula_mixer.setStyleSheet("QPushButton { padding: 6px 12px; }")
         self.btn_voice_formula_mixer.clicked.connect(self.show_voice_formula_dialog)
         voice_layout.addWidget(self.btn_voice_formula_mixer)
+        self._update_voice_mixer_state()
 
         # Play/Stop icons
         def make_icon(color, shape):
@@ -3932,7 +3933,11 @@ class abogen(QWidget):
 
         from abogen.tts_mlx import is_mlx_available
 
-        mlx_only = self.use_mlx_backend and is_mlx_available()
+        voice_formula = self.get_voice_formula()
+        is_voice_blend = isinstance(voice_formula, str) and (
+            "*" in voice_formula or "+" in voice_formula
+        )
+        mlx_only = self.use_mlx_backend and is_mlx_available() and not is_voice_blend
         self.update_log(
             "Loading MLX dependencies..."
             if mlx_only
@@ -4779,7 +4784,7 @@ class abogen(QWidget):
             self.btn_preview.setEnabled(True)
             self.btn_preview.setToolTip("Preview selected voice")
             self.voice_combo.setEnabled(True)
-            self.btn_voice_formula_mixer.setEnabled(True)  # Re-enable mixer button
+            self._update_voice_mixer_state()
             self.btn_start.setEnabled(True)  # Re-enable start button on error
             return
 
@@ -4949,7 +4954,7 @@ class abogen(QWidget):
         self.btn_preview.setToolTip("Preview selected voice")
         self.btn_preview.setEnabled(True)
         self.voice_combo.setEnabled(True)
-        self.btn_voice_formula_mixer.setEnabled(True)  # Re-enable mixer button
+        self._update_voice_mixer_state()
         self.btn_start.setEnabled(True)
 
     def _preview_error(self, msg):
@@ -5768,6 +5773,20 @@ class abogen(QWidget):
         self.config["use_spacy_segmentation"] = enabled
         save_config(self.config)
 
+    def _update_voice_mixer_state(self) -> None:
+        """Update the voice mixer button enabled state and tooltip based on backend."""
+        if not hasattr(self, "btn_voice_formula_mixer"):
+            return
+        if self.use_mlx_backend:
+            self.btn_voice_formula_mixer.setEnabled(False)
+            self.btn_voice_formula_mixer.setToolTip(
+                "Voice mixing is not supported when MLX acceleration is enabled. "
+                "Switch to PyTorch in the Settings menu to use mixed voices."
+            )
+        else:
+            self.btn_voice_formula_mixer.setEnabled(True)
+            self.btn_voice_formula_mixer.setToolTip("Mix and match voices")
+
     def _toggle_mlx_backend(self, enabled: bool) -> None:
         """Toggle the MLX Apple Silicon TTS backend on or off.
 
@@ -5777,6 +5796,7 @@ class abogen(QWidget):
         self.use_mlx_backend = enabled
         self.config["use_mlx_backend"] = enabled
         save_config(self.config)
+        self._update_voice_mixer_state()
 
     def _set_mlx_quantization(self, quantization) -> None:
         """Set the MLX Kokoro model quantization level.
