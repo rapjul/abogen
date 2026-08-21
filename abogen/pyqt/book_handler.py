@@ -9,6 +9,7 @@ import ebooklib
 import fitz
 from PyQt6.QtCore import (
     QEvent,
+    QPoint,
     QSize,
     Qt,
     QThread,
@@ -3028,58 +3029,215 @@ class HandlerDialog(QDialog):
     def get_save_as_project(self):
         return self.save_as_project
 
-    def check_selected_items(self):
+    def check_selected_items(self) -> None:
+        """Check all currently selected checkable items in the tree."""
         self.set_selected_items_checked(True)
 
-    def uncheck_selected_items(self):
+    def uncheck_selected_items(self) -> None:
+        """Uncheck all currently selected checkable items in the tree."""
         self.set_selected_items_checked(False)
 
-    def set_selected_items_checked(self, state: bool):
-        print(f"Checking selected items: {state}")
+    def set_selected_items_checked(self, state: bool) -> None:
+        """Set the checked state for all currently selected items, cascading to children.
+
+        Args:
+            state: True to check selected items, False to uncheck.
+        """
+        self._block_signals = True
         self.treeWidget.blockSignals(True)
+
+        check_state = Qt.CheckState.Checked if state else Qt.CheckState.Unchecked
+
+        def cascade_down(parent_item: QTreeWidgetItem, st: Qt.CheckState) -> None:
+            """Recursively update the check state of all child items.
+
+            Args:
+                parent_item: Parent item whose descendants are updated.
+                st: Check state to apply to checkable descendants.
+            """
+            for i in range(parent_item.childCount()):
+                child = parent_item.child(i)
+                if child is not None and (
+                    child.flags() & Qt.ItemFlag.ItemIsUserCheckable
+                ):
+                    child.setCheckState(0, st)
+                    cascade_down(child, st)
+
         for item in self.treeWidget.selectedItems():
-            if item.flags() & Qt.ItemFlag.ItemIsUserCheckable:
-                item.setCheckState(
-                    0, Qt.CheckState.Checked if state else Qt.CheckState.Unchecked
-                )
+            if item is not None and (item.flags() & Qt.ItemFlag.ItemIsUserCheckable):
+                item.setCheckState(0, check_state)
+                cascade_down(item, check_state)
+
+        self._sync_parent_checkbox_states()
         self.treeWidget.blockSignals(False)
+        self._block_signals = False
         self._update_checked_set_from_tree()
 
-    def on_tree_context_menu(self, pos):
+    def deselect_all_above(self, target_item: QTreeWidgetItem) -> None:
+        """Deselect all checkable items occurring before the target item in document order.
+
+        Args:
+            target_item: The reference QTreeWidgetItem above which all items are unchecked.
+        """
+        if target_item is None:
+            return
+
+        self._block_signals = True
+        self.treeWidget.blockSignals(True)
+
+        iterator = QTreeWidgetItemIterator(self.treeWidget)
+        while iterator.value():
+            item = iterator.value()
+            if item == target_item:
+                break
+            if item is not None and (item.flags() & Qt.ItemFlag.ItemIsUserCheckable):
+                item.setCheckState(0, Qt.CheckState.Unchecked)
+            iterator += 1
+
+        self._sync_parent_checkbox_states()
+        self.treeWidget.blockSignals(False)
+        self._block_signals = False
+        self._update_checked_set_from_tree()
+
+    def deselect_all_below(self, target_item: QTreeWidgetItem) -> None:
+        """Deselect all checkable items occurring after the target item in document order.
+
+        If target_item has children, items within target_item's subtree are preserved,
+        and all checkable items following the target subtree are unchecked.
+
+        Args:
+            target_item: The reference QTreeWidgetItem below which all items are unchecked.
+        """
+        if target_item is None:
+            return
+
+        self._block_signals = True
+        self.treeWidget.blockSignals(True)
+
+        # Collect target item and all its descendants to preserve its subtree
+        target_subtree_ids: set[int] = set()
+
+        def collect_descendants(node: QTreeWidgetItem) -> None:
+            """Recursively record a node and all its descendants in target_subtree_ids.
+
+            Args:
+                node: QTreeWidgetItem to collect descendants from.
+            """
+            target_subtree_ids.add(id(node))
+            for i in range(node.childCount()):
+                child = node.child(i)
+                if child is not None:
+                    collect_descendants(child)
+
+        collect_descendants(target_item)
+
+        iterator = QTreeWidgetItemIterator(self.treeWidget)
+        found_target = False
+        while iterator.value():
+            item = iterator.value()
+            if item == target_item:
+                found_target = True
+                iterator += 1
+                continue
+            if found_target and id(item) not in target_subtree_ids:
+                if item is not None and (
+                    item.flags() & Qt.ItemFlag.ItemIsUserCheckable
+                ):
+                    item.setCheckState(0, Qt.CheckState.Unchecked)
+            iterator += 1
+
+        self._sync_parent_checkbox_states()
+        self.treeWidget.blockSignals(False)
+        self._block_signals = False
+        self._update_checked_set_from_tree()
+
+    def on_tree_context_menu(self, pos: QPoint) -> None:
+        """Handle right-click context menu requested on the chapter selection tree.
+
+        Provides options to check/uncheck multiple selected items, toggle a single chapter,
+        and deselect all chapters above or below the targeted item.
+
+        Args:
+            pos: Position where the context menu was triggered (relative to treeWidget).
+        """
         item = self.treeWidget.itemAt(pos)
-        # multi-select context menu
-        if self.treeWidget.selectedItems() and len(self.treeWidget.selectedItems()) > 1:
-            menu = QMenu(self)
-            action = menu.addAction("Select")
-            if action is not None:
-                action.triggered.connect(self.check_selected_items)
-            action = menu.addAction("Clear")
-            if action is not None:
-                action.triggered.connect(self.uncheck_selected_items)
+        if item is None or not (item.flags() & Qt.ItemFlag.ItemIsUserCheckable):
+            return
+
+        selected_items = self.treeWidget.selectedItems()
+        menu = QMenu(self)
+
+        # Multi-selection context menu
+        if selected_items and len(selected_items) > 1 and item in selected_items:
+            check_action = menu.addAction("Check Selected Chapters")
+            if check_action is not None:
+                check_action.triggered.connect(self.check_selected_items)
+
+            uncheck_action = menu.addAction("Uncheck Selected Chapters")
+            if uncheck_action is not None:
+                uncheck_action.triggered.connect(self.uncheck_selected_items)
+
+            menu.addSeparator()
+
+            above_action = menu.addAction("Deselect All Above")
+            if above_action is not None:
+                above_action.triggered.connect(lambda: self.deselect_all_above(item))
+
+            below_action = menu.addAction("Deselect All Below")
+            if below_action is not None:
+                below_action.triggered.connect(lambda: self.deselect_all_below(item))
+
             menu.exec(self.treeWidget.mapToGlobal(pos))
             return
 
-        if (
-            not item
-            or item.childCount() == 0
-            or not (item.flags() & Qt.ItemFlag.ItemIsUserCheckable)
-        ):
-            return
+        # Single-item context menu
+        is_checked = item.checkState(0) == Qt.CheckState.Checked
+        if item.childCount() > 0:
+            toggle_text = "Uncheck Section" if is_checked else "Check Section"
+        else:
+            toggle_text = "Uncheck Chapter" if is_checked else "Check Chapter"
 
-        menu = QMenu(self)
-        checked = item.checkState(0) == Qt.CheckState.Checked
-        text = "Unselect only this" if checked else "Select only this"
-        action = menu.addAction(text)
+        toggle_action = menu.addAction(toggle_text)
+        if toggle_action is not None:
 
-        def do_toggle():
-            self.treeWidget.blockSignals(True)
-            new_state = Qt.CheckState.Unchecked if checked else Qt.CheckState.Checked
-            item.setCheckState(0, new_state)
-            self.treeWidget.blockSignals(False)
-            self._update_checked_set_from_tree()
+            def do_toggle() -> None:
+                """Toggle check state of target item and cascade to children."""
+                self.treeWidget.setCurrentItem(item)
+                new_state = not is_checked
+                self._block_signals = True
+                self.treeWidget.blockSignals(True)
+                st = Qt.CheckState.Checked if new_state else Qt.CheckState.Unchecked
+                item.setCheckState(0, st)
 
-        if action is not None:
-            action.triggered.connect(do_toggle)
+                def cascade_down(
+                    parent_item: QTreeWidgetItem, target_st: Qt.CheckState
+                ) -> None:
+                    for i in range(parent_item.childCount()):
+                        child = parent_item.child(i)
+                        if child is not None and (
+                            child.flags() & Qt.ItemFlag.ItemIsUserCheckable
+                        ):
+                            child.setCheckState(0, target_st)
+                            cascade_down(child, target_st)
+
+                cascade_down(item, st)
+                self._sync_parent_checkbox_states()
+                self.treeWidget.blockSignals(False)
+                self._block_signals = False
+                self._update_checked_set_from_tree()
+
+            toggle_action.triggered.connect(do_toggle)
+
+        menu.addSeparator()
+
+        above_action = menu.addAction("Deselect All Above")
+        if above_action is not None:
+            above_action.triggered.connect(lambda: self.deselect_all_above(item))
+
+        below_action = menu.addAction("Deselect All Below")
+        if below_action is not None:
+            below_action.triggered.connect(lambda: self.deselect_all_below(item))
+
         menu.exec(self.treeWidget.mapToGlobal(pos))
 
     def on_visual_indent_changed(self, state: int) -> None:

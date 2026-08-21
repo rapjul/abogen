@@ -8,9 +8,9 @@ direct text editing persistence, and quick selection filtering presets.
 from pathlib import Path
 from typing import Generator
 import pytest
-from PyQt6.QtCore import QEvent, Qt
+from PyQt6.QtCore import QEvent, QPoint, Qt
 from PyQt6.QtGui import QKeyEvent
-from PyQt6.QtWidgets import QApplication, QTreeWidgetItem
+from PyQt6.QtWidgets import QApplication, QMenu, QTreeWidgetItem
 
 from abogen.pyqt.book_handler import HandlerDialog
 
@@ -285,3 +285,267 @@ def test_uncheck_short_chapters_and_invert_preset(
 
     assert item_long.checkState(0) == Qt.CheckState.Unchecked
     assert item_short.checkState(0) == Qt.CheckState.Checked
+
+
+def test_deselect_all_above_and_below_flat(
+    qapp: QApplication, mock_md_book: Path
+) -> None:
+    """Test positional deselect all above and deselect all below on flat chapters.
+
+    Args:
+        qapp: QApplication fixture.
+        mock_md_book: Sample book file fixture.
+    """
+    dialog = HandlerDialog(str(mock_md_book), file_type="markdown")
+    _wait_dialog_loader(dialog)
+
+    dialog.treeWidget.clear()
+
+    items: list[QTreeWidgetItem] = []
+    for i in range(1, 6):
+        item = QTreeWidgetItem(dialog.treeWidget, [f"Chapter {i}"])
+        item.setData(0, Qt.ItemDataRole.UserRole, f"ch{i}")
+        item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+        item.setCheckState(0, Qt.CheckState.Checked)
+        items.append(item)
+
+    dialog.content_texts = {f"ch{i}": f"Text for chapter {i}" for i in range(1, 6)}
+    dialog._update_checked_set_from_tree()
+
+    # Test Deselect All Above from Chapter 3 (index 2)
+    dialog.deselect_all_above(items[2])
+
+    assert items[0].checkState(0) == Qt.CheckState.Unchecked
+    assert items[1].checkState(0) == Qt.CheckState.Unchecked
+    assert items[2].checkState(0) == Qt.CheckState.Checked
+    assert items[3].checkState(0) == Qt.CheckState.Checked
+    assert items[4].checkState(0) == Qt.CheckState.Checked
+    assert dialog.checked_chapters == {"ch3", "ch4", "ch5"}
+
+    # Re-check all items
+    dialog.select_all_chapters()
+    assert len(dialog.checked_chapters) == 5
+
+    # Test Deselect All Below from Chapter 3 (index 2)
+    dialog.deselect_all_below(items[2])
+
+    assert items[0].checkState(0) == Qt.CheckState.Checked
+    assert items[1].checkState(0) == Qt.CheckState.Checked
+    assert items[2].checkState(0) == Qt.CheckState.Checked
+    assert items[3].checkState(0) == Qt.CheckState.Unchecked
+    assert items[4].checkState(0) == Qt.CheckState.Unchecked
+    assert dialog.checked_chapters == {"ch1", "ch2", "ch3"}
+
+    # Edge cases: Deselect above from first item (should not uncheck anything)
+    dialog.select_all_chapters()
+    dialog.deselect_all_above(items[0])
+    assert all(item.checkState(0) == Qt.CheckState.Checked for item in items)
+
+    # Edge cases: Deselect below from last item (should not uncheck anything)
+    dialog.deselect_all_below(items[4])
+    assert all(item.checkState(0) == Qt.CheckState.Checked for item in items)
+
+
+def test_deselect_all_above_and_below_hierarchical(
+    qapp: QApplication, mock_md_book: Path
+) -> None:
+    """Test positional deselect all above and below on hierarchical section tree.
+
+    Args:
+        qapp: QApplication fixture.
+        mock_md_book: Sample book file fixture.
+    """
+    dialog = HandlerDialog(str(mock_md_book), file_type="markdown")
+    _wait_dialog_loader(dialog)
+
+    dialog.treeWidget.clear()
+
+    # Section 1 with children 1a, 1b
+    sec1 = QTreeWidgetItem(dialog.treeWidget, ["Section 1"])
+    sec1.setData(0, Qt.ItemDataRole.UserRole, "sec1")
+    sec1.setFlags(sec1.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+    ch1a = QTreeWidgetItem(sec1, ["Chapter 1A"])
+    ch1a.setData(0, Qt.ItemDataRole.UserRole, "ch1a")
+    ch1a.setFlags(ch1a.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+    ch1b = QTreeWidgetItem(sec1, ["Chapter 1B"])
+    ch1b.setData(0, Qt.ItemDataRole.UserRole, "ch1b")
+    ch1b.setFlags(ch1b.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+
+    # Section 2 with children 2a, 2b
+    sec2 = QTreeWidgetItem(dialog.treeWidget, ["Section 2"])
+    sec2.setData(0, Qt.ItemDataRole.UserRole, "sec2")
+    sec2.setFlags(sec2.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+    ch2a = QTreeWidgetItem(sec2, ["Chapter 2A"])
+    ch2a.setData(0, Qt.ItemDataRole.UserRole, "ch2a")
+    ch2a.setFlags(ch2a.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+    ch2b = QTreeWidgetItem(sec2, ["Chapter 2B"])
+    ch2b.setData(0, Qt.ItemDataRole.UserRole, "ch2b")
+    ch2b.setFlags(ch2b.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+
+    # Section 3 with children 3a, 3b
+    sec3 = QTreeWidgetItem(dialog.treeWidget, ["Section 3"])
+    sec3.setData(0, Qt.ItemDataRole.UserRole, "sec3")
+    sec3.setFlags(sec3.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+    ch3a = QTreeWidgetItem(sec3, ["Chapter 3A"])
+    ch3a.setData(0, Qt.ItemDataRole.UserRole, "ch3a")
+    ch3a.setFlags(ch3a.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+    ch3b = QTreeWidgetItem(sec3, ["Chapter 3B"])
+    ch3b.setData(0, Qt.ItemDataRole.UserRole, "ch3b")
+    ch3b.setFlags(ch3b.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+
+    dialog.content_texts = {
+        "sec1": "S1",
+        "ch1a": "1A",
+        "ch1b": "1B",
+        "sec2": "S2",
+        "ch2a": "2A",
+        "ch2b": "2B",
+        "sec3": "S3",
+        "ch3a": "3A",
+        "ch3b": "3B",
+    }
+
+    dialog.select_all_chapters()
+
+    # Deselect all above Section 2 -> should uncheck Section 1 and its children
+    dialog.deselect_all_above(sec2)
+
+    assert sec1.checkState(0) == Qt.CheckState.Unchecked
+    assert ch1a.checkState(0) == Qt.CheckState.Unchecked
+    assert ch1b.checkState(0) == Qt.CheckState.Unchecked
+
+    assert sec2.checkState(0) == Qt.CheckState.Checked
+    assert ch2a.checkState(0) == Qt.CheckState.Checked
+    assert ch2b.checkState(0) == Qt.CheckState.Checked
+
+    assert sec3.checkState(0) == Qt.CheckState.Checked
+    assert ch3a.checkState(0) == Qt.CheckState.Checked
+    assert ch3b.checkState(0) == Qt.CheckState.Checked
+
+    # Re-check all
+    dialog.select_all_chapters()
+
+    # Deselect all below Section 2 -> should preserve Section 2 and its children (2a, 2b)
+    # and uncheck Section 3 and its children (3a, 3b)
+    dialog.deselect_all_below(sec2)
+
+    assert sec1.checkState(0) == Qt.CheckState.Checked
+    assert ch1a.checkState(0) == Qt.CheckState.Checked
+    assert ch1b.checkState(0) == Qt.CheckState.Checked
+
+    assert sec2.checkState(0) == Qt.CheckState.Checked
+    assert ch2a.checkState(0) == Qt.CheckState.Checked
+    assert ch2b.checkState(0) == Qt.CheckState.Checked
+
+    assert sec3.checkState(0) == Qt.CheckState.Unchecked
+    assert ch3a.checkState(0) == Qt.CheckState.Unchecked
+    assert ch3b.checkState(0) == Qt.CheckState.Unchecked
+
+
+def test_multi_select_group_check_and_uncheck(
+    qapp: QApplication, mock_md_book: Path
+) -> None:
+    """Test group checking and unchecking with parent-child state synchronization.
+
+    Args:
+        qapp: QApplication fixture.
+        mock_md_book: Sample book file fixture.
+    """
+    dialog = HandlerDialog(str(mock_md_book), file_type="markdown")
+    _wait_dialog_loader(dialog)
+
+    dialog.treeWidget.clear()
+
+    items: list[QTreeWidgetItem] = []
+    for i in range(1, 6):
+        item = QTreeWidgetItem(dialog.treeWidget, [f"Chapter {i}"])
+        item.setData(0, Qt.ItemDataRole.UserRole, f"ch{i}")
+        item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+        item.setCheckState(0, Qt.CheckState.Checked)
+        items.append(item)
+
+    dialog.content_texts = {f"ch{i}": f"Text for chapter {i}" for i in range(1, 6)}
+    dialog._update_checked_set_from_tree()
+
+    # Multi-select items 2, 3, 4 (indices 1, 2, 3)
+    items[1].setSelected(True)
+    items[2].setSelected(True)
+    items[3].setSelected(True)
+
+    # Uncheck selected
+    dialog.uncheck_selected_items()
+
+    assert items[0].checkState(0) == Qt.CheckState.Checked
+    assert items[1].checkState(0) == Qt.CheckState.Unchecked
+    assert items[2].checkState(0) == Qt.CheckState.Unchecked
+    assert items[3].checkState(0) == Qt.CheckState.Unchecked
+    assert items[4].checkState(0) == Qt.CheckState.Checked
+    assert dialog.checked_chapters == {"ch1", "ch5"}
+
+    # Re-check selected
+    dialog.check_selected_items()
+
+    assert items[1].checkState(0) == Qt.CheckState.Checked
+    assert items[2].checkState(0) == Qt.CheckState.Checked
+    assert items[3].checkState(0) == Qt.CheckState.Checked
+    assert len(dialog.checked_chapters) == 5
+
+
+def test_context_menu_action_generation(
+    qapp: QApplication, mock_md_book: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test context menu generation and actions for single and multi-selections.
+
+    Args:
+        qapp: QApplication fixture.
+        mock_md_book: Sample book file fixture.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    dialog = HandlerDialog(str(mock_md_book), file_type="markdown")
+    _wait_dialog_loader(dialog)
+
+    dialog.treeWidget.clear()
+
+    item1 = QTreeWidgetItem(dialog.treeWidget, ["Chapter 1"])
+    item1.setData(0, Qt.ItemDataRole.UserRole, "ch1")
+    item1.setFlags(item1.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+    item1.setCheckState(0, Qt.CheckState.Checked)
+
+    item2 = QTreeWidgetItem(dialog.treeWidget, ["Chapter 2"])
+    item2.setData(0, Qt.ItemDataRole.UserRole, "ch2")
+    item2.setFlags(item2.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+    item2.setCheckState(0, Qt.CheckState.Checked)
+
+    dialog.content_texts = {"ch1": "Text 1", "ch2": "Text 2"}
+    dialog._update_checked_set_from_tree()
+
+    recorded_actions: list[str] = []
+
+    def mock_exec(menu_self: QMenu, point: QPoint) -> None:
+        for action in menu_self.actions():
+            if action.text():
+                recorded_actions.append(action.text())
+
+    monkeypatch.setattr(QMenu, "exec", mock_exec)
+
+    # Case 1: Single item context menu on Chapter 1
+    recorded_actions.clear()
+    dialog.treeWidget.clearSelection()
+    item1.setSelected(True)
+    item_rect = dialog.treeWidget.visualItemRect(item1)
+    dialog.on_tree_context_menu(item_rect.center())
+
+    assert "Uncheck Chapter" in recorded_actions
+    assert "Deselect All Above" in recorded_actions
+    assert "Deselect All Below" in recorded_actions
+
+    # Case 2: Multi-selection context menu
+    recorded_actions.clear()
+    item1.setSelected(True)
+    item2.setSelected(True)
+    dialog.on_tree_context_menu(item_rect.center())
+
+    assert "Check Selected Chapters" in recorded_actions
+    assert "Uncheck Selected Chapters" in recorded_actions
+    assert "Deselect All Above" in recorded_actions
+    assert "Deselect All Below" in recorded_actions
