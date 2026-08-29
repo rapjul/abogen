@@ -672,6 +672,15 @@ def tokenize_with_spans(text: str) -> List[Tuple[str, int, int]]:
     ]
 
 
+_OPENING_PUNCTUATION_CHARS = "«‹“‘([{¡¿「『"
+_CLOSING_PUNCTUATION_CHARS = "»›”’)]}」』"
+_STANDARD_PUNCTUATION_CHARS = ",.;:!?%"
+
+_OPENING_PUNCT_CLASS = re.escape(_OPENING_PUNCTUATION_CHARS)
+_CLOSING_PUNCT_CLASS = re.escape(_CLOSING_PUNCTUATION_CHARS)
+_STANDARD_PUNCT_CLASS = re.escape(_STANDARD_PUNCTUATION_CHARS)
+
+
 def _cleanup_spacing(text: str) -> str:
     if not text:
         return text
@@ -679,16 +688,29 @@ def _cleanup_spacing(text: str) -> str:
     for marker in ("\ufeff", "\u200b", "\u200c", "\u200d", "\u2060"):
         text = text.replace(marker, "")
 
-    # Collapse spaces before closing punctuation.
-    text = re.sub(r"\s+([,.;:!?%])", r"\1", text)
-    text = re.sub(r"\s+([’\"”»›)\]\}])", r"\1", text)
+    # Collapse spaces before standard punctuation and unambiguous closing quotes/brackets.
+    text = re.sub(rf"\s+([{_STANDARD_PUNCT_CLASS}])", r"\1", text)
+    text = re.sub(rf"\s+([{_CLOSING_PUNCT_CLASS}])", r"\1", text)
 
-    # Remove spaces directly after opening punctuation/quotes.
-    text = re.sub(r"([«‹“‘\"'(\[\{])\s+", r"\1", text)
+    # Remove spaces directly after unambiguous opening punctuation/quotes.
+    text = re.sub(rf"([{_OPENING_PUNCT_CLASS}])\s+", r"\1", text)
+
+    # Handle ambiguous straight quotes (\", ')
+    # 1. Remove spaces directly after opening straight quotes:
+    #    e.g. ' \" word' -> ' \"word', '^\" word' -> '\"word', '(\" word' -> '(\"word'
+    text = re.sub(rf"(^|[\s{_OPENING_PUNCT_CLASS}])([\"\'])\s+", r"\1\2", text)
+    # 2. Collapse spaces directly before closing straight quotes:
+    #    e.g. 'word \" ' -> 'word\" ', 'word \".' -> 'word\".'
+    text = re.sub(rf"\s+([\"\'])([\s{_STANDARD_PUNCT_CLASS}{_CLOSING_PUNCT_CLASS}]|$)", r"\1\2", text)
 
     # Ensure spaces exist after sentence punctuation when followed by a word/quote.
-    text = re.sub(r"([,.;:!?%])(?![\s”'\"’»›)])", r"\1 ", text)
-    text = re.sub(r"([”\"’])(?![\s.,;:!?\"”’»›)])", r"\1 ", text)
+    text = re.sub(rf"([{_STANDARD_PUNCT_CLASS}])(?![\s{_CLOSING_PUNCT_CLASS}\"\'”’»›)])", r"\1 ", text)
+    # Ensure space after unambiguous closing quote when followed by a word (e.g. '”Next' -> '” Next')
+    text = re.sub(rf"([{_CLOSING_PUNCT_CLASS}])(?![\s{_STANDARD_PUNCT_CLASS}{_CLOSING_PUNCT_CLASS}\"\'”’»›)])", r"\1 ", text)
+    # Straight double quote closing (preceded by non-whitespace) followed directly by a word/number/opening
+    text = re.sub(rf"(\S\")([A-Za-z0-9{_OPENING_PUNCT_CLASS}])", r"\1 \2", text)
+    # Straight single quote closing (preceded by punctuation, not internal word apostrophe) followed by a word
+    text = re.sub(rf"([{_STANDARD_PUNCT_CLASS}{_CLOSING_PUNCT_CLASS}]\')([A-Za-z0-9{_OPENING_PUNCT_CLASS}])", r"\1 \2", text)
 
     # Tighten hyphen/em dash spacing between word characters.
     text = re.sub(r"(?<=\w)\s*([-–—])\s*(?=\w)", r"\1", text)
@@ -1622,8 +1644,18 @@ def normalize_apostrophes(
         results.append((tok, category, norm))
         normalized_tokens.append(norm)
 
-    filtered = [token for token in normalized_tokens if token]
-    normalized_text = _cleanup_spacing(" ".join(filtered))
+    out_pieces: List[str] = []
+    last_end = 0
+    for (tok, start, end), norm in zip(token_entries, normalized_tokens):
+        if start > last_end:
+            out_pieces.append(text[last_end:start])
+        out_pieces.append(norm)
+        last_end = end
+    if last_end < len(text):
+        out_pieces.append(text[last_end:])
+
+    reconstructed = "".join(out_pieces)
+    normalized_text = _cleanup_spacing(reconstructed)
     return normalized_text, results
 
 
