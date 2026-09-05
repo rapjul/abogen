@@ -924,7 +924,10 @@ class EpubParser(BaseBookParser):
                 except ValueError:
                     pass
 
-            if not slice_html.strip() and current_doc_html:
+            is_zero_length_slice = bool(
+                next_entry and current_doc == next_doc and start_slice_pos == next_pos
+            )
+            if not slice_html.strip() and current_doc_html and not is_zero_length_slice:
                 slice_html = current_doc_html
 
             if slice_html.strip():
