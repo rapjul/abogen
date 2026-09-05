@@ -146,8 +146,13 @@ def test_chapter_stats_and_duration_format(
     assert "300" in stats_text
     assert "Test Chapter" in stats_text
     assert "<" not in stats_text and ">" not in stats_text
-    assert stats_text.startswith("Test Chapter\n")
-    assert "Chars:" in stats_text and "Words: 300" in stats_text
+
+    # Three-line hierarchy verification
+    lines = stats_text.split("\n")
+    assert len(lines) == 3
+    assert lines[0] == "Test Chapter"
+    assert "Chars:" in lines[1] and "Words:" in lines[1] and "Paragraphs:" in lines[1]
+    assert "Est." in lines[2] and "Audio:" in lines[2]
 
     # Action buttons must have fixed width to prevent layout shifts when toggled
     assert dialog.toggle_edit_btn.minimumWidth() == 120
@@ -157,6 +162,8 @@ def test_chapter_stats_and_duration_format(
 
     dialog.toggle_edit_mode()
     assert dialog.toggle_edit_btn.text() == "Editing (Active)"
+    assert "#1b5e20" in dialog.toggle_edit_btn.styleSheet()
+    assert "#ffffff" in dialog.toggle_edit_btn.styleSheet()
     assert dialog.toggle_edit_btn.maximumWidth() == 120
     dialog.toggle_edit_mode()
     assert dialog.toggle_edit_btn.text() == "Edit Text"

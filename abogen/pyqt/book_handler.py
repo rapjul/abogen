@@ -689,19 +689,25 @@ class HandlerDialog(QDialog):
         self.chapter_stats_label.setWordWrap(True)
         info_layout.addWidget(self.chapter_stats_label, 1)
 
+        btn_box = QVBoxLayout()
+        btn_box.setContentsMargins(0, 0, 0, 0)
+        btn_box.setSpacing(4)
+
         self.toggle_edit_btn = QPushButton("Edit Text", self.chapter_info_frame)
         self.toggle_edit_btn.setToolTip(
             "Toggle direct manual text editing in the preview pane"
         )
         self.toggle_edit_btn.setFixedWidth(120)
         self.toggle_edit_btn.clicked.connect(self.toggle_edit_mode)
-        info_layout.addWidget(self.toggle_edit_btn, 0)
+        btn_box.addWidget(self.toggle_edit_btn)
 
         self.toggle_fr_btn = QPushButton("Find && Replace", self.chapter_info_frame)
         self.toggle_fr_btn.setToolTip("Open Find & Replace panel (Ctrl+F)")
         self.toggle_fr_btn.setFixedWidth(120)
         self.toggle_fr_btn.clicked.connect(self.toggle_find_replace_panel)
-        info_layout.addWidget(self.toggle_fr_btn, 0)
+        btn_box.addWidget(self.toggle_fr_btn)
+
+        info_layout.addLayout(btn_box, 0)
 
         self.chapter_info_frame.hide()
 
@@ -1119,10 +1125,8 @@ class HandlerDialog(QDialog):
         title = current.text(0)
         self.chapter_stats_label.setText(
             f"{title}\n"
-            f"Chars: {char_count:,} | "
-            f"Words: {word_count:,} | "
-            f"Paragraphs: {paragraphs} | "
-            f"Est. Audio: {duration_str} ({speed:.2f}x speed)"
+            f"Chars:\u00a0{char_count:,} | Words:\u00a0{word_count:,} | Paragraphs:\u00a0{paragraphs}\n"
+            f"Est.\u00a0Audio:\u00a0{duration_str} ({speed:.2f}x speed)"
         )
 
     def toggle_edit_mode(self) -> None:
@@ -1133,7 +1137,7 @@ class HandlerDialog(QDialog):
         if self._is_editing_enabled:
             self.toggle_edit_btn.setText("Editing (Active)")
             self.toggle_edit_btn.setStyleSheet(
-                "QPushButton { background-color: #28a745; color: white; font-weight: bold; }"
+                "QPushButton { background-color: #1b5e20; color: #ffffff; font-weight: bold; border: 1px solid #2e7d32; border-radius: 4px; }"
             )
             self.previewEdit.setFocus()
         else:
