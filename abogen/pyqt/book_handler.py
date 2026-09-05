@@ -61,6 +61,51 @@ _HTML_TAG_PATTERN = re.compile(r"<[^>]+>")
 _LEADING_DASH_PATTERN = re.compile(r"^\s*[-–—]\s*")
 _LEADING_SIMPLE_DASH_PATTERN = re.compile(r"^\s*-\s*")
 _GAP_PAGE_TITLE_PATTERN = re.compile(r"^Page \d+(?:\s*-.*)?$")
+_CHAPTER_EXPLICIT_PATTERN = re.compile(
+    r"(?i)\b(?:chapter|chap|ch|episode|ep)\.?\s*#?\s*(\d+)\b"
+)
+_CHAPTER_LEADING_NUM_PATTERN = re.compile(r"^(\d+)\b")
+_CHAPTER_STANDALONE_NUM_PATTERN = re.compile(r"\b(\d+)\b")
+_TREE_PREFIX_PATTERN = re.compile(r"^[\s├─└│|─\-]+")
+
+
+def _extract_chapter_number(title: str) -> int | None:
+    """Extract the primary chapter number from a chapter title string.
+
+    Cleans visual tree prefix characters (such as tree structure symbols
+    or leading dashes) and uses regex patterns to extract chapter numbering.
+    Prioritizes explicit prefixes like 'Chapter 111', 'Ch 111', 'Episode 111',
+    followed by leading numbers, and finally standalone numbers.
+
+    Args:
+        title: The chapter title string extracted from chapter markers.
+
+    Returns:
+        int | None: The integer chapter number if found, otherwise None.
+    """
+    if not title:
+        return None
+
+    cleaned_title = _TREE_PREFIX_PATTERN.sub("", title).strip()
+
+    # 1. Match explicit chapter/episode prefixes with numbers
+    match_explicit = _CHAPTER_EXPLICIT_PATTERN.search(cleaned_title)
+    if match_explicit:
+        return int(match_explicit.group(1))
+
+    # 2. Match leading numbers at start of title
+    match_leading = _CHAPTER_LEADING_NUM_PATTERN.search(cleaned_title)
+    if match_leading:
+        return int(match_leading.group(1))
+
+    # 3. Match standalone numbers in the title
+    all_numbers = _CHAPTER_STANDALONE_NUM_PATTERN.findall(cleaned_title)
+    if all_numbers:
+        if len(all_numbers) > 1 and "vol" in cleaned_title.lower():
+            return int(all_numbers[-1])
+        return int(all_numbers[0])
+
+    return None
 
 
 class HandlerDialog(QDialog):
@@ -2489,11 +2534,12 @@ class HandlerDialog(QDialog):
         chunk_size = self.get_split_chapters_count()
         chunks = []
 
-        def is_marked(ch_text):
+        def is_marked(ch_text: str) -> bool:
+            """Check whether a chapter text segment has an associated chapter number."""
             m = re.match(r"<<CHAPTER_MARKER:(.*?)>>", ch_text)
             if not m:
                 return False
-            return bool(re.search(r"\d", m.group(1)))
+            return _extract_chapter_number(m.group(1)) is not None
 
         total_chapters = len(chapters)
         marked_count = sum(1 for c in chapters if is_marked(c))
@@ -2525,10 +2571,13 @@ class HandlerDialog(QDialog):
                 current_chunk_chapters.append(ch)
                 if is_marked(ch):
                     numbered_count += 1
+                    m = re.match(r"<<CHAPTER_MARKER:(.*?)>>", ch)
+                    ch_num = _extract_chapter_number(m.group(1)) if m else None
+                    effective_num = ch_num if ch_num is not None else numbered_count
 
                     if chunk_start_ch is None:
-                        chunk_start_ch = numbered_count
-                    chunk_end_ch = numbered_count
+                        chunk_start_ch = effective_num
+                    chunk_end_ch = effective_num
 
                     if numbered_count % chunk_size == 0:
                         if chunk_start_ch == chunk_end_ch:
