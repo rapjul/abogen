@@ -166,6 +166,7 @@ def test_find_and_replace_plain_text(qapp: QApplication, mock_md_book: Path) -> 
 
     dialog.toggle_find_replace_panel()
     assert not dialog.find_replace_frame.isHidden()
+    assert dialog.toggle_fr_btn.text() == "Find && Replace"
 
     dialog.fr_find_input.setText("fox")
     dialog._search_matches()

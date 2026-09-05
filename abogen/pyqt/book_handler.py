@@ -696,7 +696,7 @@ class HandlerDialog(QDialog):
         self.toggle_edit_btn.clicked.connect(self.toggle_edit_mode)
         info_layout.addWidget(self.toggle_edit_btn, 0)
 
-        self.toggle_fr_btn = QPushButton("Find & Replace", self.chapter_info_frame)
+        self.toggle_fr_btn = QPushButton("Find && Replace", self.chapter_info_frame)
         self.toggle_fr_btn.setToolTip("Open Find & Replace panel (Ctrl+F)")
         self.toggle_fr_btn.clicked.connect(self.toggle_find_replace_panel)
         info_layout.addWidget(self.toggle_fr_btn, 0)
