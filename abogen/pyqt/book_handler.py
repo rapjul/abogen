@@ -533,6 +533,7 @@ class HandlerDialog(QDialog):
 
         if self.processed_nav_structure:
             self._build_tree_from_nav(self.processed_nav_structure, self.treeWidget)
+            self._sync_parent_checkbox_states()
         else:
             # If no structure found but content exists (rare fallback), list flat
             for ch_id, ch_len in self.content_lengths.items():
@@ -589,6 +590,21 @@ class HandlerDialog(QDialog):
         else:
             item.setCheckState(0, Qt.CheckState.PartiallyChecked)
 
+    @staticmethod
+    def _get_first_leaf_src(node: dict) -> str | None:
+        """Find the navigation source of the first descendant leaf item.
+
+        Args:
+            node: Navigation dictionary node with optional children.
+
+        Returns:
+            The source URI string of the first leaf child, or None if not found.
+        """
+        curr = node
+        while curr.get("children"):
+            curr = curr["children"][0]
+        return curr.get("src")
+
     def _build_tree_from_nav(
         self,
         nav_nodes: list[dict],
@@ -608,38 +624,61 @@ class HandlerDialog(QDialog):
             title = node.get("title", "Unknown")
             src = node.get("src")
             children = node.get("children", [])
+            has_children = bool(children)
+
+            # Check whether a container node is borrowing its first descendant's target
+            is_container_borrowing_child = False
+            if has_children and src:
+                first_child_src = self._get_first_leaf_src(node)
+                if src == first_child_src:
+                    is_container_borrowing_child = True
+                elif (
+                    src in self.content_texts and first_child_src in self.content_texts
+                ):
+                    parent_text = self.content_texts[src].strip()
+                    child_text = self.content_texts[first_child_src].strip()
+                    if parent_text and parent_text == child_text:
+                        is_container_borrowing_child = True
+
+            effective_src = None if is_container_borrowing_child else src
 
             item = QTreeWidgetItem(parent_item, [title])
-            item.setData(0, Qt.ItemDataRole.UserRole, src)
+            item.setData(0, Qt.ItemDataRole.UserRole, effective_src)
 
             is_empty = (
-                src
-                and (src in self.content_texts)
-                and (not self.content_texts[src].strip())
+                effective_src
+                and (effective_src in self.content_texts)
+                and (not self.content_texts[effective_src].strip())
             )
             is_duplicate = False
-            if src and src in self.content_texts and self.content_texts[src].strip():
-                content_hash = hash(self.content_texts[src])
-                if content_hash in seen_content_hashes:
-                    is_duplicate = True
-                else:
-                    seen_content_hashes.add(content_hash)
+            if (
+                effective_src
+                and effective_src in self.content_texts
+                and self.content_texts[effective_src].strip()
+            ):
+                content_hash = hash(self.content_texts[effective_src])
+                # Only check/record duplicate content hashes for leaf chapter items
+                if not has_children:
+                    if content_hash in seen_content_hashes:
+                        is_duplicate = True
+                    else:
+                        seen_content_hashes.add(content_hash)
 
-            if src and not is_empty:
+            if effective_src and not is_empty:
                 item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
                 if is_duplicate:
                     item.setText(0, f"{title} (Duplicate)")
                     item.setData(0, Qt.ItemDataRole.UserRole + 1, True)
                     item.setCheckState(0, Qt.CheckState.Unchecked)
                 else:
-                    is_checked = src in self.checked_chapters
+                    is_checked = effective_src in self.checked_chapters
                     item.setCheckState(
                         0,
                         Qt.CheckState.Checked
                         if is_checked
                         else Qt.CheckState.Unchecked,
                     )
-            elif children:
+            elif has_children:
                 item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
                 item.setCheckState(0, Qt.CheckState.Unchecked)
             else:
@@ -1718,6 +1757,7 @@ class HandlerDialog(QDialog):
         else:
             self._run_pdf_auto_check()
 
+        self._sync_parent_checkbox_states()
         self._block_signals = False
         self._update_checked_set_from_tree()
 
