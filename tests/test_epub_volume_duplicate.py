@@ -216,8 +216,8 @@ class TestEpubVolumeDuplicate(unittest.TestCase):
     def test_volume_text_extraction_does_not_duplicate_audio_markers(
         self,
     ) -> None:
-        """Verify that selecting a volume and its children produces single chapter markers."""
-        epub_path = self.test_dir / "volumes_text_test.epub"
+        """Verify that selecting a volume and its children produces spoken announcements without duplicating text."""
+        epub_path: Path = self.test_dir / "volumes_text_test.epub"
         self._create_multi_volume_epub(epub_path)
 
         dialog = HandlerDialog(str(epub_path))
@@ -228,12 +228,46 @@ class TestEpubVolumeDuplicate(unittest.TestCase):
         self.assertTrue(len(chunks) > 0, "Expected non-empty chunks from dialog")
         combined_text = chunks[0][0]
 
-        # The first chapter text should appear under its own title marker
-        self.assertIn("Mirror, mirror on the wall", combined_text)
+        # Ensure Volume 1 has its spoken announcement marker
+        self.assertIn("<<CHAPTER_MARKER:Volume 1>>\nVolume 1.", combined_text)
 
-        # Ensure Volume 1 does not duplicate the first chapter content
-        self.assertNotIn("<<CHAPTER_MARKER:Volume 1>>", combined_text)
-        self.assertNotIn("<<CHAPTER_MARKER:└─ Volume 1>>", combined_text)
+        # The first chapter text should appear under its own title marker with visual tree prefix
+        self.assertIn("<<CHAPTER_MARKER:├─ Mirror, mirror on the wall>>", combined_text)
+
+        # Ensure the substantial narrative text appears under the chapter, not duplicated under Volume 1
+        vol1_split = combined_text.split("<<CHAPTER_MARKER:Volume 1>>\n")[1]
+        vol1_section_text = vol1_split.split("<<CHAPTER_MARKER:")[0].strip()
+        self.assertEqual(vol1_section_text, "Volume 1.")
+
+        dialog.close()
+
+    def test_volume_text_extraction_clean_titles_when_visual_indentation_off(
+        self,
+    ) -> None:
+        """Verify that clean chapter titles without parent prefixes are used when visual indentation is disabled."""
+        epub_path: Path = self.test_dir / "volumes_text_clean_test.epub"
+        self._create_multi_volume_epub(epub_path)
+
+        dialog = HandlerDialog(str(epub_path))
+        self._wait_for_dialog(dialog)
+        dialog.chapter_visual_indentation = False
+        dialog.auto_select_chapters()
+
+        chunks, checked_ids = dialog.get_selected_text()
+        self.assertTrue(len(chunks) > 0, "Expected non-empty chunks from dialog")
+        combined_text = chunks[0][0]
+
+        # Volume 1 has its announcement marker
+        self.assertIn("<<CHAPTER_MARKER:Volume 1>>\nVolume 1.", combined_text)
+
+        # Child chapter has a clean title without redundant 'Volume 1 - ' prefix
+        self.assertIn("<<CHAPTER_MARKER:Mirror, mirror on the wall>>", combined_text)
+        self.assertNotIn(
+            "<<CHAPTER_MARKER:Volume 1 - Mirror, mirror on the wall>>", combined_text
+        )
+        self.assertNotIn(
+            "<<CHAPTER_MARKER:├─ Mirror, mirror on the wall>>", combined_text
+        )
 
         dialog.close()
 

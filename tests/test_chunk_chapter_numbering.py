@@ -36,6 +36,14 @@ def test_extract_chapter_number_various_formats() -> None:
     assert _extract_chapter_number("Volume 2 Chapter 111") == 111
     assert _extract_chapter_number("One Piece Chapter 111") == 111
 
+    # Pure Volume, Book, and Arc headers should return None
+    assert _extract_chapter_number("Volume 1") is None
+    assert _extract_chapter_number("Volume 2") is None
+    assert _extract_chapter_number("Vol. 1") is None
+    assert _extract_chapter_number("Vol 2") is None
+    assert _extract_chapter_number("Book 1") is None
+    assert _extract_chapter_number("Arc 1") is None
+
     # Unnumbered titles should return None
     assert _extract_chapter_number("Prologue") is None
     assert _extract_chapter_number("Interlude") is None
