@@ -103,6 +103,8 @@ def _extract_chapter_number(title: str) -> int | None:
     if all_numbers:
         if len(all_numbers) > 1 and "vol" in cleaned_title.lower():
             return int(all_numbers[-1])
+        if re.search(r"(?i)\b(?:vol(?:ume)?\.?|book|arc)\b", cleaned_title):
+            return None
         return int(all_numbers[0])
 
     return None
@@ -671,7 +673,7 @@ class HandlerDialog(QDialog):
             children = node.get("children", [])
             has_children = bool(children)
 
-            # Check whether a container node is borrowing its first descendant's target
+            # Check whether a container node is borrowing its first descendant's target or lacks content
             is_container_borrowing_child = False
             if has_children and src:
                 first_child_src = self._get_first_leaf_src(node)
@@ -685,10 +687,38 @@ class HandlerDialog(QDialog):
                     if parent_text and parent_text == child_text:
                         is_container_borrowing_child = True
 
-            effective_src = None if is_container_borrowing_child else src
+            is_container_without_content = has_children and (
+                is_container_borrowing_child
+                or not src
+                or not self.content_texts.get(src, "").strip()
+            )
+
+            is_section_announcement = False
+            if is_container_without_content:
+                clean_title = _TREE_PREFIX_PATTERN.sub("", title).strip()
+                clean_title = _LEADING_DASH_PATTERN.sub("", clean_title).strip()
+                if clean_title.endswith(" (Duplicate)"):
+                    clean_title = clean_title[:-12].strip()
+
+                if clean_title:
+                    announcement_text = (
+                        clean_title
+                        if re.search(r"[.!?:—]$", clean_title)
+                        else f"{clean_title}."
+                    )
+                    effective_src = f"section_announcement:{src or title}_{id(node)}"
+                    self.content_texts[effective_src] = announcement_text
+                    self.content_lengths[effective_src] = len(announcement_text)
+                    is_section_announcement = True
+                else:
+                    effective_src = None
+            else:
+                effective_src = src
 
             item = QTreeWidgetItem(parent_item, [title])
             item.setData(0, Qt.ItemDataRole.UserRole, effective_src)
+            if is_section_announcement:
+                item.setData(0, Qt.ItemDataRole.UserRole + 2, True)
 
             is_empty = (
                 effective_src
@@ -716,7 +746,9 @@ class HandlerDialog(QDialog):
                     item.setData(0, Qt.ItemDataRole.UserRole + 1, True)
                     item.setCheckState(0, Qt.CheckState.Unchecked)
                 else:
-                    is_checked = effective_src in self.checked_chapters
+                    is_checked = effective_src in self.checked_chapters or (
+                        src in self.checked_chapters if src else False
+                    )
                     item.setCheckState(
                         0,
                         Qt.CheckState.Checked
@@ -2749,6 +2781,51 @@ class HandlerDialog(QDialog):
         parts.reverse()
         return " - ".join(parts)
 
+    @staticmethod
+    def _is_descendant_item(
+        child_item: QTreeWidgetItem, parent_item: QTreeWidgetItem
+    ) -> bool:
+        """Determine whether child_item is a descendant of parent_item in the tree.
+
+        Args:
+            child_item: The potential descendant tree item.
+            parent_item: The potential ancestor tree item.
+
+        Returns:
+            bool: True if child_item is a descendant of parent_item, False otherwise.
+        """
+        curr = child_item.parent()
+        while curr is not None:
+            if curr == parent_item:
+                return True
+            curr = curr.parent()
+        return False
+
+    def _format_chapter_title_for_marker(self, item: QTreeWidgetItem) -> str:
+        """Format a chapter title for a chapter marker according to visual tree settings.
+
+        When chapter_visual_indentation is enabled, prefixes nested chapter titles
+        with tree-drawing characters ('├─', '└─'). When disabled, uses clean chapter
+        titles without redundant parent prefixes, as parent sections are already
+        represented by preceding chapter markers in the audio Table of Contents.
+
+        Args:
+            item: The QTreeWidgetItem representing the chapter or section.
+
+        Returns:
+            str: The formatted chapter title for the marker.
+        """
+        raw_title: str = item.text(0)
+        clean_title: str = _TREE_PREFIX_PATTERN.sub("", raw_title).strip()
+        clean_title = _LEADING_DASH_PATTERN.sub("", clean_title).strip()
+        if clean_title.endswith(" (Duplicate)"):
+            clean_title = clean_title[:-12].strip()
+
+        if self.chapter_visual_indentation:
+            prefix: str = self._get_visual_prefix(item)
+            return f"{prefix}{clean_title}"
+        return clean_title
+
     def _get_item_depth(self, item: QTreeWidgetItem) -> int:
         """Calculate the 1-based depth of a QTreeWidgetItem in the tree.
 
@@ -2842,15 +2919,32 @@ class HandlerDialog(QDialog):
         while iterator.value():
             item = iterator.value()
             item_order_counter += 1
-            if item.checkState(0) == Qt.CheckState.Checked:
+            check_state = item.checkState(0)
+            is_announcement = bool(item.data(0, Qt.ItemDataRole.UserRole + 2))
+            is_valid_checked = check_state == Qt.CheckState.Checked or (
+                is_announcement and check_state == Qt.CheckState.PartiallyChecked
+            )
+            if is_valid_checked:
                 identifier = item.data(0, Qt.ItemDataRole.UserRole)
-
                 if identifier and identifier != "info:bookinfo":
                     all_checked_identifiers.add(identifier)
                     ordered_checked_items.append((item_order_counter, item, identifier))
             iterator += 1
 
         ordered_checked_items.sort(key=lambda x: x[0])
+
+        filtered_checked_items = []
+        for order_idx, item, identifier in ordered_checked_items:
+            is_announcement = bool(item.data(0, Qt.ItemDataRole.UserRole + 2))
+            if is_announcement:
+                has_checked_descendant = any(
+                    self._is_descendant_item(other_item, item)
+                    for _, other_item, _ in ordered_checked_items
+                )
+                if not has_checked_descendant:
+                    continue
+            filtered_checked_items.append((order_idx, item, identifier))
+        ordered_checked_items = filtered_checked_items
 
         checked_ids = {identifier for _, _, identifier in ordered_checked_items}
         accumulated_texts = {}
@@ -2883,15 +2977,7 @@ class HandlerDialog(QDialog):
         for _, item, identifier in ordered_checked_items:
             if id(item) in accumulated_texts and accumulated_texts[id(item)]:
                 text_content = "\n\n".join(accumulated_texts[id(item)])
-                if self.chapter_visual_indentation:
-                    prefix = self._get_visual_prefix(item)
-                    title = item.text(0)
-                    title = _LEADING_DASH_PATTERN.sub("", title).strip()
-                    if title.endswith(" (Duplicate)"):
-                        title = title[:-12].strip()
-                    title = f"{prefix}{title}"
-                else:
-                    title = self._get_hierarchical_title(item)
+                title = self._format_chapter_title_for_marker(item)
                 marker = f"<<CHAPTER_MARKER:{title}>>"
                 chapter_texts.append(marker + "\n" + text_content)
 
@@ -2911,7 +2997,12 @@ class HandlerDialog(QDialog):
         while iterator.value():
             item = iterator.value()
             item_order_counter += 1
-            if item.checkState(0) == Qt.CheckState.Checked:
+            check_state = item.checkState(0)
+            is_announcement = bool(item.data(0, Qt.ItemDataRole.UserRole + 2))
+            is_valid_checked = check_state == Qt.CheckState.Checked or (
+                is_announcement and check_state == Qt.CheckState.PartiallyChecked
+            )
+            if is_valid_checked:
                 identifier = item.data(0, Qt.ItemDataRole.UserRole)
                 if identifier and identifier != "info:bookinfo":
                     all_checked_identifiers.add(identifier)
@@ -2919,6 +3010,19 @@ class HandlerDialog(QDialog):
             iterator += 1
 
         ordered_checked_items.sort(key=lambda x: x[0])
+
+        filtered_checked_items = []
+        for order_idx, item, identifier in ordered_checked_items:
+            is_announcement = bool(item.data(0, Qt.ItemDataRole.UserRole + 2))
+            if is_announcement:
+                has_checked_descendant = any(
+                    self._is_descendant_item(other_item, item)
+                    for _, other_item, _ in ordered_checked_items
+                )
+                if not has_checked_descendant:
+                    continue
+            filtered_checked_items.append((order_idx, item, identifier))
+        ordered_checked_items = filtered_checked_items
 
         checked_ids = {identifier for _, _, identifier in ordered_checked_items}
         accumulated_texts = {}
@@ -2951,15 +3055,7 @@ class HandlerDialog(QDialog):
         for _, item, identifier in ordered_checked_items:
             if id(item) in accumulated_texts and accumulated_texts[id(item)]:
                 text_content = "\n\n".join(accumulated_texts[id(item)])
-                if self.chapter_visual_indentation:
-                    prefix = self._get_visual_prefix(item)
-                    title = item.text(0)
-                    title = _LEADING_DASH_PATTERN.sub("", title).strip()
-                    if title.endswith(" (Duplicate)"):
-                        title = title[:-12].strip()
-                    title = f"{prefix}{title}"
-                else:
-                    title = self._get_hierarchical_title(item)
+                title = self._format_chapter_title_for_marker(item)
                 marker = f"<<CHAPTER_MARKER:{title}>>"
                 chapter_texts.append(marker + "\n" + text_content)
 
@@ -3051,17 +3147,7 @@ class HandlerDialog(QDialog):
                             )
                         else:
                             # Start a new chapter
-                            if self.chapter_visual_indentation:
-                                prefix = self._get_visual_prefix(item)
-                                cleaned_title = item.text(0)
-                                cleaned_title = _LEADING_DASH_PATTERN.sub(
-                                    "", cleaned_title
-                                ).strip()
-                                if cleaned_title.endswith(" (Duplicate)"):
-                                    cleaned_title = cleaned_title[:-12].strip()
-                                cleaned_title = f"{prefix}{cleaned_title}"
-                            else:
-                                cleaned_title = self._get_hierarchical_title(item)
+                            cleaned_title = self._format_chapter_title_for_marker(item)
                             marker = f"<<CHAPTER_MARKER:{cleaned_title}>>"
                             section_titles.append((cleaned_title, marker + "\n" + text))
                             current_chapter_idx = len(section_titles) - 1
