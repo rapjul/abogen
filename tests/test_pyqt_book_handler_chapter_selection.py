@@ -154,20 +154,30 @@ def test_chapter_stats_and_duration_format(
     assert "Chars:" in lines[1] and "Words:" in lines[1] and "Paragraphs:" in lines[1]
     assert "Est." in lines[2] and "Audio:" in lines[2]
 
-    # Action buttons must have fixed width to prevent layout shifts when toggled
+    # Action buttons must have fixed width and height to prevent shape changes when toggled
     assert dialog.toggle_edit_btn.minimumWidth() == 120
     assert dialog.toggle_edit_btn.maximumWidth() == 120
     assert dialog.toggle_fr_btn.minimumWidth() == 120
     assert dialog.toggle_fr_btn.maximumWidth() == 120
+    assert (
+        dialog.toggle_edit_btn.minimumHeight() == dialog.toggle_edit_btn.maximumHeight()
+    )
+    assert dialog.toggle_fr_btn.minimumHeight() == dialog.toggle_fr_btn.maximumHeight()
+    expected_height = dialog.toggle_edit_btn.maximumHeight()
 
     dialog.toggle_edit_mode()
     assert dialog.toggle_edit_btn.text() == "Editing (Active)"
     assert "#1b5e20" in dialog.toggle_edit_btn.styleSheet()
     assert "#ffffff" in dialog.toggle_edit_btn.styleSheet()
     assert dialog.toggle_edit_btn.maximumWidth() == 120
+    assert dialog.toggle_edit_btn.maximumHeight() == expected_height
+    assert dialog.toggle_edit_btn.minimumHeight() == expected_height
+
     dialog.toggle_edit_mode()
     assert dialog.toggle_edit_btn.text() == "Edit Text"
     assert dialog.toggle_edit_btn.maximumWidth() == 120
+    assert dialog.toggle_edit_btn.maximumHeight() == expected_height
+    assert dialog.toggle_edit_btn.minimumHeight() == expected_height
 
 
 def test_find_and_replace_plain_text(qapp: QApplication, mock_md_book: Path) -> None:

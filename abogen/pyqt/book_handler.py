@@ -697,15 +697,17 @@ class HandlerDialog(QDialog):
         self.toggle_edit_btn.setToolTip(
             "Toggle direct manual text editing in the preview pane"
         )
-        self.toggle_edit_btn.setFixedWidth(120)
         self.toggle_edit_btn.clicked.connect(self.toggle_edit_mode)
         btn_box.addWidget(self.toggle_edit_btn)
 
         self.toggle_fr_btn = QPushButton("Find && Replace", self.chapter_info_frame)
         self.toggle_fr_btn.setToolTip("Open Find & Replace panel (Ctrl+F)")
-        self.toggle_fr_btn.setFixedWidth(120)
         self.toggle_fr_btn.clicked.connect(self.toggle_find_replace_panel)
         btn_box.addWidget(self.toggle_fr_btn)
+
+        btn_height = max(self.toggle_edit_btn.sizeHint().height(), 30)
+        self.toggle_edit_btn.setFixedSize(120, btn_height)
+        self.toggle_fr_btn.setFixedSize(120, btn_height)
 
         info_layout.addLayout(btn_box, 0)
 
@@ -1137,7 +1139,7 @@ class HandlerDialog(QDialog):
         if self._is_editing_enabled:
             self.toggle_edit_btn.setText("Editing (Active)")
             self.toggle_edit_btn.setStyleSheet(
-                "QPushButton { background-color: #1b5e20; color: #ffffff; font-weight: bold; border: 1px solid #2e7d32; border-radius: 4px; }"
+                "QPushButton { background-color: #1b5e20; color: #ffffff; font-weight: bold; border: 1px solid #2e7d32; border-radius: 5px; padding: 4px 8px; }"
             )
             self.previewEdit.setFocus()
         else:
