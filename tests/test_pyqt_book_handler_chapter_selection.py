@@ -145,6 +145,22 @@ def test_chapter_stats_and_duration_format(
     stats_text = dialog.chapter_stats_label.text()
     assert "300" in stats_text
     assert "Test Chapter" in stats_text
+    assert "<" not in stats_text and ">" not in stats_text
+    assert stats_text.startswith("Test Chapter\n")
+    assert "Chars:" in stats_text and "Words: 300" in stats_text
+
+    # Action buttons must have fixed width to prevent layout shifts when toggled
+    assert dialog.toggle_edit_btn.minimumWidth() == 120
+    assert dialog.toggle_edit_btn.maximumWidth() == 120
+    assert dialog.toggle_fr_btn.minimumWidth() == 120
+    assert dialog.toggle_fr_btn.maximumWidth() == 120
+
+    dialog.toggle_edit_mode()
+    assert dialog.toggle_edit_btn.text() == "Editing (Active)"
+    assert dialog.toggle_edit_btn.maximumWidth() == 120
+    dialog.toggle_edit_mode()
+    assert dialog.toggle_edit_btn.text() == "Edit Text"
+    assert dialog.toggle_edit_btn.maximumWidth() == 120
 
 
 def test_find_and_replace_plain_text(qapp: QApplication, mock_md_book: Path) -> None:

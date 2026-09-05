@@ -685,7 +685,7 @@ class HandlerDialog(QDialog):
         info_layout.setContentsMargins(6, 4, 6, 4)
 
         self.chapter_stats_label = QLabel(self.chapter_info_frame)
-        self.chapter_stats_label.setText("<b>No chapter selected</b>")
+        self.chapter_stats_label.setText("No chapter selected")
         self.chapter_stats_label.setWordWrap(True)
         info_layout.addWidget(self.chapter_stats_label, 1)
 
@@ -693,11 +693,13 @@ class HandlerDialog(QDialog):
         self.toggle_edit_btn.setToolTip(
             "Toggle direct manual text editing in the preview pane"
         )
+        self.toggle_edit_btn.setFixedWidth(120)
         self.toggle_edit_btn.clicked.connect(self.toggle_edit_mode)
         info_layout.addWidget(self.toggle_edit_btn, 0)
 
         self.toggle_fr_btn = QPushButton("Find && Replace", self.chapter_info_frame)
         self.toggle_fr_btn.setToolTip("Open Find & Replace panel (Ctrl+F)")
+        self.toggle_fr_btn.setFixedWidth(120)
         self.toggle_fr_btn.clicked.connect(self.toggle_find_replace_panel)
         info_layout.addWidget(self.toggle_fr_btn, 0)
 
@@ -1116,11 +1118,11 @@ class HandlerDialog(QDialog):
 
         title = current.text(0)
         self.chapter_stats_label.setText(
-            f"<b>{title}</b> &nbsp;|&nbsp; "
-            f"<b>Chars:</b> {char_count:,} &nbsp;|&nbsp; "
-            f"<b>Words:</b> {word_count:,} &nbsp;|&nbsp; "
-            f"<b>Paragraphs:</b> {paragraphs} &nbsp;|&nbsp; "
-            f"<b>Est. Audio:</b> {duration_str} ({speed:.2f}x speed)"
+            f"{title}\n"
+            f"Chars: {char_count:,} | "
+            f"Words: {word_count:,} | "
+            f"Paragraphs: {paragraphs} | "
+            f"Est. Audio: {duration_str} ({speed:.2f}x speed)"
         )
 
     def toggle_edit_mode(self) -> None:
