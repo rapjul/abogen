@@ -104,3 +104,52 @@ def test_chunking_single_chapter_in_chunk(monkeypatch: pytest.MonkeyPatch) -> No
     assert len(chunks) == 1
     assert chunks[0][1] == " {Ch 111}"
     assert "<<METADATA_TITLE:Book {Ch 111}>>" in chunks[0][0]
+
+
+def test_conversion_thread_resolves_output_base_name_with_chunk_suffix() -> None:
+    """Test that ConversionThread incorporates chunk_suffix into the sanitized base name."""
+    from abogen.pyqt.conversion import ConversionThread
+
+    worker = ConversionThread.__new__(ConversionThread)
+    worker.chunk_suffix = " {Ch 111–130}"
+
+    base_path = "/path/to/My Great Book.epub"
+    processing_file = "/tmp/fake_processing.txt"
+
+    sanitized = worker._resolve_output_base_name(base_path, processing_file)
+    assert sanitized == "My Great Book {Ch 111–130}"
+
+
+def test_conversion_thread_falls_back_to_metadata_title_for_chunk_suffix(
+    tmp_path: pytest.TempPathFactory,
+) -> None:
+    """Test that ConversionThread parses chunk suffix from METADATA_TITLE when not explicitly set."""
+    from pathlib import Path
+    from abogen.pyqt.conversion import ConversionThread
+
+    worker = ConversionThread.__new__(ConversionThread)
+    worker.chunk_suffix = ""
+
+    text_file = Path(str(tmp_path)) / "chunk.txt"
+    text_file.write_text(
+        "<<METADATA_TITLE:Story Title {Ch 111–130}>>\n<<METADATA_ARTIST:Author>>\nContent",
+        encoding="utf-8",
+    )
+
+    base_path = "/path/to/Story Title.epub"
+    sanitized = worker._resolve_output_base_name(base_path, str(text_file))
+    assert sanitized == "Story Title {Ch 111–130}"
+
+
+def test_conversion_thread_strips_to_ch_before_applying_chunk_suffix() -> None:
+    """Test that existing {To Ch...} patterns are stripped prior to appending chunk_suffix."""
+    from abogen.pyqt.conversion import ConversionThread
+
+    worker = ConversionThread.__new__(ConversionThread)
+    worker.chunk_suffix = " {Ch 111–130}"
+
+    base_path = "/path/to/My Story {To Ch. Count of 136}.epub"
+    processing_file = ""
+
+    sanitized = worker._resolve_output_base_name(base_path, processing_file)
+    assert sanitized == "My Story {Ch 111–130}"

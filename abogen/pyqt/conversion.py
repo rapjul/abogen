@@ -1140,6 +1140,7 @@ class ConversionThread(QThread):
         save_base_path=None,
         shared_model=None,
         shared_model_config=None,
+        chunk_suffix="",
     ):  # Add use_gpu parameter
         super().__init__()
         self.shared_model = shared_model
@@ -1165,6 +1166,7 @@ class ConversionThread(QThread):
         self.processed_char_count = 0  # Initialize processed character count
         self.display_path = None  # Add variable for display path
         self.save_base_path = save_base_path  # Store the save base path
+        self.chunk_suffix = chunk_suffix  # Store chunk suffix if splitting into chunks
         self.ffmpeg_proc = None
         self.chapter_ffmpeg_proc = None
         self.is_direct_text = (
@@ -1451,6 +1453,45 @@ class ConversionThread(QThread):
             os.makedirs(parent, exist_ok=True)
 
         return parent
+
+    def _resolve_output_base_name(self, base_path: str, processing_file: str) -> str:
+        """Resolve the effective sanitized base name for output files.
+
+        Appends the chunk suffix (e.g., ' {Ch 111–130}') to the file base name
+        if chunked, falling back to reading the suffix from metadata tags in the
+        processing text file if not explicitly set.
+
+        Args:
+            base_path: Base document path.
+            processing_file: Current processed text file path.
+
+        Returns:
+            str: The sanitized base name suitable for output audio files.
+        """
+        base_name = os.path.splitext(os.path.basename(base_path))[0]
+        # Strip any existing {To Ch...} suffix from proper name
+        base_name = re.sub(r"\s*\{To Ch[^}]*\}", "", base_name).strip()
+
+        chunk_suffix = getattr(self, "chunk_suffix", "")
+        if not chunk_suffix and processing_file and os.path.exists(processing_file):
+            try:
+                with open(
+                    processing_file, "r", encoding="utf-8", errors="replace"
+                ) as f:
+                    header = f.read(4096)
+                m = re.search(
+                    r"<<METADATA_TITLE:[^>]+?(\s*\{Ch [^}]+\}|\s*\{Extras\})>>",
+                    header,
+                )
+                if m:
+                    chunk_suffix = m.group(1)
+            except Exception:
+                pass
+
+        if chunk_suffix and chunk_suffix not in base_name:
+            base_name = f"{base_name}{chunk_suffix}"
+
+        return sanitize_name_for_os(base_name, is_folder=False)
 
     def _find_unique_output_suffix(
         self,
@@ -2053,11 +2094,10 @@ class ConversionThread(QThread):
             chapters_out_dir = None
             suffix = ""
 
-            _, _, base_path = self._resolve_run_paths()
-
-            base_name = os.path.splitext(os.path.basename(base_path))[0]
-            # Sanitize base_name for folder/file creation based on OS
-            sanitized_base_name = sanitize_name_for_os(base_name, is_folder=True)
+            _, processing_file, base_path = self._resolve_run_paths()
+            sanitized_base_name = self._resolve_output_base_name(
+                base_path, processing_file
+            )
 
             parent_dir = self._resolve_output_parent_dir(base_path)
             # Ensure the output folder exists, error if it doesn't
@@ -2989,8 +3029,9 @@ class ConversionThread(QThread):
             )
 
             # Setup output paths
-            base_name = os.path.splitext(os.path.basename(base_path))[0]
-            sanitized_base_name = sanitize_name_for_os(base_name, is_folder=True)
+            sanitized_base_name = self._resolve_output_base_name(
+                base_path, self.file_name
+            )
             parent_dir = self._resolve_output_parent_dir(base_path)
 
             if not os.path.exists(parent_dir):

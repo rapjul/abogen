@@ -2346,6 +2346,7 @@ class abogen(QWidget):
 
                     if first:
                         self.selected_file = tmp
+                        self.chunk_suffix = chunk_suffix
                         first = False
 
                 self.selected_book_path = book_path
@@ -3540,6 +3541,7 @@ class abogen(QWidget):
             self.save_chunks_in_folder_name = getattr(
                 queued_item, "save_chunks_in_folder_name", None
             )
+            self.chunk_suffix = getattr(queued_item, "chunk_suffix", "")
 
             # CHECK GLOBAL OVERRIDE SETTING
             if not self.config.get("queue_override_settings", False):
@@ -3891,6 +3893,8 @@ class abogen(QWidget):
             self.conversion_thread.save_chunks_in_folder_name = getattr(
                 self, "save_chunks_in_folder_name", None
             )
+            # Pass chunk_suffix setting
+            self.conversion_thread.chunk_suffix = getattr(self, "chunk_suffix", "")
             # Pass subtitle format setting
             self.conversion_thread.subtitle_format = self.config.get(
                 "subtitle_format", "ass_centered_narrow"
