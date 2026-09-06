@@ -316,6 +316,7 @@ def test_queue_manager_reordering_preserves_multi_selection(
     from PyQt6.QtWidgets import QApplication
     from abogen.pyqt.queue_manager_gui import QueueManager
     from abogen.pyqt.queued_item import QueuedItem
+
     app = QApplication.instance() or QApplication(sys.argv)
     assert app is not None
 
@@ -349,11 +350,13 @@ def test_queue_manager_reordering_preserves_multi_selection(
     manager.listwidget.clearSelection()
     selection_model.select(
         model.index(1, 0),
-        QItemSelectionModel.SelectionFlag.Select | QItemSelectionModel.SelectionFlag.Rows,
+        QItemSelectionModel.SelectionFlag.Select
+        | QItemSelectionModel.SelectionFlag.Rows,
     )
     selection_model.select(
         model.index(2, 0),
-        QItemSelectionModel.SelectionFlag.Select | QItemSelectionModel.SelectionFlag.Rows,
+        QItemSelectionModel.SelectionFlag.Select
+        | QItemSelectionModel.SelectionFlag.Rows,
     )
 
     assert manager._get_selected_rows() == [1, 2]
@@ -369,5 +372,3 @@ def test_queue_manager_reordering_preserves_multi_selection(
 
     # Multi-selection should be preserved on the moved items (now at rows 0 and 1)
     assert manager._get_selected_rows() == [0, 1]
-
-

@@ -44,7 +44,9 @@ def _build_queued_item(file_name: str) -> Any:
     )
 
 
-def test_stop_queue_after_current_item(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_stop_queue_after_current_item(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Verify that when stop_queue_flag is True, the queue halts execution.
 
     Args:

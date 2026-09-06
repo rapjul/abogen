@@ -70,28 +70,27 @@ _TREE_PREFIX_PATTERN = re.compile(r"^[\s├─└│|─\-]+")
 
 
 def _is_valid_image_bytes(data: bytes | None) -> bool:
-    """Check whether binary data represents a recognized image format.
+    """Check whether binary data represents valid image data and not markup.
 
     Args:
         data: The binary payload to inspect.
 
     Returns:
-        True if the data matches image magic bytes (PNG, JPEG, GIF, WEBP, BMP), False otherwise.
+        True if the data is valid image binary data (and not XML/HTML markup), False otherwise.
     """
-    if not data or len(data) < 16:
+    if not data or len(data) < 8:
         return False
-    head = bytes(data[:16])
-    if head.startswith(b"\x89PNG\r\n\x1a\n"):
-        return True
-    if head.startswith(b"\xff\xd8\xff"):
-        return True
-    if head.startswith(b"GIF87a") or head.startswith(b"GIF89a"):
-        return True
-    if head.startswith(b"RIFF") and b"WEBP" in head:
-        return True
-    if head.startswith(b"BM"):
-        return True
-    return False
+    head = bytes(data[:64]).strip().lower()
+    if (
+        head.startswith(b"<?xml")
+        or head.startswith(b"<html")
+        or head.startswith(b"<!doctype")
+        or head.startswith(b"<svg")
+        or head.startswith(b"{\\")
+        or head.startswith(b"/*")
+    ):
+        return False
+    return True
 
 
 def _guess_image_extension(image_bytes: bytes | None) -> str:
@@ -2724,6 +2723,26 @@ class HandlerDialog(QDialog):
                         metadata["series_index"] = parser_meta["series_index"]
                 except Exception as exc:
                     logging.debug(f"Failed to re-extract parser metadata: {exc}")
+
+            epub_book = getattr(self.parser, "book", None)
+            if not metadata.get("cover_image") and epub_book is not None:
+                try:
+                    import ebooklib
+
+                    for item in epub_book.get_items_of_type(ebooklib.ITEM_COVER):
+                        data = item.get_content()
+                        if _is_valid_image_bytes(data):
+                            metadata["cover_image"] = data
+                            break
+                    if not metadata.get("cover_image"):
+                        for item in epub_book.get_items_of_type(ebooklib.ITEM_IMAGE):
+                            if "cover" in str(item.get_name() or "").lower():
+                                data = item.get_content()
+                                if _is_valid_image_bytes(data):
+                                    metadata["cover_image"] = data
+                                    break
+                except Exception:
+                    pass
 
         # Get values with fallbacks
         title = metadata.get("title") or filename
