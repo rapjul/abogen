@@ -326,6 +326,31 @@ def _m4b_cover_attach_args(input_index: int) -> list[str]:
     ]
 
 
+def _is_valid_image_bytes(data: bytes | None) -> bool:
+    """Check whether binary data represents a recognized image format.
+
+    Args:
+        data: The binary payload to inspect.
+
+    Returns:
+        True if the data matches image magic bytes (PNG, JPEG, GIF, WEBP, BMP), False otherwise.
+    """
+    if not data or len(data) < 16:
+        return False
+    head = bytes(data[:16])
+    if head.startswith(b"\x89PNG\r\n\x1a\n"):
+        return True
+    if head.startswith(b"\xff\xd8\xff"):
+        return True
+    if head.startswith(b"GIF87a") or head.startswith(b"GIF89a"):
+        return True
+    if head.startswith(b"RIFF") and b"WEBP" in head:
+        return True
+    if head.startswith(b"BM"):
+        return True
+    return False
+
+
 def _guess_image_extension(image_bytes: bytes) -> str:
     head = bytes(image_bytes[:16]) if image_bytes else b""
     if head.startswith(b"\x89PNG\r\n\x1a\n"):
@@ -3593,28 +3618,57 @@ class ConversionThread(QThread):
         cover_bytes = None
 
         try:
-            import ebooklib
-            from ebooklib import epub
+            from abogen.book_parser import EpubParser
 
-            book = epub.read_epub(norm_source)
-            for item in book.get_items_of_type(ebooklib.ITEM_COVER):
-                cover_bytes = item.get_content()
-                if cover_bytes:
-                    break
-            if not cover_bytes:
-                for item in book.get_items_of_type(ebooklib.ITEM_IMAGE):
-                    item_name = item.get_name().lower()
-                    if "cover" in item_name or "front" in item_name:
-                        cover_bytes = item.get_content()
-                        if cover_bytes:
-                            break
+            parser = EpubParser(norm_source)
+            parser.load()
+            meta = parser._extract_book_metadata()
+            cover_bytes = meta.get("cover_image")
         except Exception:
             cover_bytes = None
 
         if not cover_bytes:
-            cover_bytes = self._extract_cover_bytes_from_epub_zip(norm_source)
+            try:
+                import ebooklib
+                from ebooklib import epub
+
+                book = epub.read_epub(norm_source)
+                for item in book.get_items():
+                    props = getattr(item, "properties", []) or []
+                    if isinstance(props, str):
+                        props = props.split()
+                    if "cover-image" in props or "cover" in props:
+                        data = item.get_content()
+                        if _is_valid_image_bytes(data):
+                            cover_bytes = data
+                            break
+                if not cover_bytes:
+                    for item in book.get_items_of_type(ebooklib.ITEM_COVER):
+                        data = item.get_content()
+                        if _is_valid_image_bytes(data):
+                            cover_bytes = data
+                            break
+                if not cover_bytes:
+                    for item in book.get_items_of_type(ebooklib.ITEM_IMAGE):
+                        item_name = str(item.get_name() or "").lower()
+                        item_id = str(getattr(item, "id", "") or "").lower()
+                        if (
+                            "cover" in item_name
+                            or "cover" in item_id
+                            or "front" in item_name
+                            or "front" in item_id
+                        ):
+                            data = item.get_content()
+                            if _is_valid_image_bytes(data):
+                                cover_bytes = data
+                                break
+            except Exception:
+                cover_bytes = None
 
         if not cover_bytes:
+            cover_bytes = self._extract_cover_bytes_from_epub_zip(norm_source)
+
+        if not cover_bytes or not _is_valid_image_bytes(cover_bytes):
             return None
 
         try:
@@ -3676,6 +3730,19 @@ class ConversionThread(QThread):
                 self.log_updated.emit(
                     f"Warning: Cover image is not readable: {cover_path}"
                 )
+                return None
+
+            # Validate magic bytes to ensure file contains actual image data
+            try:
+                with open(cover_path, "rb") as handle:
+                    header = handle.read(16)
+                if not _is_valid_image_bytes(header):
+                    self.log_updated.emit(
+                        f"Warning: Cover file does not contain valid image data: {cover_path}"
+                    )
+                    return None
+            except Exception as exc:
+                self.log_updated.emit(f"Warning: Error reading cover header: {exc}")
                 return None
 
             # Convert select unsupported formats to JPEG before embedding.

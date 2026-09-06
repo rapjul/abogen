@@ -69,6 +69,54 @@ _CHAPTER_STANDALONE_NUM_PATTERN = re.compile(r"\b(\d+)\b")
 _TREE_PREFIX_PATTERN = re.compile(r"^[\s├─└│|─\-]+")
 
 
+def _is_valid_image_bytes(data: bytes | None) -> bool:
+    """Check whether binary data represents a recognized image format.
+
+    Args:
+        data: The binary payload to inspect.
+
+    Returns:
+        True if the data matches image magic bytes (PNG, JPEG, GIF, WEBP, BMP), False otherwise.
+    """
+    if not data or len(data) < 16:
+        return False
+    head = bytes(data[:16])
+    if head.startswith(b"\x89PNG\r\n\x1a\n"):
+        return True
+    if head.startswith(b"\xff\xd8\xff"):
+        return True
+    if head.startswith(b"GIF87a") or head.startswith(b"GIF89a"):
+        return True
+    if head.startswith(b"RIFF") and b"WEBP" in head:
+        return True
+    if head.startswith(b"BM"):
+        return True
+    return False
+
+
+def _guess_image_extension(image_bytes: bytes | None) -> str:
+    """Guess the image file extension from image binary header bytes.
+
+    Args:
+        image_bytes: Binary payload of the image.
+
+    Returns:
+        The matched extension including leading dot (.png, .jpg, .gif, .webp, .bmp).
+    """
+    head = bytes(image_bytes[:16]) if image_bytes else b""
+    if head.startswith(b"\x89PNG\r\n\x1a\n"):
+        return ".png"
+    if head.startswith(b"\xff\xd8\xff"):
+        return ".jpg"
+    if head.startswith(b"GIF87a") or head.startswith(b"GIF89a"):
+        return ".gif"
+    if head.startswith(b"RIFF") and b"WEBP" in head:
+        return ".webp"
+    if head.startswith(b"BM"):
+        return ".bmp"
+    return ".jpg"
+
+
 def _extract_chapter_number(title: str) -> int | None:
     """Extract the primary chapter number from a chapter title string.
 
@@ -2646,57 +2694,45 @@ class HandlerDialog(QDialog):
 
         return chunks, identifiers
 
-    def _format_metadata_tags(self):
-        """Format metadata tags for insertion at the beginning of the text"""
+    def _format_metadata_tags(self) -> str:
+        """Format metadata tags for insertion at the beginning of the text."""
         import datetime
+        from pathlib import Path
 
         from abogen.utils import get_user_cache_path
 
         metadata = dict(self.book_metadata or {})
-        filename = os.path.splitext(os.path.basename(self.book_path))[0]
+        filename = Path(self.book_path).stem
         current_year = str(datetime.datetime.now().year)
 
-        # Recover missing EPUB author/cover metadata directly from parser state when needed.
+        # Ensure cover image and authors are populated from parser metadata if available
         if self.parser.file_type == "epub":
-            epub_book = getattr(self.parser, "book", None)
-            if epub_book is not None:
-                if not metadata.get("authors") and metadata.get("author"):
-                    metadata["authors"] = [str(metadata.get("author"))]
-
-                if not metadata.get("authors"):
-                    try:
-                        author_items = epub_book.get_metadata("DC", "creator")
-                        authors = [a[0] for a in author_items or [] if a and a[0]]
-                        if authors:
-                            metadata["authors"] = authors
-                    except Exception:
-                        pass
-
-                if not metadata.get("cover_image"):
-                    try:
-                        for item in epub_book.get_items_of_type(ebooklib.ITEM_COVER):
-                            metadata["cover_image"] = item.get_content()
-                            break
-                    except Exception:
-                        pass
-
-                if not metadata.get("cover_image"):
-                    try:
-                        for item in epub_book.get_items_of_type(ebooklib.ITEM_IMAGE):
-                            if "cover" in item.get_name().lower():
-                                metadata["cover_image"] = item.get_content()
-                                break
-                    except Exception:
-                        pass
+            if not metadata.get("cover_image") and hasattr(
+                self.parser, "_extract_book_metadata"
+            ):
+                try:
+                    parser_meta = self.parser._extract_book_metadata()
+                    if parser_meta.get("cover_image"):
+                        metadata["cover_image"] = parser_meta["cover_image"]
+                    if not metadata.get("authors") and parser_meta.get("authors"):
+                        metadata["authors"] = parser_meta["authors"]
+                    if not metadata.get("series") and parser_meta.get("series"):
+                        metadata["series"] = parser_meta["series"]
+                    if not metadata.get("series_index") and parser_meta.get(
+                        "series_index"
+                    ):
+                        metadata["series_index"] = parser_meta["series_index"]
+                except Exception as exc:
+                    logging.debug(f"Failed to re-extract parser metadata: {exc}")
 
         # Get values with fallbacks
         title = metadata.get("title") or filename
-        authors = metadata.get("authors") or ["Unknown"]
+        authors = metadata.get("authors") or (
+            [str(metadata.get("author"))] if metadata.get("author") else ["Unknown"]
+        )
         authors_text = ", ".join(authors)
         album_artist = authors_text or "Unknown"
-        year = (
-            metadata.get("publication_year") or current_year
-        )  # Use publication year if available
+        year = metadata.get("publication_year") or current_year
 
         # Count chapters/pages
         total_chapters = len(self.checked_chapters)
@@ -2704,17 +2740,17 @@ class HandlerDialog(QDialog):
 
         # Handle cover image
         cover_tag = ""
-        if metadata.get("cover_image"):
+        cover_bytes = metadata.get("cover_image")
+        if cover_bytes and _is_valid_image_bytes(cover_bytes):
             try:
                 import uuid
 
-                cache_dir = get_user_cache_path()
-                os.makedirs(cache_dir, exist_ok=True)
-                cover_path = os.path.join(cache_dir, f"cover_{uuid.uuid4()}.jpg")
-                cover_path = os.path.normpath(cover_path)
-                with open(cover_path, "wb") as f:
-                    f.write(metadata["cover_image"])
-                cover_tag = f"<<METADATA_COVER_PATH:{cover_path}>>"
+                cache_dir = Path(get_user_cache_path())
+                cache_dir.mkdir(parents=True, exist_ok=True)
+                ext = _guess_image_extension(cover_bytes)
+                cover_path = cache_dir / f"cover_{uuid.uuid4()}{ext}"
+                cover_path.write_bytes(cover_bytes)
+                cover_tag = f"<<METADATA_COVER_PATH:{cover_path.resolve()}>>"
             except Exception as e:
                 logging.warning(f"Failed to save cover image: {e}")
 
