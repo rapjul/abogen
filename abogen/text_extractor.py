@@ -48,6 +48,31 @@ class ExtractedChapter:
         return calculate_text_length(self.text)
 
 
+def _is_valid_image_bytes(data: Optional[bytes]) -> bool:
+    """Check whether binary data represents a recognized image format.
+
+    Args:
+        data: The binary payload to inspect.
+
+    Returns:
+        True if the data matches image magic bytes (PNG, JPEG, GIF, WEBP, BMP), False otherwise.
+    """
+    if not data or len(data) < 16:
+        return False
+    head = bytes(data[:16])
+    if head.startswith(b"\x89PNG\r\n\x1a\n"):
+        return True
+    if head.startswith(b"\xff\xd8\xff"):
+        return True
+    if head.startswith(b"GIF87a") or head.startswith(b"GIF89a"):
+        return True
+    if head.startswith(b"RIFF") and b"WEBP" in head:
+        return True
+    if head.startswith(b"BM"):
+        return True
+    return False
+
+
 @dataclass
 class ExtractionResult:
     chapters: List[ExtractedChapter]
@@ -581,27 +606,78 @@ class EpubExtractor:
         return metadata
 
     def _extract_cover(self) -> Tuple[Optional[bytes], Optional[str]]:
+        # 1. EPUB 2 OPF meta cover ID
+        try:
+            meta_items = self.book.get_metadata("OPF", "meta")
+            for value, attrs in meta_items or []:
+                attrs_dict = attrs or {}
+                if (attrs_dict.get("name") or "").strip().lower() == "cover":
+                    cover_id = str(attrs_dict.get("content") or value or "").strip()
+                    if cover_id:
+                        for item in self.book.get_items():
+                            item_id = str(getattr(item, "id", "") or "").strip()
+                            file_name = str(
+                                getattr(item, "file_name", "") or ""
+                            ).strip()
+                            if item_id == cover_id or file_name == cover_id:
+                                data = item.get_content()
+                                if _is_valid_image_bytes(data):
+                                    media_type = (
+                                        getattr(item, "media_type", None)
+                                        or mimetypes.guess_type(item.get_name())[0]
+                                    )
+                                    return data, media_type
+        except Exception as exc:
+            logger.debug("Failed to extract EPUB 2 meta cover: %s", exc)
+
+        # 2. EPUB 3 cover-image manifest property
+        try:
+            for item in self.book.get_items():
+                props = getattr(item, "properties", []) or []
+                if isinstance(props, str):
+                    props = props.split()
+                if "cover-image" in props or "cover" in props:
+                    data = item.get_content()
+                    if _is_valid_image_bytes(data):
+                        media_type = (
+                            getattr(item, "media_type", None)
+                            or mimetypes.guess_type(item.get_name())[0]
+                        )
+                        return data, media_type
+        except Exception as exc:
+            logger.debug("Failed to extract EPUB 3 cover property: %s", exc)
+
+        # 3. Dedicated ITEM_COVER
         try:
             for item in self.book.get_items_of_type(ebooklib.ITEM_COVER):
                 data = item.get_content()
-                if data:
-                    media_type = getattr(item, "media_type", None)
+                if _is_valid_image_bytes(data):
+                    media_type = (
+                        getattr(item, "media_type", None)
+                        or mimetypes.guess_type(item.get_name())[0]
+                    )
                     return data, media_type
         except Exception as exc:
             logger.debug("Failed to read dedicated EPUB cover image: %s", exc)
 
+        # 4. Fallback IMAGE item
         try:
             for item in self.book.get_items_of_type(ebooklib.ITEM_IMAGE):
                 name = item.get_name().lower()
-                if "cover" not in name and "front" not in name:
-                    continue
-                data = item.get_content()
-                if not data:
-                    continue
-                media_type = getattr(item, "media_type", None)
-                if not media_type:
-                    media_type = mimetypes.guess_type(name)[0]
-                return data, media_type
+                item_id = str(getattr(item, "id", "") or "").lower()
+                if (
+                    "cover" in name
+                    or "cover" in item_id
+                    or "front" in name
+                    or "front" in item_id
+                ):
+                    data = item.get_content()
+                    if _is_valid_image_bytes(data):
+                        media_type = (
+                            getattr(item, "media_type", None)
+                            or mimetypes.guess_type(name)[0]
+                        )
+                        return data, media_type
         except Exception as exc:
             logger.debug("Failed to locate fallback EPUB cover image: %s", exc)
 

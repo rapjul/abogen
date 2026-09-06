@@ -7,7 +7,7 @@ import re
 import textwrap
 import urllib.parse
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Optional
 
 import ebooklib
 import fitz  # PyMuPDF
@@ -30,6 +30,31 @@ _PAGE_NUMBERS_AT_END_PATTERN = re.compile(r"\s+\d+\s*$", re.MULTILINE)
 _PAGE_NUMBERS_WITH_DASH_PATTERN = re.compile(
     r"\s+[-–—]\s*\d+\s*[-–—]?\s*$", re.MULTILINE
 )
+
+
+def _is_valid_image_bytes(data: Optional[bytes]) -> bool:
+    """Check whether binary data represents a recognized image format.
+
+    Args:
+        data: The binary payload to inspect.
+
+    Returns:
+        True if the data matches image magic bytes (PNG, JPEG, GIF, WEBP, BMP), False otherwise.
+    """
+    if not data or len(data) < 16:
+        return False
+    head = bytes(data[:16])
+    if head.startswith(b"\x89PNG\r\n\x1a\n"):
+        return True
+    if head.startswith(b"\xff\xd8\xff"):
+        return True
+    if head.startswith(b"GIF87a") or head.startswith(b"GIF89a"):
+        return True
+    if head.startswith(b"RIFF") and b"WEBP" in head:
+        return True
+    if head.startswith(b"BM"):
+        return True
+    return False
 
 
 class BaseBookParser(ABC):
@@ -464,27 +489,290 @@ class EpubParser(BaseBookParser):
 
         return self.content_texts, self.content_lengths
 
-    def _extract_book_metadata(self):
-        metadata = {}
+    def _extract_book_metadata(self) -> dict[str, Any]:
+        """Extract metadata and cover image bytes from the loaded EPUB book.
+
+        Returns:
+            Dictionary containing book metadata attributes including title, authors,
+            description, publisher, publication_year, language, series, series_index,
+            and cover_image bytes.
+        """
+        metadata: dict[str, Any] = {
+            "title": None,
+            "author": None,
+            "authors": [],
+            "description": None,
+            "cover_image": None,
+            "publisher": None,
+            "publication_year": None,
+            "language": None,
+            "series": None,
+            "series_index": None,
+        }
         if not self.book:
             return metadata
 
         try:
-            metadata["title"] = self.book.get_metadata("DC", "title")[0][0]
-        except Exception:
+            title_items = self.book.get_metadata("DC", "title")
+            if title_items and len(title_items) > 0:
+                metadata["title"] = title_items[0][0]
+        except Exception as exc:
+            logging.warning(f"Error extracting title metadata: {exc}")
+        if not metadata["title"]:
             metadata["title"] = os.path.splitext(os.path.basename(self.book_path))[0]
 
         try:
-            metadata["author"] = self.book.get_metadata("DC", "creator")[0][0]
-        except Exception:
+            author_items = self.book.get_metadata("DC", "creator")
+            if author_items:
+                metadata["authors"] = [
+                    author[0]
+                    for author in author_items
+                    if len(author) > 0 and author[0]
+                ]
+                if metadata["authors"]:
+                    metadata["author"] = metadata["authors"][0]
+        except Exception as exc:
+            logging.warning(f"Error extracting author metadata: {exc}")
+        if not metadata["author"]:
             metadata["author"] = "Unknown Author"
 
         try:
-            metadata["language"] = self.book.get_metadata("DC", "language")[0][0]
-        except Exception:
+            desc_items = self.book.get_metadata("DC", "description")
+            if desc_items and len(desc_items) > 0:
+                metadata["description"] = desc_items[0][0]
+        except Exception as exc:
+            logging.warning(f"Error extracting description metadata: {exc}")
+
+        try:
+            publisher_items = self.book.get_metadata("DC", "publisher")
+            if publisher_items and len(publisher_items) > 0:
+                metadata["publisher"] = publisher_items[0][0]
+        except Exception as exc:
+            logging.warning(f"Error extracting publisher metadata: {exc}")
+
+        try:
+            date_items = self.book.get_metadata("DC", "date")
+            if date_items and len(date_items) > 0:
+                date_str = str(date_items[0][0])
+                year_match = re.search(r"\b(19|20)\d{2}\b", date_str)
+                if year_match:
+                    metadata["publication_year"] = year_match.group(0)
+                else:
+                    metadata["publication_year"] = date_str
+        except Exception as exc:
+            logging.warning(f"Error extracting publication date metadata: {exc}")
+
+        try:
+            language_items = self.book.get_metadata("DC", "language")
+            if language_items and len(language_items) > 0:
+                metadata["language"] = language_items[0][0]
+        except Exception as exc:
+            logging.warning(f"Error extracting language metadata: {exc}")
+        if not metadata["language"]:
             metadata["language"] = "en"
 
+        try:
+            meta_items = self.book.get_metadata("OPF", "meta")
+        except Exception as exc:
+            logging.warning(f"Error extracting OPF metadata: {exc}")
+            meta_items = []
+
+        series_name: Any = None
+        series_index: Any = None
+        cover_id: Any = None
+
+        for value, attrs in meta_items or []:
+            attrs_dict = attrs or {}
+            name = str(attrs_dict.get("name") or "").strip().casefold()
+            prop = str(attrs_dict.get("property") or "").strip().casefold()
+            content = attrs_dict.get("content")
+            candidate = content if content is not None else value
+            candidate_text = str(candidate or "").strip()
+            if not candidate_text:
+                continue
+
+            if name == "cover" and not cover_id:
+                cover_id = candidate_text
+            if name in {"calibre:series", "series"} and series_name is None:
+                series_name = candidate_text
+                continue
+            if (
+                name
+                in {
+                    "calibre:series_index",
+                    "calibre:seriesindex",
+                    "series_index",
+                    "seriesindex",
+                }
+                and series_index is None
+            ):
+                series_index = candidate_text
+                continue
+            if prop.endswith("belongs-to-collection") and series_name is None:
+                series_name = candidate_text
+
+        metadata["series"] = series_name
+        metadata["series_index"] = series_index
+
+        cover_bytes = None
+
+        # 1. Look up item by EPUB 2 OPF cover meta ID
+        if cover_id:
+            try:
+                for item in self.book.get_items():
+                    item_id = str(getattr(item, "id", "") or "").strip()
+                    file_name = str(getattr(item, "file_name", "") or "").strip()
+                    if item_id == cover_id or file_name == cover_id:
+                        data = item.get_content()
+                        if _is_valid_image_bytes(data):
+                            cover_bytes = data
+                            break
+            except Exception as exc:
+                logging.debug(f"Failed to resolve cover by ID '{cover_id}': {exc}")
+
+        # 2. Look up manifest items with EPUB 3 cover-image property
+        if not cover_bytes:
+            try:
+                for item in self.book.get_items():
+                    props = getattr(item, "properties", []) or []
+                    if isinstance(props, str):
+                        props = props.split()
+                    if "cover-image" in props or "cover" in props:
+                        data = item.get_content()
+                        if _is_valid_image_bytes(data):
+                            cover_bytes = data
+                            break
+            except Exception as exc:
+                logging.debug(f"Failed to resolve EPUB 3 cover property: {exc}")
+
+        # 3. Dedicated ebooklib ITEM_COVER with valid image binary data
+        if not cover_bytes:
+            try:
+                for item in self.book.get_items_of_type(ebooklib.ITEM_COVER):
+                    data = item.get_content()
+                    if _is_valid_image_bytes(data):
+                        cover_bytes = data
+                        break
+            except Exception as exc:
+                logging.debug(f"Failed to read ITEM_COVER: {exc}")
+
+        # 4. Fallback: Image item with 'cover' or 'front' in name/ID
+        if not cover_bytes:
+            try:
+                for item in self.book.get_items_of_type(ebooklib.ITEM_IMAGE):
+                    name = str(item.get_name() or "").lower()
+                    item_id = str(getattr(item, "id", "") or "").lower()
+                    if (
+                        "cover" in name
+                        or "cover" in item_id
+                        or "front" in name
+                        or "front" in item_id
+                    ):
+                        data = item.get_content()
+                        if _is_valid_image_bytes(data):
+                            cover_bytes = data
+                            break
+            except Exception as exc:
+                logging.debug(f"Failed to extract fallback image cover: {exc}")
+
+        # 5. Direct container fallback (zipfile inspection)
+        if not cover_bytes and os.path.isfile(self.book_path):
+            try:
+                cover_bytes = self._extract_cover_bytes_from_zip(self.book_path)
+            except Exception as exc:
+                logging.debug(f"Direct zip cover extraction failed: {exc}")
+
+        metadata["cover_image"] = cover_bytes
         return metadata
+
+    def _extract_cover_bytes_from_zip(self, epub_path: str) -> Optional[bytes]:
+        """Extract cover image bytes directly from the EPUB zip container.
+
+        Args:
+            epub_path: Path to the EPUB file on disk.
+
+        Returns:
+            Image bytes if found and valid, None otherwise.
+        """
+        try:
+            import posixpath
+            import xml.etree.ElementTree as ET
+            import zipfile
+
+            with zipfile.ZipFile(epub_path, "r") as zf:
+                names = set(zf.namelist())
+                opf_candidates = [n for n in names if n.lower().endswith(".opf")]
+                if not opf_candidates:
+                    return None
+
+                for opf_name in opf_candidates:
+                    try:
+                        root = ET.fromstring(zf.read(opf_name))
+                    except Exception:
+                        continue
+
+                    opf_dir = posixpath.dirname(opf_name)
+                    cover_id = ""
+                    manifest_entries: list[tuple[str, str, str, str]] = []
+                    fallback_cover_href = ""
+                    first_image_href = ""
+
+                    for elem in root.iter():
+                        tag = elem.tag.split("}")[-1].lower()
+                        if tag == "meta":
+                            name_attr = (elem.attrib.get("name") or "").strip().lower()
+                            if name_attr == "cover" and not cover_id:
+                                cover_id = (elem.attrib.get("content") or "").strip()
+                        elif tag == "item":
+                            item_id = (elem.attrib.get("id") or "").strip()
+                            href = (elem.attrib.get("href") or "").strip()
+                            media_type = (
+                                (elem.attrib.get("media-type") or "").strip().lower()
+                            )
+                            properties = (
+                                (elem.attrib.get("properties") or "").strip().lower()
+                            )
+                            manifest_entries.append(
+                                (item_id, href, media_type, properties)
+                            )
+                            if not href:
+                                continue
+
+                            href_l = href.lower()
+                            if not first_image_href and media_type.startswith("image/"):
+                                first_image_href = href
+
+                            if not fallback_cover_href and (
+                                "cover-image" in properties
+                                or "cover" in item_id.lower()
+                                or "cover" in href_l
+                                or "front" in href_l
+                            ):
+                                fallback_cover_href = href
+
+                    target_href = ""
+                    if cover_id:
+                        for item_id, href, _media_type, _props in manifest_entries:
+                            if item_id == cover_id and href:
+                                target_href = href
+                                break
+
+                    selected_href = (
+                        target_href or fallback_cover_href or first_image_href
+                    )
+                    if not selected_href:
+                        continue
+
+                    full_path = posixpath.normpath(
+                        posixpath.join(opf_dir, selected_href)
+                    )
+                    if full_path in names:
+                        data = zf.read(full_path)
+                        if _is_valid_image_bytes(data):
+                            return data
+            return None
+        except Exception:
+            return None
 
     def _find_doc_key(self, base_href, doc_order, doc_order_decoded):
         candidates = [
