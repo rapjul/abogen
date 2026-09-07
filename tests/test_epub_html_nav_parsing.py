@@ -172,7 +172,10 @@ class TestEpubHtmlNavParsing(unittest.TestCase):
         <nav epub:type="toc" id="toc"><h1>TOC</h1><ol><li><a href="c1.html">C1</a></li></ol></nav>
         """
         self._create_epub_with_custom_nav(nav_html)
+        from abogen.book_parser import EpubParser
+
         parser = get_book_parser(self.epub_path)
+        assert isinstance(parser, EpubParser)
         # Note: _identify_nav_item relies on self.book being loaded
         # The parser constructor or process_content handles load()
         # But here we can call load directly if needed, or rely on normal flow up until navigation
@@ -181,6 +184,7 @@ class TestEpubHtmlNavParsing(unittest.TestCase):
 
         self.assertEqual(nav_type, "html")
         self.assertIsNotNone(nav_item)
+        assert nav_item is not None
         self.assertTrue("nav.xhtml" in nav_item.get_name())
 
 

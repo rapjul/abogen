@@ -287,8 +287,8 @@ def test_handler_dialog_format_metadata_tags_cover_path(
     dialog.parser = EpubParser(str(epub_file))
     dialog.parser.load()
     dialog.book_metadata = dialog.parser._extract_book_metadata()
-    dialog.checked_chapters = ["ch1"]
-    dialog.get_split_book = lambda: False  # type: ignore[assignment]
+    dialog.checked_chapters = {"ch1"}
+    setattr(dialog, "get_split_book", lambda: False)
 
     tags_text = dialog._format_metadata_tags()
 
@@ -311,7 +311,7 @@ def test_conversion_worker_validate_cover_image_rejects_html(
     fake_jpg.write_bytes(XHTML_BYTES)
 
     worker = ConversionThread.__new__(ConversionThread)
-    worker.log_updated = types.SimpleNamespace(emit=lambda msg: None)  # type: ignore[assignment]
+    setattr(worker, "log_updated", types.SimpleNamespace(emit=lambda msg: None))
 
     assert worker._validate_cover_image(str(fake_jpg)) is None
 

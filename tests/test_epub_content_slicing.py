@@ -75,6 +75,7 @@ class TestEpubContentSlicing(unittest.TestCase):
         import zipfile
 
         patched = False
+        temp_epub = f"{self.epub_path}.temp"
         with zipfile.ZipFile(self.epub_path, "r") as zin:
             opf_content = zin.read("EPUB/content.opf").decode("utf-8")
             if 'toc="ncx"' in opf_content:
@@ -82,8 +83,7 @@ class TestEpubContentSlicing(unittest.TestCase):
                 patched = True
 
             if patched:
-                TEMP_EPUB = self.epub_path + ".temp"
-                with zipfile.ZipFile(TEMP_EPUB, "w") as zout:
+                with zipfile.ZipFile(temp_epub, "w") as zout:
                     for item in zin.infolist():
                         if item.filename == "EPUB/content.opf":
                             zout.writestr(item, opf_content)
@@ -91,7 +91,7 @@ class TestEpubContentSlicing(unittest.TestCase):
                             zout.writestr(item, zin.read(item.filename))
 
         if patched:
-            shutil.move(TEMP_EPUB, self.epub_path)
+            shutil.move(temp_epub, self.epub_path)
 
         # Parse
         parser = get_book_parser(self.epub_path)
@@ -164,21 +164,21 @@ class TestEpubContentSlicing(unittest.TestCase):
         import zipfile
 
         patched = False
+        temp_epub = f"{self.epub_path}.temp"
         with zipfile.ZipFile(self.epub_path, "r") as zin:
             opf_content = zin.read("EPUB/content.opf").decode("utf-8")
             if 'toc="ncx"' in opf_content:
                 opf_content = opf_content.replace('toc="ncx"', "")
                 patched = True
             if patched:
-                TEMP_EPUB = self.epub_path + ".temp"
-                with zipfile.ZipFile(TEMP_EPUB, "w") as zout:
+                with zipfile.ZipFile(temp_epub, "w") as zout:
                     for item in zin.infolist():
                         if item.filename == "EPUB/content.opf":
                             zout.writestr(item, opf_content)
                         else:
                             zout.writestr(item, zin.read(item.filename))
         if patched:
-            shutil.move(TEMP_EPUB, self.epub_path)
+            shutil.move(temp_epub, self.epub_path)
 
         parser = get_book_parser(self.epub_path)
         parser.process_content()

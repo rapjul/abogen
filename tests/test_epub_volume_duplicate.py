@@ -16,9 +16,8 @@ from abogen.book_parser import get_book_parser
 from abogen.pyqt.book_handler import HandlerDialog
 
 # Shared QApplication instance for Qt tests
-_qt_app: QApplication | None = QApplication.instance()
-if _qt_app is None:
-    _qt_app = QApplication(sys.argv)
+_inst = QApplication.instance()
+_qt_app: QApplication = _inst if isinstance(_inst, QApplication) else QApplication(sys.argv)
 
 
 class TestEpubVolumeDuplicate(unittest.TestCase):
@@ -121,9 +120,13 @@ class TestEpubVolumeDuplicate(unittest.TestCase):
         vol0_section = epub.Section("Volume 0: Auxiliary Volume", href="vol0_c1.xhtml")
         vol1_section = epub.Section("Volume 1", href="vol1_c1.xhtml")
 
-        book.toc = (
-            (vol0_section, (v0_c1,)),
-            (vol1_section, (v1_c1, v1_c2, v1_c3)),
+        setattr(
+            book,
+            "toc",
+            (
+                (vol0_section, (v0_c1,)),
+                (vol1_section, (v1_c1, v1_c2, v1_c3)),
+            ),
         )
 
         book.add_item(epub.EpubNcx())
@@ -161,11 +164,14 @@ class TestEpubVolumeDuplicate(unittest.TestCase):
 
         self.assertIsNotNone(vol0_item, "Volume 0 item not found in tree")
         self.assertIsNotNone(vol1_item, "Volume 1 item not found in tree")
+        assert vol0_item is not None
+        assert vol1_item is not None
 
         # Verify Volume 0 first chapter is NOT marked duplicate
         self.assertEqual(vol0_item.childCount(), 1)
         v0_ch1 = vol0_item.child(0)
         self.assertIsNotNone(v0_ch1)
+        assert v0_ch1 is not None
         self.assertNotIn(
             "(Duplicate)",
             v0_ch1.text(0),
@@ -180,6 +186,7 @@ class TestEpubVolumeDuplicate(unittest.TestCase):
         self.assertEqual(vol1_item.childCount(), 3)
         v1_ch1 = vol1_item.child(0)
         self.assertIsNotNone(v1_ch1)
+        assert v1_ch1 is not None
         self.assertNotIn(
             "(Duplicate)",
             v1_ch1.text(0),
@@ -193,6 +200,7 @@ class TestEpubVolumeDuplicate(unittest.TestCase):
         # Verify Volume 1 second chapter is NOT marked duplicate
         v1_ch2 = vol1_item.child(1)
         self.assertIsNotNone(v1_ch2)
+        assert v1_ch2 is not None
         self.assertNotIn(
             "(Duplicate)",
             v1_ch2.text(0),
@@ -202,6 +210,7 @@ class TestEpubVolumeDuplicate(unittest.TestCase):
         # Verify that the genuine duplicate chapter IS marked duplicate
         v1_ch3 = vol1_item.child(2)
         self.assertIsNotNone(v1_ch3)
+        assert v1_ch3 is not None
         self.assertIn(
             "(Duplicate)",
             v1_ch3.text(0),

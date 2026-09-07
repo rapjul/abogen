@@ -200,10 +200,12 @@ def test_persist_cover_image_handles_duplicate_names(tmp_path):
 
     # First call
     cover_path1, _ = persist_cover_image(result, stored_path)
+    assert cover_path1 is not None
     assert cover_path1.exists()
 
     # Second call with same parameters should create a numbered file
     cover_path2, _ = persist_cover_image(result, stored_path)
+    assert cover_path2 is not None
     assert cover_path2.exists()
     assert cover_path1 != cover_path2
     assert "_1" in cover_path2.name

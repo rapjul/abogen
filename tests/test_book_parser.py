@@ -98,6 +98,7 @@ class TestBookParser(unittest.TestCase):
         # 2. Open it telling parser it IS epub
         parser = get_book_parser(wrong_ext_path, file_type="epub")
         self.assertIsInstance(parser, EpubParser)
+        assert isinstance(parser, EpubParser)
 
         # Should load successfully
         parser.load()
@@ -256,9 +257,14 @@ class TestBookParser(unittest.TestCase):
             <a href="chap25.xhtml">Chapter 25 – &quot;Lisa&#x27;s Past&quot;</a>
         </li>
         """
+        from bs4 import Tag
+
         soup_html = BeautifulSoup(html_nav, "html.parser")
         li_element = soup_html.find("li")
+        self.assertIsNotNone(li_element)
+        assert isinstance(li_element, Tag)
         link_element = li_element.find("a")
+        assert isinstance(link_element, Tag)
 
         extracted_title = epub_parser._extract_nav_li_title(li_element, link_element=link_element)
         self.assertEqual(extracted_title, 'Chapter 25 – "Lisa\'s Past"')

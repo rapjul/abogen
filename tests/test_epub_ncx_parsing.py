@@ -47,7 +47,7 @@ class TestEpubNcxParsing(unittest.TestCase):
             epub_chapters.append(c)
 
         # Define Table of Contents
-        book.toc = tuple(epub_chapters)
+        setattr(book, "toc", tuple(epub_chapters))
 
         # Add default NCX and generic spine
         book.add_item(epub.EpubNcx())
@@ -118,7 +118,7 @@ class TestEpubNcxParsing(unittest.TestCase):
         link_sect = epub.Link("main.xhtml#sect1", "Section 1", "sect1")
 
         # Structure: Intro -> Section 1 (as child)
-        book.toc = ((link_root, (link_sect,)),)
+        setattr(book, "toc", ((link_root, (link_sect,)),))
 
         book.add_item(epub.EpubNcx())
         book.spine = ["nav", c1]

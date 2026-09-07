@@ -17,7 +17,8 @@ from PyQt6.QtWidgets import QApplication, QTreeWidget, QTreeWidgetItem
 from abogen.pyqt.book_handler import HandlerDialog
 
 # Initialize QApplication for widgets
-_APP: QApplication = QApplication.instance() or QApplication(sys.argv)
+_inst = QApplication.instance()
+_APP: QApplication = _inst if isinstance(_inst, QApplication) else QApplication(sys.argv)
 
 
 class TestHierarchicalChapters(unittest.TestCase):
@@ -34,16 +35,32 @@ class TestHierarchicalChapters(unittest.TestCase):
         self.dialog.parser = MockParser()
 
         # Bind the actual methods under test to the mock dialog
-        self.dialog._get_item_depth = lambda item: HandlerDialog._get_item_depth(self.dialog, item)
-        self.dialog._get_visual_prefix = lambda item: HandlerDialog._get_visual_prefix(
-            self.dialog, item
+        setattr(
+            self.dialog,
+            "_get_item_depth",
+            lambda item: HandlerDialog._get_item_depth(self.dialog, item),
         )
-        self.dialog._find_closest_valid_ancestor = lambda item, limit, ids: (
-            HandlerDialog._find_closest_valid_ancestor(self.dialog, item, limit, ids)
+        setattr(
+            self.dialog,
+            "_get_visual_prefix",
+            lambda item: HandlerDialog._get_visual_prefix(self.dialog, item),
         )
-        self.dialog._format_metadata_tags = lambda: HandlerDialog._format_metadata_tags(self.dialog)
-        self.dialog._get_hierarchical_title = lambda item: HandlerDialog._get_hierarchical_title(
-            self.dialog, item
+        setattr(
+            self.dialog,
+            "_find_closest_valid_ancestor",
+            lambda item, limit, ids: HandlerDialog._find_closest_valid_ancestor(
+                self.dialog, item, limit, ids
+            ),
+        )
+        setattr(
+            self.dialog,
+            "_format_metadata_tags",
+            lambda: HandlerDialog._format_metadata_tags(self.dialog),
+        )
+        setattr(
+            self.dialog,
+            "_get_hierarchical_title",
+            lambda item: HandlerDialog._get_hierarchical_title(self.dialog, item),
         )
 
         self.dialog.book_metadata = {
@@ -65,7 +82,7 @@ class TestHierarchicalChapters(unittest.TestCase):
         }
         self.dialog.checked_chapters = {"ch1", "sec11", "subsec111"}
         self.dialog.save_chapters_checkbox = None
-        HandlerDialog.has_pdf_bookmarks = True
+        setattr(HandlerDialog, "has_pdf_bookmarks", True)
 
     def test_visual_prefix_generation(self) -> None:
         """Verify the correct tree-drawing prefix characters are produced."""
@@ -131,7 +148,7 @@ class TestHierarchicalChapters(unittest.TestCase):
         checked_ids: set[str] = {"ch1", "sec11", "subsec111"}
 
         # Test finding parent at limit 2 for subsec112 (parent is checked and has depth 2)
-        ancestor: QTreeWidgetItem = self.dialog._find_closest_valid_ancestor(
+        ancestor: QTreeWidgetItem | None = self.dialog._find_closest_valid_ancestor(
             subsec112, 2, checked_ids
         )
         self.assertEqual(ancestor, sec11)
@@ -370,8 +387,10 @@ class TestHierarchicalChapters(unittest.TestCase):
     def test_title_exclusions(self) -> None:
         """Verify that _should_exclude_by_title correctly identifies front/back matter."""
         # We need to bind the actual _should_exclude_by_title to the dialog
-        self.dialog._should_exclude_by_title = lambda item: HandlerDialog._should_exclude_by_title(
-            self.dialog, item
+        setattr(
+            self.dialog,
+            "_should_exclude_by_title",
+            lambda item: HandlerDialog._should_exclude_by_title(self.dialog, item),
         )
 
         # Helper to create a dummy item with a specific text
@@ -420,16 +439,30 @@ class TestHierarchicalChapters(unittest.TestCase):
         self.dialog.checked_chapters = set()
 
         # Bind methods
-        self.dialog.select_all_chapters = lambda: HandlerDialog.select_all_chapters(self.dialog)
-        self.dialog.deselect_all_chapters = lambda: HandlerDialog.deselect_all_chapters(self.dialog)
-        self.dialog.select_parent_chapters = lambda: HandlerDialog.select_parent_chapters(
-            self.dialog
+        setattr(
+            self.dialog,
+            "select_all_chapters",
+            lambda: HandlerDialog.select_all_chapters(self.dialog),
         )
-        self.dialog.deselect_parent_chapters = lambda: HandlerDialog.deselect_parent_chapters(
-            self.dialog
+        setattr(
+            self.dialog,
+            "deselect_all_chapters",
+            lambda: HandlerDialog.deselect_all_chapters(self.dialog),
         )
-        self.dialog._update_checked_set_from_tree = lambda: (
-            HandlerDialog._update_checked_set_from_tree(self.dialog)
+        setattr(
+            self.dialog,
+            "select_parent_chapters",
+            lambda: HandlerDialog.select_parent_chapters(self.dialog),
+        )
+        setattr(
+            self.dialog,
+            "deselect_parent_chapters",
+            lambda: HandlerDialog.deselect_parent_chapters(self.dialog),
+        )
+        setattr(
+            self.dialog,
+            "_update_checked_set_from_tree",
+            lambda: HandlerDialog._update_checked_set_from_tree(self.dialog),
         )
 
         # Build a small tree
@@ -465,13 +498,25 @@ class TestHierarchicalChapters(unittest.TestCase):
 
     def test_auto_select_chapters(self) -> None:
         """Verify the automatic checking algorithm for EPUB, Markdown, and PDF."""
-        self.dialog._run_epub_auto_check = lambda: HandlerDialog._run_epub_auto_check(self.dialog)
-        self.dialog._run_markdown_auto_check = lambda: HandlerDialog._run_markdown_auto_check(
-            self.dialog
+        setattr(
+            self.dialog,
+            "_run_epub_auto_check",
+            lambda: HandlerDialog._run_epub_auto_check(self.dialog),
         )
-        self.dialog._run_pdf_auto_check = lambda: HandlerDialog._run_pdf_auto_check(self.dialog)
-        self.dialog._should_exclude_by_title = lambda item: HandlerDialog._should_exclude_by_title(
-            self.dialog, item
+        setattr(
+            self.dialog,
+            "_run_markdown_auto_check",
+            lambda: HandlerDialog._run_markdown_auto_check(self.dialog),
+        )
+        setattr(
+            self.dialog,
+            "_run_pdf_auto_check",
+            lambda: HandlerDialog._run_pdf_auto_check(self.dialog),
+        )
+        setattr(
+            self.dialog,
+            "_should_exclude_by_title",
+            lambda item: HandlerDialog._should_exclude_by_title(self.dialog, item),
         )
 
         tree: QTreeWidget = QTreeWidget()
@@ -519,11 +564,15 @@ class TestHierarchicalChapters(unittest.TestCase):
 
     def test_parent_synchronization_helpers(self) -> None:
         """Verify internal parent state synchronization methods."""
-        self.dialog._sync_parent_checkbox_states = lambda: (
-            HandlerDialog._sync_parent_checkbox_states(self.dialog)
+        setattr(
+            self.dialog,
+            "_sync_parent_checkbox_states",
+            lambda: HandlerDialog._sync_parent_checkbox_states(self.dialog),
         )
-        self.dialog._update_item_checkbox_state = lambda item: (
-            HandlerDialog._update_item_checkbox_state(self.dialog, item)
+        setattr(
+            self.dialog,
+            "_update_item_checkbox_state",
+            lambda item: HandlerDialog._update_item_checkbox_state(self.dialog, item),
         )
 
         tree: QTreeWidget = QTreeWidget()
