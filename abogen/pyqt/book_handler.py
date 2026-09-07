@@ -77,7 +77,7 @@ def _is_valid_image_bytes(data: bytes | None) -> bool:
     """
     if not data or len(data) < 8:
         return False
-    head = bytes(data[:64]).strip().lower()
+    head = data[:64].strip().lower()
     return not (head.startswith((b"<?xml", b"<html", b"<!doctype", b"<svg", b"{\\", b"/*")))
 
 
@@ -90,7 +90,7 @@ def _guess_image_extension(image_bytes: bytes | None) -> str:
     Returns:
         The matched extension including leading dot (.png, .jpg, .gif, .webp, .bmp).
     """
-    head = bytes(image_bytes[:16]) if image_bytes else b""
+    head = image_bytes[:16] if image_bytes else b""
     if head.startswith(b"\x89PNG\r\n\x1a\n"):
         return ".png"
     if head.startswith(b"\xff\xd8\xff"):
@@ -460,10 +460,10 @@ class HandlerDialog(QDialog):
         retrieves the value, rounds it to the nearest multiple of 10, clamps
         it between 10 and 100, and updates the spinbox.
         """
-        val: int = self.split_chapters_spinbox.value()
-        remainder: int = val % 10
+        val = self.split_chapters_spinbox.value()
+        remainder = val % 10
         if remainder != 0:
-            new_val: int = int(round(val / 10.0) * 10)
+            new_val = round(val / 10.0) * 10
             new_val = max(10, min(100, new_val))
             self.split_chapters_spinbox.setValue(new_val)
 
@@ -541,7 +541,7 @@ class HandlerDialog(QDialog):
         cache_key = (
             str(self.book_path),
             float(mod_time),
-            str(self.parser.file_type),
+            self.parser.file_type,
             bool(replace_single_newlines),
         )
 
@@ -1353,7 +1353,9 @@ class HandlerDialog(QDialog):
             cursor.setPosition(start)
             cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
 
-            selection = QTextEdit.ExtraSelection()
+            # PyQt6 SIP stubs declare cursor and format using legacy type comments
+            # (cursor = ... # type: QtGui.QTextCursor), causing Pyright to infer type Ellipsis.
+            selection: Any = QTextEdit.ExtraSelection()
             selection.cursor = cursor
 
             fmt = QTextCharFormat()
@@ -2967,8 +2969,8 @@ class HandlerDialog(QDialog):
             int: The number of chapters per chunk, clamped between 10 and 100,
                  and rounded to the nearest multiple of 10.
         """
-        val: int = self.split_chapters_spinbox.value()
-        new_val: int = int(round(val / 10.0) * 10)
+        val = self.split_chapters_spinbox.value()
+        new_val = round(val / 10.0) * 10
         return max(10, min(100, new_val))
 
     def get_save_chunks_in_folder(self):

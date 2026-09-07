@@ -113,10 +113,10 @@ class PreDownloadWorker(QThread):
         # Suppress HF tracker warnings during downloads
         self._original_emitter = abogen.hf_tracker.show_warning_signal_emitter
         self._selected_languages: set[str] = {
-            str(code).strip().lower() for code in (selected_languages or []) if code
+            code.strip().lower() for code in (selected_languages or []) if code
         }
         self._selected_genders: set[str] = {
-            str(code).strip().lower() for code in (selected_genders or []) if code
+            code.strip().lower() for code in (selected_genders or []) if code
         }
         self._voices_only = voices_only
 

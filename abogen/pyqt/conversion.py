@@ -106,7 +106,7 @@ class _AudioWriteItem:
 
 @dataclass
 class _FlushMarker:
-    """Sentinel queued by :meth:`_AsyncAudioWriter.flush` to synchronise the worker thread.
+    """Sentinel queued by :meth:`_AsyncAudioWriter.flush` to synchronize the worker thread.
 
     When the background thread dequeues a :class:`_FlushMarker` it sets the
     associated threading event, which unblocks the caller of ``flush()``.
@@ -298,7 +298,7 @@ def _cover_size_text(size_bytes: int) -> str:
 
 
 def _jpeg_quality_percent_to_ffmpeg_q(quality_percent: int) -> int:
-    clamped = max(1, min(100, int(quality_percent)))
+    clamped = max(1, min(100, quality_percent))
     # FFmpeg mjpeg: lower q is better. Map 1-100 roughly to q 31-2.
     mapped = round(31 - (clamped / 100.0) * 29)
     return max(2, min(31, mapped))
@@ -309,7 +309,7 @@ def _freeform_atom_key(name: str) -> str:
 
 
 def _m4b_cover_attach_args(input_index: int) -> list[str]:
-    idx = str(int(input_index))
+    idx = str(input_index)
     return [
         "-map",
         "0:a",
@@ -337,12 +337,12 @@ def _is_valid_image_bytes(data: bytes | None) -> bool:
     """
     if not data or len(data) < 8:
         return False
-    head = bytes(data[:64]).strip().lower()
+    head = data[:64].strip().lower()
     return not (head.startswith((b"<?xml", b"<html", b"<!doctype", b"<svg", b"{\\", b"/*")))
 
 
 def _guess_image_extension(image_bytes: bytes) -> str:
-    head = bytes(image_bytes[:16]) if image_bytes else b""
+    head = image_bytes[:16] if image_bytes else b""
     if head.startswith(b"\x89PNG\r\n\x1a\n"):
         return ".png"
     if head.startswith(b"\xff\xd8\xff"):
@@ -829,7 +829,7 @@ class ConversionThread(QThread):
         try:
             page_size = os.sysconf("SC_PAGE_SIZE")
             phys_pages = os.sysconf("SC_PHYS_PAGES")
-            total_bytes = int(page_size) * int(phys_pages)
+            total_bytes = page_size * phys_pages
             return max(1, int(total_bytes / (1024**3)))
         except Exception:
             return 16
