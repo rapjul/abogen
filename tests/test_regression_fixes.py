@@ -88,3 +88,35 @@ def test_manual_override_normalization():
     assert normalize_manual_override_token("The") == "the"
     assert normalize_manual_override_token("  A  ") == "a"
     assert normalize_manual_override_token("word") == "word"
+
+
+def test_paragraph_breaks_and_ellipsis_preserved() -> None:
+    """Verify paragraph breaks and ellipsis runs are preserved without spacing corruption."""
+    normalized = normalize("Test. Lorem ipsum...\n\nLorem...\n\nLorem ...")
+    assert "\n\n" in normalized
+    assert ". . ." not in normalized
+    assert "Lorem..." in normalized
+
+
+def test_quote_spacing_and_multilingual_punctuation() -> None:
+    """Verify straight dialogue quotes and multilingual punctuation delimiters format cleanly."""
+    from abogen.kokoro_text_normalization import _cleanup_spacing
+
+    # Dialogue straight quotes
+    assert _cleanup_spacing('"Hello," she said.') == '"Hello," she said.'
+    assert _cleanup_spacing('She said, "Wait!"') == 'She said, "Wait!"'
+
+    # Multilingual delimiters
+    assert _cleanup_spacing("¡Hola! ¿Cómo estás?") == "¡Hola! ¿Cómo estás?"
+    assert _cleanup_spacing("« Bonjour le monde »") == "«Bonjour le monde»"
+    assert _cleanup_spacing("「こんにちは」") == "「こんにちは」"
+
+
+def test_apostrophe_token_offset_reconstruction() -> None:
+    """Verify normalize_apostrophes preserves whitespace around contraction tokens."""
+    from abogen.kokoro_text_normalization import normalize_apostrophes
+
+    text = "It's fine.\n\nDon't worry."
+    normalized, _ = normalize_apostrophes(text)
+    assert "\n\n" in normalized
+    assert "Don't" in normalized or "Do not" in normalized
