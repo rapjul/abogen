@@ -64,7 +64,7 @@ def _load_pipeline(language: str, use_gpu: bool) -> Any:
 
 
 def _extract_cases_from_text(text: str) -> list[tuple[str, str]]:
-    raw = str(text or "")
+    raw = text or ""
     matches = list(_MARKER_RE.finditer(raw))
     cases: list[tuple[str, str]] = []
     if not matches:
@@ -83,7 +83,7 @@ def _extract_cases_from_text(text: str) -> list[tuple[str, str]]:
 def _spoken_id(code: str) -> str:
     # Make IDs pronounceable and stable (avoid reading as a word).
     out: list[str] = []
-    for ch in str(code or ""):
+    for ch in code or "":
         if ch == "_":
             out.append(" ")
         elif ch.isalnum():
@@ -177,7 +177,7 @@ def run_debug_tts_wavs(
         if resolved_voice:
             voice_spec = resolved_voice
         if profile_language:
-            language = str(profile_language).strip() or language
+            language = profile_language.strip() or language
     except Exception:
         # Voice profile resolution is best-effort; fall back to raw voice_spec.
         pass
@@ -210,7 +210,7 @@ def run_debug_tts_wavs(
                 settings=normalization_settings,
             )
             if apply_normalization
-            else str(text or "")
+            else text or ""
         )
         parts: list[np.ndarray] = []
         for segment in pipeline(

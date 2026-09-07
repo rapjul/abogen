@@ -1,5 +1,6 @@
 import json
 import logging
+import time
 from pathlib import Path
 
 from flask import (
@@ -110,7 +111,7 @@ def send_job_to_audiobookshelf(job_id: str) -> ResponseReturnValue:
     def _panel_response() -> ResponseReturnValue:
         if request.headers.get("HX-Request"):
             return render_jobs_panel()
-        return redirect(url_for("jobs.job_detail", job_id=job.id))
+        return redirect(url_for("jobs.job_detail", job_id=job_id))
 
     if job.status != JobStatus.COMPLETED:
         return _panel_response()
@@ -242,7 +243,7 @@ def job_epub(job_id: str) -> ResponseReturnValue:
     if not epub_path:
         abort(404)
     return send_file(
-        epub_path,
+        str(epub_path),
         as_attachment=True,
         download_name=epub_path.name,
         mimetype="application/epub+zip",
@@ -260,7 +261,7 @@ def download_file(job_id: str, file_type: str) -> ResponseReturnValue:
         if not path or not path.exists():
             abort(404)
         return send_file(
-            path,
+            str(path),
             as_attachment=True,
             download_name=path.name,
         )
@@ -295,6 +296,8 @@ def stream_logs(job_id: str) -> ResponseReturnValue:
         abort(404)
 
     def generate():
+        if job is None:
+            return
         last_index = 0
         while True:
             current_logs = job.logs
@@ -309,8 +312,6 @@ def stream_logs(job_id: str) -> ResponseReturnValue:
                 JobStatus.CANCELLED,
             }:
                 break
-
-            import time
 
             time.sleep(0.5)
 

@@ -63,7 +63,7 @@ SAMPLE_RATE = 24000
 
 def _supertonic_voice_from_spec(spec: Any, fallback: str) -> str:
     raw = str(spec or "").strip()
-    fallback_raw = str(fallback or "").strip()
+    fallback_raw = (fallback or "").strip()
 
     # SuperTonic voices are discrete IDs (M1/F3/...). If we see a Kokoro mix
     # formula (contains '*' or '+'), ignore it and fall back to a safe voice.
@@ -198,7 +198,15 @@ _OUTPUT_SANITIZE_RE = re.compile(r"[^\w\-_.]+")
 
 
 def _simplify_heading_text(text: str) -> str:
-    raw = str(text or "").strip().lower()
+    """Simplify heading text for matching and comparison.
+
+    Args:
+        text: The raw heading text to normalize.
+
+    Returns:
+        str: The sanitized and simplified heading text.
+    """
+    raw = (text or "").strip().lower()
     if not raw:
         return ""
     simplified = _HEADING_SANITIZE_RE.sub("", raw)
@@ -207,6 +215,15 @@ def _simplify_heading_text(text: str) -> str:
 
 
 def _headings_equivalent(left: str, right: str) -> bool:
+    """Determine whether two heading strings are equivalent or matching.
+
+    Args:
+        left: The first heading string to compare.
+        right: The second heading string to compare.
+
+    Returns:
+        bool: True if the headings are considered equivalent, False otherwise.
+    """
     simple_left = _simplify_heading_text(left)
     simple_right = _simplify_heading_text(right)
     if not simple_left or not simple_right:
@@ -229,11 +246,11 @@ def _headings_equivalent(left: str, right: str) -> bool:
         return True
 
     # Also check if the line is contained in the heading if it's long enough
-    return bool(len(simple_left) > 5 and simple_left in simple_right)
+    return len(simple_left) > 5 and simple_left in simple_right
 
 
 def _format_spoken_chapter_title(title: str, index: int, apply_prefix: bool) -> str:
-    base = str(title or "").strip()
+    base = (title or "").strip()
     if not base:
         return f"Chapter {index}" if apply_prefix else ""
     if not apply_prefix:
@@ -253,7 +270,7 @@ def _format_spoken_chapter_title(title: str, index: int, apply_prefix: bool) -> 
 
 
 def _strip_duplicate_heading_line(text: str, heading: str) -> tuple[str, bool]:
-    source_text = str(text or "")
+    source_text = text or ""
     if not source_text:
         return source_text, False
     normalized_heading = _simplify_heading_text(heading)
@@ -369,14 +386,14 @@ def _normalize_metadata_map(values: Mapping[str, Any] | None) -> dict[str, str]:
         text = str(value).strip()
         if not text:
             continue
-        normalized[str(key).casefold()] = text
+        normalized[key.casefold()] = text
     return normalized
 
 
 def _format_author_sentence(raw: str | None) -> str:
     if raw is None:
         return ""
-    normalized = str(raw).strip()
+    normalized = raw.strip()
     if not normalized:
         return ""
     lowered = normalized.casefold()
@@ -475,7 +492,7 @@ def _extract_series_metadata(
     for key in _SERIES_NAME_KEYS:
         raw = values.get(key)
         if raw:
-            cleaned = str(raw).strip()
+            cleaned = raw.strip()
             if cleaned:
                 series_name = cleaned
                 break
@@ -924,9 +941,9 @@ def _merge_metadata(
         for key, value in extracted.items():
             if value is None:
                 continue
-            merged[str(key)] = str(value)
+            merged[key] = value
     for key, value in (overrides or {}).items():
-        key_str = str(key)
+        key_str = key
         if value is None:
             merged.pop(key_str, None)
         else:
@@ -1299,7 +1316,7 @@ def _record_override_usage(
             continue
         token_value = token_map.get(normalized, normalized)
         try:
-            increment_usage(language=language, token=token_value, amount=int(amount))
+            increment_usage(language=language, token=token_value, amount=amount)
         except Exception:  # pragma: no cover - defensive logging
             job.add_log(f"Failed to record usage for override {token_value}", level="warning")
 
@@ -1328,7 +1345,7 @@ def _chunk_text_for_tts(entry: Mapping[str, Any]) -> str:
 
 
 def _escape_ffmetadata_value(value: str) -> str:
-    escaped = str(value).replace("\\", "\\\\").replace("\n", "\\n")
+    escaped = value.replace("\\", "\\\\").replace("\n", "\\n")
     escaped = escaped.replace("=", "\\=").replace(";", "\\;").replace("#", "\\#")
     return escaped
 
@@ -1378,7 +1395,7 @@ def _metadata_to_ffmpeg_args(metadata: dict[str, Any]) -> list[str]:
     for key, value in (metadata or {}).items():
         if value in (None, ""):
             continue
-        key_str = str(key).strip()
+        key_str = key.strip()
         if not key_str:
             continue
         normalized_key = key_str.lower()
@@ -1428,11 +1445,20 @@ def _augment_metadata_with_narration(
 
 
 def _render_ffmetadata(metadata: dict[str, Any], chapters: list[dict[str, Any]]) -> str:
+    """Render metadata and chapter markers in FFMETADATA1 format.
+
+    Args:
+        metadata: Dictionary of metadata key-value pairs to write into the header.
+        chapters: List of chapter dictionaries containing title, start, and end times.
+
+    Returns:
+        str: Serialized FFMETADATA1 formatted string.
+    """
     lines: list[str] = [";FFMETADATA1"]
     for key, value in (metadata or {}).items():
         if value is None:
             continue
-        key_str = str(key).strip()
+        key_str = key.strip()
         if not key_str:
             continue
         lines.append(f"{key_str}={_escape_ffmetadata_value(value)}")
@@ -1701,7 +1727,7 @@ def run_conversion_job(job: Job) -> None:  # pyright: ignore[reportGeneralTypeIs
 
         def get_pipeline(provider: str) -> Any:
             nonlocal kokoro_cache_ready
-            provider_norm = str(provider or "kokoro").strip().lower() or "kokoro"
+            provider_norm = (provider or "kokoro").strip().lower() or "kokoro"
             if provider_norm not in {"kokoro", "supertonic"}:
                 provider_norm = "kokoro"
 
@@ -1751,7 +1777,7 @@ def run_conversion_job(job: Job) -> None:  # pyright: ignore[reportGeneralTypeIs
             raw_spec: str,
         ) -> tuple[str, str, float | None, int | None]:
             """Return (provider, voice_spec, speed_override, steps_override)."""
-            spec = str(raw_spec or "").strip()
+            spec = (raw_spec or "").strip()
             speaker_name, _ = _split_speaker_reference(spec)
             if speaker_name and speaker_name in normalized_profiles:
                 entry = normalized_profiles[speaker_name]
@@ -1999,7 +2025,7 @@ def run_conversion_job(job: Job) -> None:  # pyright: ignore[reportGeneralTypeIs
             supertonic_steps_override: int | None = None,
         ) -> int:
             nonlocal processed_chars, subtitle_index, current_time
-            source_text = str(text or "")
+            source_text = text or ""
             if heteronym_sentence_rules:
                 source_text = _apply_heteronym_sentence_rules(source_text, heteronym_sentence_rules)
             if pronunciation_rules:
@@ -2031,7 +2057,7 @@ def run_conversion_job(job: Job) -> None:  # pyright: ignore[reportGeneralTypeIs
                 segment_iter = supertonic_pipeline(
                     normalized,
                     voice=voice_name,
-                    speed=float(speed_override if speed_override is not None else job.speed),
+                    speed=(speed_override if speed_override is not None else job.speed),
                     split_pattern=split_pattern,
                     total_steps=int(
                         supertonic_steps_override
@@ -2044,7 +2070,7 @@ def run_conversion_job(job: Job) -> None:  # pyright: ignore[reportGeneralTypeIs
                 segment_iter = kokoro_pipeline(
                     normalized,
                     voice=voice_choice,
-                    speed=float(speed_override if speed_override is not None else job.speed),
+                    speed=(speed_override if speed_override is not None else job.speed),
                     split_pattern=split_pattern,
                 )
 
@@ -2350,7 +2376,7 @@ def run_conversion_job(job: Job) -> None:  # pyright: ignore[reportGeneralTypeIs
 
                 if body_segments == 0:
                     chapter_body_start = current_time
-                    chapter_text = str(chapter.text or "")
+                    chapter_text = chapter.text or ""
                     if pending_heading_strip and heading_text:
                         chapter_text, removed_heading = _strip_duplicate_heading_line(
                             chapter_text, heading_text
@@ -2378,7 +2404,7 @@ def run_conversion_job(job: Job) -> None:  # pyright: ignore[reportGeneralTypeIs
                                     level="debug",
                                 )
                                 opening_caps_logged = True
-                        if str(chapter_text or "").strip():
+                        if (chapter_text or "").strip():
                             opening_caps_pending = False
                     emitted = emit_text(
                         chapter_text,
@@ -2692,7 +2718,7 @@ def _select_device() -> str:
 def _prepare_output_dir(job: Job) -> Path:
     from platformdirs import user_desktop_dir  # type: ignore[import-not-found]
 
-    default_output = Path(str(get_user_cache_path("outputs")))
+    default_output = Path(get_user_cache_path("outputs"))
     if job.save_mode == "Save to Desktop":
         directory = Path(user_desktop_dir())
     elif job.save_mode == "Save next to input file":

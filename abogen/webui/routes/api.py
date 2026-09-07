@@ -269,7 +269,7 @@ def api_speaker_preview() -> ResponseReturnValue:
     if not resolved_provider:
         resolved_provider = (
             "supertonic"
-            if str(base_spec or "").strip()
+            if (base_spec or "").strip()
             in {"M1", "M2", "M3", "M4", "M5", "F1", "F2", "F3", "F4", "F5"}
             else "kokoro"
         )

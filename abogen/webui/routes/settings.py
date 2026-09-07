@@ -323,7 +323,7 @@ def download_debug_wav(run_id: str, filename: str) -> ResponseReturnValue:
     expected_dir = (root / "debug" / safe_run).resolve()
     if expected_dir not in path.parents:
         abort(404)
-    wants_download = str(request.args.get("download") or "").strip().lower() in {
+    wants_download = (request.args.get("download") or "").strip().lower() in {
         "1",
         "true",
         "yes",
@@ -331,7 +331,7 @@ def download_debug_wav(run_id: str, filename: str) -> ResponseReturnValue:
     mimetype = "audio/wav" if is_wav else "application/json"
     # Inline playback should work for WAVs; allow explicit downloads via ?download=1.
     return send_file(
-        path,
+        str(path),
         mimetype=mimetype,
         as_attachment=wants_download,
         download_name=path.name,
