@@ -32,6 +32,13 @@ class _SuppressSuccessfulAccessFilter(logging.Filter):
         return " 200 " not in message and " 201 " not in message and " 204 " not in message
 
 
+class _SuppressPhonemizerWarnings(logging.Filter):
+    """Suppress phonemizer word-count-mismatch warnings (normal behavior)."""
+
+    def filter(self, record: logging.LogRecord) -> bool:  # pragma: no cover - small utility
+        return "words count mismatch" not in record.getMessage()
+
+
 _access_log_filter_attached = False
 
 
@@ -128,6 +135,7 @@ def create_app(config: dict[str, Any] | None = None) -> Flask:
     global _access_log_filter_attached
     if not _access_log_filter_attached:
         logging.getLogger("werkzeug").addFilter(_SuppressSuccessfulAccessFilter())
+        logging.getLogger("phonemizer").addFilter(_SuppressPhonemizerWarnings())
         _access_log_filter_attached = True
 
     return app

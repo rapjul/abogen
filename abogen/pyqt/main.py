@@ -3,6 +3,7 @@ import os
 import platform
 import signal
 import sys
+from typing import Any
 
 from abogen.utils import get_resource_path, load_config, prevent_sleep_end
 
@@ -139,13 +140,16 @@ if platform.system() == "Darwin" and platform.processor() == "arm":
 
 
 # Custom message handler to filter out specific Qt warnings
-def qt_message_handler(mode, context, message):
+def qt_message_handler(mode: QtMsgType, context: Any, message: str) -> None:
+    """Filter out benign Qt runtime warnings across platforms."""
     # In PyQt6, the mode is an enum, so we compare with the enum members
     if "Wayland does not support QWindow::requestActivate()" in message:
         return  # Suppress this specific message
     if "setGrabPopup called with a parent, QtWaylandClient" in message:
         return
     if 'OpenType support missing for ".AppleSystemUIFont"' in message:
+        return
+    if "Failed to create portal for" in message:
         return
 
     if mode == QtMsgType.QtWarningMsg:

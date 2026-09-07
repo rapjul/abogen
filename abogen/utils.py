@@ -20,6 +20,19 @@ from dotenv import find_dotenv, load_dotenv
 
 logger = logging.getLogger(__name__)
 
+
+class _SuppressPhonemizerWarnings(logging.Filter):
+    """Suppress phonemizer word-count-mismatch warnings (normal behavior)."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            return "words count mismatch" not in record.getMessage()
+        except (TypeError, ValueError):
+            return True
+
+
+logging.getLogger("phonemizer").addFilter(_SuppressPhonemizerWarnings())
+
 _INLINE_WHITESPACE_RE = re.compile(r"[^\S\n]+")
 _PARAGRAPH_BREAK_RE = re.compile(r"\n{3,}")
 _SINGLE_NEWLINE_RE = re.compile(r"(?<!\n)\n(?!\n)")
