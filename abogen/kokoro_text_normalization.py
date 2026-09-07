@@ -401,7 +401,7 @@ def _int_to_ordinal_words(value: int, language: str) -> str | None:
             30: "thirtieth",
             31: "thirty-first",
         }
-        return ordinals.get(int(value))
+        return ordinals.get(value)
 
     return None
 
@@ -1067,7 +1067,7 @@ def _should_preserve_caps_word(word: str) -> bool:
     upper_base = base.upper()
     if upper_base in _ACRONYM_ALLOWLIST:
         return True
-    return bool(all(ch in _ROMAN_NUMERAL_LETTERS for ch in letters.upper()) and len(letters) <= 7)
+    return all(ch in _ROMAN_NUMERAL_LETTERS for ch in letters.upper()) and len(letters) <= 7
 
 
 def _should_normalize_caps_segment(segment: str) -> bool:
@@ -1172,7 +1172,7 @@ def normalize_roman_numeral_titles(
     non_empty = 0
 
     for index, raw in enumerate(titles):
-        title = "" if raw is None else str(raw)
+        title = "" if raw is None else raw
         stripped = title.lstrip()
         leading_ws = title[: len(title) - len(stripped)]
         if not stripped:

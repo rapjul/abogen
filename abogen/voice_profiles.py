@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 import json
-import os
 from collections.abc import Iterable
+from pathlib import Path
 from typing import Any
 
 from abogen.constants import VOICES_INTERNAL
@@ -8,18 +10,27 @@ from abogen.tts_supertonic import DEFAULT_SUPERTONIC_VOICES
 from abogen.utils import get_user_config_path
 
 
-def _get_profiles_path():
+def _get_profiles_path() -> Path:
+    """Return the filesystem path to the voice profiles configuration file.
+
+    Returns:
+        Path: Path to voice_profiles.json in the user config directory.
+    """
     config_path = get_user_config_path()
-    config_dir = os.path.dirname(config_path)
-    return os.path.join(config_dir, "voice_profiles.json")
+    config_dir = Path(config_path).parent
+    return config_dir / "voice_profiles.json"
 
 
-def load_profiles():
-    """Load all voice profiles from JSON file."""
+def load_profiles() -> dict[str, Any]:
+    """Load all voice profiles from the persistent JSON storage file.
+
+    Returns:
+        dict[str, Any]: Dictionary mapping profile names to profile definitions.
+    """
     path = _get_profiles_path()
-    if os.path.exists(path):
+    if path.exists():
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with path.open("r", encoding="utf-8") as f:
                 data = json.load(f)
                 # always expect abogen_voice_profiles wrapper
                 if isinstance(data, dict) and "abogen_voice_profiles" in data:
@@ -32,49 +43,88 @@ def load_profiles():
     return {}
 
 
-def save_profiles(profiles):
-    """Save all voice profiles to JSON file."""
+def save_profiles(profiles: dict[str, Any]) -> None:
+    """Save all voice profiles to the persistent JSON storage file.
+
+    Args:
+        profiles: Dictionary mapping profile names to profile configurations.
+    """
     path = _get_profiles_path()
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as f:
         # always save with abogen_voice_profiles wrapper
         json.dump({"abogen_voice_profiles": profiles}, f, indent=2)
 
 
-def delete_profile(name):
-    """Remove a profile by name."""
+def delete_profile(name: str) -> None:
+    """Remove a voice profile by name and persist the updated profile list.
+
+    Args:
+        name: Name of the profile to remove.
+    """
     profiles = load_profiles()
     if name in profiles:
         del profiles[name]
         save_profiles(profiles)
 
 
-def duplicate_profile(src, dest):
-    """Duplicate an existing profile."""
+def duplicate_profile(src: str, dest: str) -> None:
+    """Duplicate an existing voice profile under a new destination name.
+
+    Args:
+        src: Name of the source profile to copy.
+        dest: Name for the new duplicate profile.
+    """
     profiles = load_profiles()
     if src in profiles and dest:
         profiles[dest] = profiles[src]
         save_profiles(profiles)
 
 
-def export_profiles(export_path):
-    """Export all profiles to specified JSON file."""
+def export_profiles(export_path: str | Path) -> None:
+    """Export all stored voice profiles to a specified JSON destination file.
+
+    Args:
+        export_path: Destination filesystem path for the exported JSON file.
+    """
     profiles = load_profiles()
-    with open(export_path, "w", encoding="utf-8") as f:
+    target_path = Path(export_path)
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    with target_path.open("w", encoding="utf-8") as f:
         json.dump({"abogen_voice_profiles": profiles}, f, indent=2)
 
 
-def serialize_profiles() -> dict[str, dict[str, Iterable[tuple[str, float]]]]:
-    """Return profiles in canonical dictionary form."""
+def serialize_profiles() -> dict[str, Any]:
+    """Return stored voice profiles in canonical dictionary form.
+
+    Returns:
+        dict[str, Any]: Dictionary of all configured voice profiles.
+    """
     return load_profiles()
 
 
 def _normalize_supertonic_voice(value: Any) -> str:
+    """Normalize and validate a Supertonic voice identifier.
+
+    Args:
+        value: Input voice name candidate.
+
+    Returns:
+        str: Valid uppercase Supertonic voice code, defaulting to 'M1'.
+    """
     raw = str(value or "").strip().upper()
     return raw if raw in DEFAULT_SUPERTONIC_VOICES else "M1"
 
 
 def _coerce_supertonic_steps(value: Any) -> int:
+    """Coerce and clamp a Supertonic total steps parameter.
+
+    Args:
+        value: Candidate step value.
+
+    Returns:
+        int: Clamped step integer between 2 and 15, defaulting to 5.
+    """
     try:
         steps = int(value)
     except (TypeError, ValueError):
@@ -83,6 +133,14 @@ def _coerce_supertonic_steps(value: Any) -> int:
 
 
 def _coerce_supertonic_speed(value: Any) -> float:
+    """Coerce and clamp a Supertonic synthesis speed factor.
+
+    Args:
+        value: Candidate speed value.
+
+    Returns:
+        float: Clamped speed factor between 0.7 and 2.0, defaulting to 1.0.
+    """
     try:
         speed = float(value)
     except (TypeError, ValueError):
@@ -91,13 +149,18 @@ def _coerce_supertonic_speed(value: Any) -> float:
 
 
 def normalize_profile_entry(entry: Any) -> dict[str, Any]:
-    """Normalize a stored profile entry.
+    """Normalize a stored profile entry for compatibility.
 
-    Backwards compatible:
+    Supports backwards-compatible parsing of:
     - Legacy Kokoro-only entries: {language, voices}
-    - New entries: include provider.
-    """
+    - New multi-provider entries: {provider, language, ...}
 
+    Args:
+        entry: Raw profile dictionary or object.
+
+    Returns:
+        dict[str, Any]: Normalized profile configuration dictionary.
+    """
     if not isinstance(entry, dict):
         return {}
 
@@ -132,7 +195,15 @@ def normalize_profile_entry(entry: Any) -> dict[str, Any]:
     }
 
 
-def _normalize_voice_entries(entries: Iterable) -> list[tuple[str, float]]:
+def _normalize_voice_entries(entries: Iterable[Any]) -> list[tuple[str, float]]:
+    """Normalize an iterable of voice-weight pairs into canonical tuples.
+
+    Args:
+        entries: Iterable containing voice dictionaries or (name, weight) sequences.
+
+    Returns:
+        list[tuple[str, float]]: Filtered list of valid (voice_id, weight) pairs.
+    """
     normalized: list[tuple[str, float]] = []
     for item in entries or []:
         if isinstance(item, dict):
@@ -152,19 +223,33 @@ def _normalize_voice_entries(entries: Iterable) -> list[tuple[str, float]]:
             continue
         if weight_val <= 0:
             continue
-        normalized.append((voice, weight_val))
+        normalized.append((str(voice), weight_val))
     return normalized
 
 
-def normalize_voice_entries(entries: Iterable) -> list[tuple[str, float]]:
-    """Public helper to normalize voice-weight pairs from arbitrary payloads."""
+def normalize_voice_entries(entries: Iterable[Any]) -> list[tuple[str, float]]:
+    """Public helper to normalize voice-weight pairs from arbitrary payloads.
 
+    Args:
+        entries: Iterable containing voice entries.
+
+    Returns:
+        list[tuple[str, float]]: Canonical list of (voice_name, weight) pairs.
+    """
     return _normalize_voice_entries(entries)
 
 
-def save_profile(name: str, *, language: str, voices: Iterable) -> None:
-    """Persist a single profile after validating its data."""
+def save_profile(name: str, *, language: str, voices: Iterable[Any]) -> None:
+    """Persist a single voice profile after validating its input data.
 
+    Args:
+        name: Name of the profile to create or overwrite.
+        language: Language code for synthesis.
+        voices: Iterable of voice-weight entries.
+
+    Raises:
+        ValueError: If profile name is blank or no valid voices with weight > 0 exist.
+    """
     name = (name or "").strip()
     if not name:
         raise ValueError("Profile name is required")
@@ -182,15 +267,27 @@ def save_profile(name: str, *, language: str, voices: Iterable) -> None:
 
 
 def remove_profile(name: str) -> None:
+    """Remove a stored voice profile by name.
+
+    Args:
+        name: Name of the voice profile to remove.
+    """
     delete_profile(name)
 
 
-def import_profiles_data(data: dict, *, replace_existing: bool = False) -> list[str]:
-    """Merge profiles from a dictionary structure and persist them.
+def import_profiles_data(data: dict[str, Any], *, replace_existing: bool = False) -> list[str]:
+    """Merge voice profiles from a dictionary structure and persist them.
 
-    Returns the list of profile names that were added or updated.
+    Args:
+        data: Raw payload dictionary containing profile mappings.
+        replace_existing: Whether to overwrite existing profiles of the same name.
+
+    Returns:
+        list[str]: Names of profiles that were successfully imported or updated.
+
+    Raises:
+        TypeError: If input payload is not a dictionary.
     """
-
     if not isinstance(data, dict):
         raise TypeError("Invalid profile payload")
 
@@ -217,9 +314,15 @@ def import_profiles_data(data: dict, *, replace_existing: bool = False) -> list[
     return updated
 
 
-def export_profiles_payload(names: Iterable[str] | None = None) -> dict[str, dict]:
-    """Return profiles limited to the provided names for download/export."""
+def export_profiles_payload(names: Iterable[str] | None = None) -> dict[str, dict[str, Any]]:
+    """Return profiles limited to the provided names for download or export.
 
+    Args:
+        names: Optional iterable of profile names to filter by. If None, exports all.
+
+    Returns:
+        dict[str, dict[str, Any]]: Wrapped export payload dictionary.
+    """
     profiles = load_profiles()
     if names is None:
         subset = profiles

@@ -545,7 +545,7 @@ def _normalize_metadata(metadata: dict[str, Any] | None) -> dict[str, str]:
     for key, value in (metadata or {}).items():
         if value is None:
             continue
-        normalized[str(key).lower()] = str(value)
+        normalized[key.lower()] = str(value)
     return normalized
 
 
@@ -555,7 +555,7 @@ def _combine_metadata(*sources: dict[str, Any]) -> dict[str, str]:
         for key, value in (source or {}).items():
             if value is None:
                 continue
-            combined[str(key).lower()] = str(value)
+            combined[key.lower()] = str(value)
     return combined
 
 
@@ -842,7 +842,7 @@ def _render_metadata_xml(
 
     if speaker_mode:
         elements.append(
-            f'    <meta property="abogen:speakerMode">{html.escape(str(speaker_mode))}</meta>'
+            f'    <meta property="abogen:speakerMode">{html.escape(speaker_mode)}</meta>'
         )
 
     if modified:
@@ -856,7 +856,7 @@ def _format_iso_duration(value: float) -> str:
     hours, remainder_seconds = divmod(total_seconds, 3600)
     minutes, seconds = divmod(remainder_seconds, 60)
     seconds_with_fraction = seconds + remainder
-    if seconds_with_fraction.is_integer():
+    if float(seconds_with_fraction).is_integer():
         seconds_text = f"{int(seconds_with_fraction)}"
     else:
         seconds_text = f"{seconds_with_fraction:.3f}".rstrip("0").rstrip(".")

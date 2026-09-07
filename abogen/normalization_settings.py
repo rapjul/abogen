@@ -96,7 +96,7 @@ def _environment_defaults() -> dict[str, Any]:
         if isinstance(default, bool):
             overrides[key] = _coerce_bool(value, default)
         elif isinstance(default, float):
-            overrides[key] = _coerce_float(value, float(default))
+            overrides[key] = _coerce_float(value, default)
         else:
             overrides[key] = value
     return overrides

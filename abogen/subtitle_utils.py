@@ -357,7 +357,7 @@ def parse_timestamp_text_file(file_path):
         """Convert HH:MM:SS or HH:MM:SS,ms to seconds as float."""
         time_str = time_str.replace(",", ".")
         parts = time_str.split(":")
-        return float(int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2]))
+        return int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
 
     entries = []
     current_time = None

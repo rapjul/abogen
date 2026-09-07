@@ -535,7 +535,7 @@ def create_process(cmd, stdin=None, text=True, capture_output=False):
     if stdin is not None:
         kwargs["stdin"] = stdin
 
-    if platform.system() == "Windows":
+    if sys.platform == "win32":
         startupinfo = subprocess.STARTUPINFO()  # type: ignore[attr-defined]
         startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW  # type: ignore[attr-defined]
         startupinfo.wShowWindow = subprocess.SW_HIDE  # type: ignore[attr-defined]
@@ -555,7 +555,10 @@ def create_process(cmd, stdin=None, text=True, capture_output=False):
         display_cmd = shlex.join(cmd)
     print(f"Executing: {display_cmd}")
 
-    proc = subprocess.Popen(cmd, **kwargs)
+    proc: subprocess.Popen[Any] = subprocess.Popen(
+        cmd,
+        **kwargs,  # type: ignore[call-overload]
+    )  # type: ignore
 
     # Keep a bounded tail of process output for downstream error reporting.
     max_tail_chars = 12000
@@ -575,9 +578,7 @@ def create_process(cmd, stdin=None, text=True, capture_output=False):
     def _get_output_tail() -> str:
         return "".join(output_tail)
 
-    proc._abogen_get_output_tail = _get_output_tail
-
-    # Stream output to console in real-time if not capturing
+    proc._abogen_get_output_tail = _get_output_tail  # type: ignore
     if proc.stdout and not capture_output:
 
         def _stream_output(stream):
@@ -840,16 +841,17 @@ def get_gpu_acceleration(enabled):
         return f"Error checking GPU: {e}", False
 
 
-def prevent_sleep_start():
+def prevent_sleep_start() -> None:
+    """Prevent the operating system from entering idle sleep during processing."""
     from abogen.constants import PROGRAM_NAME
 
     system = platform.system()
-    if system == "Windows":
+    if sys.platform == "win32":
         import ctypes
 
-        ctypes.windll.kernel32.SetThreadExecutionState(  # type: ignore[attr-defined]
-            0x80000000 | 0x00000001 | 0x00000040
-        )
+        windll = getattr(ctypes, "windll", None)
+        if windll is not None:
+            windll.kernel32.SetThreadExecutionState(0x80000000 | 0x00000001 | 0x00000040)
     elif system == "Darwin":
         _sleep_procs["Darwin"] = create_process(
             [
@@ -882,12 +884,15 @@ def prevent_sleep_start():
             print("systemd-inhibit not found: skipping sleep inhibition on this Linux system.")
 
 
-def prevent_sleep_end():
+def prevent_sleep_end() -> None:
+    """Restore default operating system sleep behavior."""
     system = platform.system()
-    if system == "Windows":
+    if sys.platform == "win32":
         import ctypes
 
-        ctypes.windll.kernel32.SetThreadExecutionState(0x80000000)  # type: ignore[attr-defined]
+        windll = getattr(ctypes, "windll", None)
+        if windll is not None:
+            windll.kernel32.SetThreadExecutionState(0x80000000)
     elif system in ("Darwin", "Linux"):
         proc = _sleep_procs.get(system)
         if proc:

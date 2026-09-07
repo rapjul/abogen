@@ -222,7 +222,7 @@ class AudiobookshelfClient:
         folder_hint = folder_id or self._config.folder_id
         target_folders = set()
         if folder_hint:
-            folder_token = str(folder_hint).strip().lower()
+            folder_token = folder_hint.strip().lower()
             if folder_token:
                 target_folders.add(folder_token)
 
@@ -288,7 +288,7 @@ class AudiobookshelfClient:
             if isinstance(entry, Mapping):
                 item_id = self._extract_item_id(entry)
             else:
-                item_id = str(entry).strip()
+                item_id = entry.strip()
             if item_id:
                 to_delete.append(item_id)
 
@@ -487,7 +487,7 @@ class AudiobookshelfClient:
             ) from exc
 
         if not isinstance(payload, Mapping):
-            return self._config.library_id, []
+            return self._config.library_id or "", []
 
         library_name = str(payload.get("name") or payload.get("label") or self._config.library_id)
         raw_folders = payload.get("libraryFolders") or payload.get("folders") or []
@@ -617,7 +617,7 @@ class AudiobookshelfClient:
     @staticmethod
     def _extract_title(metadata: Mapping[str, Any], audio_path: Path) -> str:
         title = metadata.get("title") if isinstance(metadata, Mapping) else None
-        candidate = str(title).strip() if isinstance(title, str) else ""
+        candidate = title.strip() if isinstance(title, str) else ""
         if candidate:
             return candidate
         return audio_path.stem or audio_path.name
@@ -629,9 +629,7 @@ class AudiobookshelfClient:
             candidate = authors.strip()
             return candidate
         if isinstance(authors, Iterable) and not isinstance(authors, (str, Mapping)):
-            names = [
-                str(entry).strip() for entry in authors if isinstance(entry, str) and entry.strip()
-            ]
+            names = [entry.strip() for entry in authors if isinstance(entry, str) and entry.strip()]
             if names:
                 # ABS expects a comma-separated string for multiple authors.
                 return ", ".join(names)

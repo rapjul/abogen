@@ -60,7 +60,7 @@ def _is_valid_image_bytes(data: bytes | None) -> bool:
     """
     if not data or len(data) < 8:
         return False
-    head = bytes(data[:64]).strip().lower()
+    head = data[:64].strip().lower()
     return not (head.startswith((b"<?xml", b"<html", b"<!doctype", b"<svg", b"{\\", b"/*")))
 
 
@@ -453,13 +453,13 @@ class EpubExtractor:
         metadata = _build_metadata_payload(metadata_source, len(chapters), "epub", self.path.stem)
         metadata.setdefault("chapter_count", str(len(chapters)))
         if metadata_source.series:
-            series_text = str(metadata_source.series).strip()
+            series_text = metadata_source.series.strip()
             if series_text:
                 metadata.setdefault("series", series_text)
                 metadata.setdefault("series_name", series_text)
                 metadata.setdefault("seriesname", series_text)
         if metadata_source.series_index:
-            idx_text = str(metadata_source.series_index).strip()
+            idx_text = metadata_source.series_index.strip()
             if idx_text:
                 metadata.setdefault("series_index", idx_text)
                 metadata.setdefault("series_sequence", idx_text)

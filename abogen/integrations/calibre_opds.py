@@ -718,7 +718,7 @@ class CalibreOPDSClient:
         ) or node.findtext("calibre_md:series_index", default=None, namespaces=NS)
         series_index: float | None = None
         if series_index_raw is not None:
-            text = str(series_index_raw).strip()
+            text = series_index_raw.strip()
             if text:
                 try:
                     series_index = float(text)
@@ -780,9 +780,7 @@ class CalibreOPDSClient:
     ) -> tuple[str | None, float | None]:
         name: str | None = None
         index: float | None = None
-        author_set = {
-            str(author).strip().casefold() for author in (authors or []) if str(author).strip()
-        }
+        author_set = {author.strip().casefold() for author in (authors or []) if author.strip()}
         for category in category_nodes:
             scheme = (category.attrib.get("scheme") or "").strip().lower()
             label = (category.attrib.get("label") or "").strip()
@@ -966,7 +964,7 @@ class CalibreOPDSClient:
         for value in candidates:
             if value is None:
                 continue
-            text = str(value).strip()
+            text = value.strip()
             if not text:
                 continue
             try:
@@ -1074,7 +1072,7 @@ class CalibreOPDSClient:
             return True
         if rel.endswith(("navigation", "collection")):
             return True
-        return bool(rel.startswith(("http://opds-spec.org/sort", "http://opds-spec.org/group")))
+        return rel.startswith(("http://opds-spec.org/sort", "http://opds-spec.org/group"))
 
     @staticmethod
     def _has_navigation_link(entry: OPDSEntry) -> bool:

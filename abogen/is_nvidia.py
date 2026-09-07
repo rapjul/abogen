@@ -3,11 +3,22 @@ import gpustat
 try:
     from pynvml import NVMLError  # type: ignore[import-untyped]
 except ImportError:
-    NVMLError = ()  # type: ignore[misc,assignment]
+
+    class _NVMLErrorFallback(Exception):
+        """Fallback exception type used when pynvml is unavailable."""
+
+    NVMLError = _NVMLErrorFallback
 
 
 def check() -> bool:
-    """Check if an NVIDIA GPU is available on the system."""
+    """Check if an NVIDIA GPU is available on the system.
+
+    Queries system GPUs using gpustat and inspects device model names
+    against known NVIDIA architecture keywords.
+
+    Returns:
+        bool: True if an NVIDIA GPU was detected, False otherwise.
+    """
     try:
         stats = gpustat.new_query()
     except (NVMLError, OSError, RuntimeError, AttributeError):
