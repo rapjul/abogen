@@ -16,10 +16,13 @@ import logging
 import platform
 import re
 import sys
+from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Any, Iterator, Optional
+from pathlib import Path
+from typing import Protocol, cast
 
-import numpy as np
+import numpy as np  # type: ignore
+from numpy.typing import NDArray  # type: ignore
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +46,7 @@ def is_mlx_available() -> bool:
     if platform.machine() != "arm64":
         return False
     try:
-        import mlx_audio  # noqa: F401
+        import mlx_audio  # type: ignore  # noqa: F401
 
         return True
     except ImportError:
@@ -145,7 +148,7 @@ def _get_system_memory_gb() -> int:
                 ["sysctl", "-n", "hw.memsize"], text=True
             ).strip()
             if output.isdigit():
-                return max(1, int(int(output) / (1024**3)))
+                return max(1, int(output) // (1024**3))
     except Exception:
         pass
     try:
@@ -153,7 +156,7 @@ def _get_system_memory_gb() -> int:
 
         page_size: int = os.sysconf("SC_PAGE_SIZE")
         phys_pages: int = os.sysconf("SC_PHYS_PAGES")
-        return max(1, int(int(page_size) * int(phys_pages) / (1024**3)))
+        return max(1, (page_size * phys_pages) // (1024**3))
     except Exception:
         return 16
 
@@ -193,8 +196,25 @@ class MLXSegmentResult:
     """
 
     graphemes: str
-    audio: Any  # numpy.ndarray (float32)
-    tokens: Any = None  # Optional list of token timing objects
+    audio: NDArray[np.float32]  # numpy float32 waveform array
+    tokens: list[object] | None = None  # Token timing objects
+
+
+class _TTSModel(Protocol):
+    """Structural protocol for MLX TTS models supporting generation."""
+
+    def generate(
+        self,
+        text: str,
+        *,
+        voice: str | None = None,
+        speed: float = 1.0,
+        lang_code: str = "a",
+        split_pattern: str = r"\n+",
+        **kwargs: object,
+    ) -> Iterator[object]:
+        """Generate audio segments from text."""
+        ...
 
 
 class MLXKokoroPipeline:
@@ -210,25 +230,33 @@ class MLXKokoroPipeline:
     """
 
     SAMPLE_RATE: int = 24000
+    _model: _TTSModel
 
     def __init__(
         self,
         lang_code: str = "a",
         quantization: MLXQuantization = MLXQuantization.BF16,
-        model: Optional[Any] = None,
+        model: _TTSModel | object | None = None,
     ) -> None:
         if not is_mlx_available():
             raise RuntimeError(
                 "MLX backend is not available. Requires macOS ARM64 with "
-                "the mlx-audio package installed (pip install mlx-audio)."
+                + "the mlx-audio package installed (pip install mlx-audio)."
             )
 
         if model is not None:
-            self._model = model
+            self._model = cast(_TTSModel, model)
         else:
             from mlx_audio.tts.utils import load_model  # type: ignore
 
-            self._model = load_model(quantization.model_path)
+            # Upstream load_model is typed as `model_path: Path`, but expects `str`
+            # for Hugging Face repos. Converting to Path at runtime causes FileNotFoundError.
+            # Cast through `object` to satisfy type checker overlap validation without
+            # altering the runtime string.
+            loaded_model: object = load_model(
+                cast(Path, cast(object, quantization.model_path))
+            )
+            self._model = cast(_TTSModel, cast(object, loaded_model))
 
         self._lang_code = lang_code
         self._quantization = quantization
@@ -244,9 +272,9 @@ class MLXKokoroPipeline:
         self,
         text: str,
         *,
-        voice: Any,
+        voice: str | object,
         speed: float = 1.0,
-        split_pattern: Optional[str] = None,
+        split_pattern: str | None = None,
     ) -> Iterator[MLXSegmentResult]:
         """Synthesize *text* and yield result segments.
 
@@ -273,7 +301,7 @@ class MLXKokoroPipeline:
         if "*" in voice_name or "+" in voice_name:
             logger.warning(
                 "Voice blending formulas are not supported by the MLX backend. "
-                "Using the first voice component only: %s",
+                + "Using the first voice component only: %s",
                 voice_name,
             )
             # Extract the first voice name before any operator
@@ -299,8 +327,8 @@ class MLXKokoroPipeline:
             text_segments = [text.strip()] if text.strip() else []
 
         for segment_text in text_segments:
-            chunk_audios = []
-            chunk_tokens = []
+            chunk_audios: list[NDArray[np.float32]] = []
+            chunk_tokens: list[object] = []
             current_offset = 0.0
 
             for result in self._model.generate(
@@ -342,3 +370,108 @@ class MLXKokoroPipeline:
                     audio=np.concatenate(chunk_audios),
                     tokens=chunk_tokens if chunk_tokens else None,
                 )
+
+
+# ---------------------------------------------------------------------------
+# High-quality audio I/O and resampling utilities
+# ---------------------------------------------------------------------------
+
+
+def resample_audio_mlx(
+    audio: NDArray[np.float32],
+    src_rate: int,
+    dst_rate: int,
+) -> NDArray[np.float32]:
+    """Resample an in-memory audio array to a target sample rate.
+
+    When ``mlx_audio`` is available on Apple Silicon, uses the anti-aliased
+    polyphase filter implementation in ``mlx_audio.resample``. Otherwise,
+    falls back to ``scipy.signal.resample_poly`` or linear interpolation.
+
+    Args:
+        audio: Input 1D or 2D NumPy float array.
+        src_rate: Original audio sample rate in Hz.
+        dst_rate: Desired audio sample rate in Hz.
+
+    Returns:
+        Resampled float32 NumPy array at ``dst_rate``.
+    """
+    if src_rate == dst_rate or audio.size == 0:
+        return audio.astype(np.float32, copy=False)
+
+    if is_mlx_available():
+        try:
+            from mlx_audio.resample import resample_audio_array  # type: ignore
+
+            return resample_audio_array(audio, src_rate, dst_rate)
+        except Exception as exc:
+            logger.debug("mlx_audio polyphase resample failed, using fallback: %s", exc)
+
+    # Cross-platform fallback: try scipy.signal.resample_poly, else linear interpolation
+    try:
+        import math
+        from scipy import signal  # type: ignore
+
+        gcd = math.gcd(src_rate, dst_rate)
+        up = dst_rate // gcd
+        down = src_rate // gcd
+        return signal.resample_poly(audio, up, down).astype(np.float32, copy=False)
+    except Exception:
+        target_length = int(round(len(audio) * float(dst_rate) / float(src_rate)))
+        orig_indices = np.linspace(0, 1, len(audio))
+        target_indices = np.linspace(0, 1, target_length)
+        return np.interp(target_indices, orig_indices, audio).astype(np.float32)
+
+
+def load_audio_mlx(
+    file_path: str | Path,
+    target_sample_rate: int | None = None,
+    dtype: str = "float32",
+) -> tuple[NDArray[np.float32], int]:
+    """Load an audio file into a NumPy array using native macOS decoders.
+
+    When ``mlx_audio`` is available, this function decodes WAV, MP3, FLAC, and
+    containerized formats (.m4a, .m4b, .mp4, .ogg, .opus, .caf) directly into
+    memory via ``mlx_audio.audio_io``.
+
+    Args:
+        file_path: Path to the audio file to load.
+        target_sample_rate: Optional target sample rate. When specified, the
+            audio is resampled to this rate during decoding.
+        dtype: Output array data type (defaults to ``"float32"``).
+
+    Returns:
+        A tuple of ``(audio_array, sample_rate)``.
+
+    Raises:
+        FileNotFoundError: If ``file_path`` does not exist.
+        RuntimeError: If decoding fails or format is unsupported on the platform.
+    """
+    path = Path(file_path)
+    if not path.is_file():
+        raise FileNotFoundError(f"Audio file not found: {path}")
+
+    if is_mlx_available():
+        try:
+            import mlx_audio.audio_io as aio  # type: ignore
+
+            samples, sr = aio.read(
+                path,
+                dtype=dtype,
+                sample_rate=target_sample_rate,
+            )
+            return np.asarray(samples, dtype=np.float32), sr
+        except Exception as exc:
+            logger.debug(
+                "mlx_audio.audio_io.read failed, falling back to soundfile: %s", exc
+            )
+
+    # Standard fallback via soundfile
+    import soundfile as sf  # type: ignore
+
+    data, sr = sf.read(str(path), dtype=dtype)
+    data_np: NDArray[np.float32] = np.asarray(data, dtype=np.float32)
+    if target_sample_rate is not None and target_sample_rate != sr:
+        data_np = resample_audio_mlx(data_np, sr, target_sample_rate)
+        sr = target_sample_rate
+    return data_np, sr

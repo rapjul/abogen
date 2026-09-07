@@ -132,6 +132,16 @@ filterwarnings = [
   "ignore:Importing 'parser.split_arg_string' is deprecated:DeprecationWarning",
 ]
 
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+
+[tool.ty.environment]
+python = ".venv"
+
+[tool.ty.rules]
+unused-type-ignore-comment = "ignore"
+
 # --- KOKORO CONFIGURATION (for macOS) ---
 [tool.uv.exclude-newer-package]
 mlx-audio = "2026-09-08T00:00:00Z"

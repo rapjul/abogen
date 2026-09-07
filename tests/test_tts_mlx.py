@@ -16,33 +16,31 @@ Test surface:
 from __future__ import annotations
 
 import sys
-import types
+import tempfile
 import unittest
 from dataclasses import dataclass
-from typing import Any
+from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+import numpy as np
+import soundfile as sf
 
 # ---------------------------------------------------------------------------
 # Helpers: build a minimal mlx_audio stub so we can import tts_mlx anywhere.
 # ---------------------------------------------------------------------------
 
 
-def _make_mlx_audio_stub() -> types.ModuleType:
+def _make_mlx_audio_stub() -> MagicMock:
     """Build a lightweight ``mlx_audio`` package stub.
 
     Returns:
-        A :class:`types.ModuleType` that satisfies the import in
+        A :class:`unittest.mock.MagicMock` that satisfies the import in
         :mod:`abogen.tts_mlx` without pulling in real MLX dependencies.
     """
-    mlx_audio = types.ModuleType("mlx_audio")
-    tts = types.ModuleType("mlx_audio.tts")
-    tts_utils = types.ModuleType("mlx_audio.tts.utils")
-    tts_utils.load_model = MagicMock(return_value=MagicMock())
-    mlx_audio.tts = tts
-    tts.utils = tts_utils
+    mlx_audio = MagicMock()
     sys.modules.setdefault("mlx_audio", mlx_audio)
-    sys.modules.setdefault("mlx_audio.tts", tts)
-    sys.modules.setdefault("mlx_audio.tts.utils", tts_utils)
+    sys.modules.setdefault("mlx_audio.tts", mlx_audio.tts)
+    sys.modules.setdefault("mlx_audio.tts.utils", mlx_audio.tts.utils)
     return mlx_audio
 
 
@@ -51,8 +49,8 @@ class _FakeMLXResult:
     """Fake result object returned by ``model.generate``."""
 
     graphemes: str
-    audio: Any  # Will be a list; the pipeline converts to numpy float32.
-    tokens: Any = None
+    audio: object  # Will be a list; the pipeline converts to numpy float32.
+    tokens: object = None
 
 
 # ---------------------------------------------------------------------------
@@ -123,37 +121,41 @@ class TestIsMLXAvailable(unittest.TestCase):
 class TestMLXQuantization(unittest.TestCase):
     """Test :class:`abogen.tts_mlx.MLXQuantization`."""
 
-    def setUp(self) -> None:
-        """Import the enum under test."""
-        from abogen.tts_mlx import MLXQuantization
-
-        self.MLXQuantization = MLXQuantization
-
     def test_all_members_present(self) -> None:
         """All four quantization levels should exist."""
-        names = {m.name for m in self.MLXQuantization}
+        from abogen.tts_mlx import MLXQuantization
+
+        names = {m.name for m in MLXQuantization}
         self.assertSetEqual(names, {"BF16", "EIGHT_BIT", "SIX_BIT", "FOUR_BIT"})
 
     def test_bf16_has_full_quality_label(self) -> None:
         """BF16 should advertise full quality in its display label."""
-        q = self.MLXQuantization.BF16
+        from abogen.tts_mlx import MLXQuantization
+
+        q = MLXQuantization.BF16
         self.assertIn("Full Quality", q.display_label)
 
     def test_four_bit_is_fastest(self) -> None:
         """The 4-bit variant should advertise the highest speed multiplier."""
-        q = self.MLXQuantization.FOUR_BIT
+        from abogen.tts_mlx import MLXQuantization
+
+        q = MLXQuantization.FOUR_BIT
         self.assertIn("1.5", q.speed_description)
 
     def test_model_path_is_non_empty_string(self) -> None:
         """Every variant should resolve to a non-empty model path."""
-        for q in self.MLXQuantization:
+        from abogen.tts_mlx import MLXQuantization
+
+        for q in MLXQuantization:
             with self.subTest(quant=q.name):
                 self.assertIsInstance(q.model_path, str)
                 self.assertTrue(q.model_path)
 
     def test_quality_description_present(self) -> None:
         """Every variant should have a non-empty quality description."""
-        for q in self.MLXQuantization:
+        from abogen.tts_mlx import MLXQuantization
+
+        for q in MLXQuantization:
             with self.subTest(quant=q.name):
                 self.assertTrue(q.quality_description)
 
@@ -339,6 +341,157 @@ class TestMLXKokoroPipelineCall(unittest.TestCase):
         mock_model.generate.return_value = iter([no_audio])
         results = list(pipeline("nothing", voice="af_heart"))
         self.assertEqual(results, [])
+
+
+# ---------------------------------------------------------------------------
+# Tests: Audio I/O & Resampling Utilities
+# ---------------------------------------------------------------------------
+
+
+class TestMLXAudioProcessing(unittest.TestCase):
+    """Test audio resampling and I/O utilities in :mod:`abogen.tts_mlx`."""
+
+    def test_resample_downsample(self) -> None:
+        """Should downsample 24kHz audio to 22.05kHz with mathematically expected length."""
+        from abogen.tts_mlx import resample_audio_mlx
+
+        t = np.linspace(0, 1.0, 24000, endpoint=False, dtype=np.float32)
+        audio = np.sin(2 * np.pi * 440 * t)
+        resampled = resample_audio_mlx(audio, 24000, 22050)
+
+        expected_len = int(round(len(audio) * 22050 / 24000))
+        self.assertAlmostEqual(len(resampled), expected_len, delta=2)
+        self.assertEqual(resampled.dtype, np.float32)
+
+    def test_resample_upsample(self) -> None:
+        """Should upsample 22.05kHz audio to 24kHz with mathematically expected length."""
+        from abogen.tts_mlx import resample_audio_mlx
+
+        t = np.linspace(0, 1.0, 22050, endpoint=False, dtype=np.float32)
+        audio = np.sin(2 * np.pi * 440 * t)
+        resampled = resample_audio_mlx(audio, 22050, 24000)
+
+        expected_len = int(round(len(audio) * 24000 / 22050))
+        self.assertAlmostEqual(len(resampled), expected_len, delta=2)
+        self.assertEqual(resampled.dtype, np.float32)
+
+    def test_resample_same_rate(self) -> None:
+        """Resampling to the identical rate should return audio without modification."""
+        from abogen.tts_mlx import resample_audio_mlx
+
+        audio = np.ones(100, dtype=np.float32)
+        resampled = resample_audio_mlx(audio, 24000, 24000)
+        np.testing.assert_array_equal(audio, resampled)
+
+    def test_resample_empty_array(self) -> None:
+        """Resampling an empty array should return an empty array without error."""
+        from abogen.tts_mlx import resample_audio_mlx
+
+        audio = np.array([], dtype=np.float32)
+        resampled = resample_audio_mlx(audio, 24000, 22050)
+        self.assertEqual(len(resampled), 0)
+
+    def test_resample_fallback_without_mlx(self) -> None:
+        """Resampling should succeed using the fallback path when MLX is unavailable."""
+        from abogen.tts_mlx import resample_audio_mlx
+
+        with patch("abogen.tts_mlx.is_mlx_available", return_value=False):
+            t = np.linspace(0, 0.5, 12000, endpoint=False, dtype=np.float32)
+            audio = np.sin(2 * np.pi * 440 * t)
+            resampled = resample_audio_mlx(audio, 24000, 22050)
+            expected_len = int(round(len(audio) * 22050 / 24000))
+            self.assertAlmostEqual(len(resampled), expected_len, delta=2)
+
+    def test_load_audio_file(self) -> None:
+        """load_audio_mlx should read an audio file to a float32 array with correct sample rate."""
+        from abogen.tts_mlx import load_audio_mlx
+
+        samplerate = 24000
+        duration = 0.5
+        t = np.linspace(
+            0, duration, int(samplerate * duration), endpoint=False, dtype=np.float32
+        )
+        data = (np.sin(2 * np.pi * 440 * t) * 0.5).astype(np.float32)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            wav_path = Path(tmpdir) / "test.wav"
+            sf.write(str(wav_path), data, samplerate)
+
+            loaded_audio, sr = load_audio_mlx(wav_path)
+            self.assertEqual(sr, samplerate)
+            self.assertEqual(loaded_audio.dtype, np.float32)
+            self.assertEqual(len(loaded_audio), len(data))
+
+    def test_load_audio_file_not_found(self) -> None:
+        """load_audio_mlx should raise FileNotFoundError when the file does not exist."""
+        from abogen.tts_mlx import load_audio_mlx
+
+        with self.assertRaises(FileNotFoundError):
+            load_audio_mlx(Path("non_existent_audio_file.wav"))
+
+
+# ---------------------------------------------------------------------------
+# Tests: Live MLX Backend & Patch Integrity (macOS ARM64 only)
+# ---------------------------------------------------------------------------
+
+
+class TestMLXBackendPatches(unittest.TestCase):
+    """Test real MLX backend model sanitization and patched modules.
+
+    These tests run only on Apple Silicon macOS systems where ``mlx-audio`` is
+    installed.
+    """
+
+    @unittest.skipUnless(
+        sys.platform == "darwin",
+        "MLX backend tests require macOS",
+    )
+    def test_conv1d_shape_fix_patched(self) -> None:
+        """check_array_shape should handle 1D convolutional weights in MLX format."""
+        import importlib
+
+        try:
+            import mlx.core as mx  # type: ignore[import-not-found]
+
+            base_mod = importlib.import_module("mlx_audio.tts.models.base")
+            check_array_shape = base_mod.check_array_shape
+        except Exception:
+            self.skipTest("mlx or mlx_audio not installed")
+
+        # In MLX, 1D conv weight shape is (out_channels, kernel_size, in_channels).
+        # For a layer with out_channels=512, kernel_size=3, in_channels=512:
+        weight_mlx = mx.zeros((512, 3, 512))
+        self.assertTrue(
+            check_array_shape(weight_mlx),
+            "check_array_shape should return True for 1D convolution weights in MLX format.",
+        )
+
+    @unittest.skipUnless(
+        sys.platform == "darwin",
+        "MLX backend tests require macOS",
+    )
+    def test_sine_gen_broadcasting_patched(self) -> None:
+        """SineGen.__call__ should not crash with broadcast errors on varying lengths."""
+        import importlib
+
+        try:
+            import mlx.core as mx  # type: ignore[import-not-found]
+
+            istft_mod = importlib.import_module("mlx_audio.tts.models.kokoro.istftnet")
+            SineGen = istft_mod.SineGen
+        except Exception:
+            self.skipTest("mlx or mlx_audio not installed")
+
+        sine_gen = SineGen(samp_rate=24000, upsample_scale=300, harmonic_num=8)
+
+        # Test lengths that historically triggered interpolation rounding drift
+        for length in [100, 300, 565, 1000]:
+            f0 = mx.ones((1, length, 1)) * 200.0
+            sine_waves, uv, noise = sine_gen(f0)
+            self.assertEqual(sine_waves.shape[0], 1)
+            self.assertEqual(sine_waves.shape[1], length)
+            self.assertEqual(noise.shape[0], 1)
+            self.assertEqual(noise.shape[1], length)
 
 
 if __name__ == "__main__":
