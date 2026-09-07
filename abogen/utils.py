@@ -923,8 +923,26 @@ def prevent_sleep_end() -> None:
                 _sleep_procs[system] = None
 
 
-def load_numpy_kpipeline():
+def load_numpy_kpipeline() -> tuple[Any, Any]:
+    """Lazy-load numpy and Kokoro KPipeline dependencies.
+
+    Applies a forward-compatibility monkey-patch for ``transformers.AlbertModel``
+    if omitted from the top-level namespace in ``transformers >= 5.0.0`` before
+    Kokoro attempts to import it.
+
+    Returns:
+        tuple[Any, Any]: A tuple of the numpy module and Kokoro KPipeline class.
+    """
     import numpy as np
+    import transformers
+
+    # Transformers 5.x moved AlbertModel out of top-level imports.
+    # Monkey-patch before kokoro imports it.
+    if not hasattr(transformers, "AlbertModel"):
+        from transformers.models.albert import AlbertModel as _AlbertModel
+
+        transformers.AlbertModel = _AlbertModel  # type: ignore[attr-defined]
+
     from kokoro import KPipeline  # type: ignore[import-not-found]
 
     return np, KPipeline
