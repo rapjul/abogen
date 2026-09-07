@@ -2860,7 +2860,7 @@ def _build_ffmpeg_command(
             "-c:a",
             "libopus",
             "-b:a",
-            "24000",
+            "128000",
         ]
     elif fmt == "m4b":
         base += [
