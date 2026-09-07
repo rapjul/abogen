@@ -369,7 +369,7 @@ class InputBox(QLabel):
         buffer = QBuffer()
         buffer.open(QIODevice.OpenModeFlag.WriteOnly)
         pixmap.save(buffer, "PNG")
-        img_data = base64.b64encode(bytes(buffer.data().data())).decode()
+        img_data = base64.b64encode(buffer.data().data()).decode()
 
         size_str = self._human_readable_size(os.path.getsize(file_path))
         name = os.path.basename(file_path)
@@ -1236,10 +1236,14 @@ class abogen(QWidget):
         self.save_option = self.config.get("save_option", "Save next to input file")
         self.selected_output_folder = self.config.get("selected_output_folder", None)
         self.last_input_folder = self.config.get("last_input_folder", "")
-        self.selected_file = self.selected_file_type = self.selected_book_path = None
-        self.displayed_file_path = None  # Add new variable to track the displayed file path
-        self.save_chapters_separately = None
-        self.merge_chapters_at_end = None
+        self.selected_file: str | None = None
+        self.selected_file_type: str | None = None
+        self.selected_book_path: str | None = None
+        self.displayed_file_path: str | None = (
+            None  # Add new variable to track the displayed file path
+        )
+        self.save_chapters_separately: bool | None = None
+        self.merge_chapters_at_end: bool | None = None
         self.chapter_visual_indentation = True
         self.chapter_depth_limit = 99
         self.input_box_cleared_by_queue = False
@@ -2380,7 +2384,7 @@ class abogen(QWidget):
 
     def get_speed_step_units(self):
         step_value = self.get_selected_speed_step_value()
-        return max(1, round(float(step_value) * 100))
+        return max(1, round(step_value * 100))
 
     def set_speed_slider_from_config(self, speed_value):
         try:
@@ -2589,7 +2593,7 @@ class abogen(QWidget):
             collapsed: True to collapse the log pane, False to expand it.
             resize_window: If True, resizes the parent window to match the toggled state height.
         """
-        self.log_text_collapsed = bool(collapsed)
+        self.log_text_collapsed = collapsed
         self.log_text.setVisible(not self.log_text_collapsed)
         self.btn_toggle_log.setText("Expand" if self.log_text_collapsed else "Collapse")
         if resize_window:
