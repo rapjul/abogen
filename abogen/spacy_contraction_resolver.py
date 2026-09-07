@@ -6,11 +6,6 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
 
-try:  # pragma: no cover - optional dependency
-    import spacy
-except ImportError:  # pragma: no cover - spaCy unavailable at runtime
-    spacy = None
-
 # Lazy spaCy type hints to avoid a hard dependency at import time.
 Language = Any  # type: ignore[assignment]
 Token = Any  # type: ignore[assignment]
@@ -37,7 +32,17 @@ _DEFAULT_MODEL = os.environ.get("ABOGEN_SPACY_MODEL", "en_core_web_sm")
 
 @lru_cache(maxsize=1)
 def _load_spacy_model(model: str = _DEFAULT_MODEL) -> Language | None:
-    if spacy is None:
+    """Load a spaCy model on-demand, caching the loaded NLP pipeline.
+
+    Args:
+        model (str): Name of the spaCy model to load (defaults to en_core_web_sm).
+
+    Returns:
+        Language | None: The loaded spaCy Language pipeline, or None if unavailable.
+    """
+    try:  # pragma: no cover - optional dependency
+        import spacy
+    except ImportError:  # pragma: no cover - spaCy unavailable at runtime
         logger.debug("spaCy is not installed; skipping contraction disambiguation")
         return None
 

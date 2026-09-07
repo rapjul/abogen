@@ -6,10 +6,25 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-try:  # pragma: no cover - optional dependency
-    import spacy  # type: ignore
-except ImportError:  # pragma: no cover - spaCy may be unavailable in minimal environments
-    spacy = None
+_SPACY: Any = None
+_SPACY_LOADED = False
+
+
+def _get_spacy() -> Any:
+    """Import spaCy lazily to prevent loading torch/thinc at startup (~2s latency).
+
+    Returns:
+        Any: Loaded spaCy module, or None if unavailable.
+    """
+    global _SPACY, _SPACY_LOADED
+    if not _SPACY_LOADED:
+        _SPACY_LOADED = True
+        try:  # pragma: no cover - optional dependency
+            import spacy  # type: ignore
+        except ImportError:  # pragma: no cover - spaCy may be unavailable in minimal environments
+            spacy = None
+        _SPACY = spacy
+    return _SPACY
 
 
 @dataclass(frozen=True)
@@ -181,6 +196,7 @@ def _build_replacement_sentence(sentence: str, token: str, replacement_token: st
 
 
 def _load_spacy(language: str) -> Any:
+    spacy = _get_spacy()
     if spacy is None:
         return None
 
@@ -218,7 +234,7 @@ def extract_heteronym_overrides(
     if not lang.startswith("en"):
         return []
 
-    if spacy is None:
+    if _get_spacy() is None:
         return []
 
     nlp = _load_spacy(lang)

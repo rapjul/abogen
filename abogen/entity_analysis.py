@@ -10,10 +10,26 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, TypedDict
 
-try:  # pragma: no cover - fallback when spaCy not available during tests
-    import spacy  # type: ignore[import-not-found]
-except ImportError:  # pragma: no cover - spaCy optional during runtime bootstrap
-    spacy = None
+_SPACY: Any = None
+_SPACY_LOADED = False
+
+
+def _get_spacy() -> Any:
+    """Import spaCy lazily to prevent loading torch/thinc at startup (~2s latency).
+
+    Returns:
+        Any: Loaded spaCy module, or None if unavailable.
+    """
+    global _SPACY, _SPACY_LOADED
+    if not _SPACY_LOADED:
+        _SPACY_LOADED = True
+        try:  # pragma: no cover - fallback when spaCy not available during tests
+            import spacy  # type: ignore[import-not-found]
+        except ImportError:  # pragma: no cover - spaCy optional during runtime bootstrap
+            spacy = None
+        _SPACY = spacy
+    return _SPACY
+
 
 _Language = Any  # type: ignore[misc,assignment]
 Doc = Any  # type: ignore[misc,assignment]
@@ -178,6 +194,7 @@ def _resolve_model_name(language: str) -> str:
 
 
 def _load_model(language: str) -> Any:
+    spacy = _get_spacy()
     if spacy is None:
         raise EntityModelError("spaCy is not available. Install spaCy to enable entity extraction.")
 
