@@ -5,24 +5,33 @@ from abogen.webui.routes.utils.form import should_preselect_chapter
 
 
 class MockItem:
-    def __init__(self, text):
+    """Mock tree widget item providing a text getter."""
+
+    def __init__(self, text: str) -> None:
+        """Initialize mock item with text content.
+
+        Args:
+            text: Chapter or page title.
+        """
         self._text = text
 
-    def text(self, col):
+    def text(self, col: int = 0) -> str:
+        """Return the column text.
+
+        Args:
+            col: Column index (default 0).
+
+        Returns:
+            The stored title text.
+        """
         return self._text
 
 
 class TestSelectionHeuristics(unittest.TestCase):
     def test_pyqt_heuristics(self) -> None:
         """Test PyQt chapter selection exclusion heuristics against typical titles."""
-        # We can't easily instantiate HandlerDialog without a real file and QApplication.
-        # But we can use a mock that implements the logic or just use the method from the class.
-
-        # Since _should_exclude_by_title doesn't use self, we can call it on the class or a dummy instance
-        class DummyHandler:
-            _should_exclude_by_title = HandlerDialog._should_exclude_by_title
-
-        handler = DummyHandler()
+        # Instantiate HandlerDialog using __new__ to bypass GUI and file initialization in __init__.
+        handler: HandlerDialog = HandlerDialog.__new__(HandlerDialog)
 
         # Test cases: title, expected_excluded
         # False means it IS selected (not excluded)

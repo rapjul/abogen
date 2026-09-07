@@ -109,9 +109,10 @@ def test_resolve_voice_setting_handles_profile_reference():
     assert language == "b"
 
 
-def test_apply_prepare_form_updates_closing_outro_flag():
+def test_apply_prepare_form_updates_closing_outro_flag() -> None:
+    """Test that applying prepare form with false outro updates the pending job flag."""
     pending = _make_pending_job()
-    pending.read_closing_outro = True
+    setattr(pending, "read_closing_outro", True)
     form = MultiDict(
         {
             "read_closing_outro": "false",
@@ -120,4 +121,4 @@ def test_apply_prepare_form_updates_closing_outro_flag():
 
     apply_prepare_form(pending, form)
 
-    assert pending.read_closing_outro is False
+    assert not pending.read_closing_outro

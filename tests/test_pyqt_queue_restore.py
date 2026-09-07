@@ -127,28 +127,26 @@ def test_queue_completion_clears_queue(tmp_path: Path, monkeypatch) -> None:
 
     window.queued_items = [_build_queued_item(str(file_a))]
     window.current_queue_index = 0
-    window.queue_run_active = True
-    window.queue_started_at = 123456789.0
-    window.queue_elapsed_seconds = 10
-    window.queue_item_started_at = {0: 123456789.0}
-    window.queue_item_elapsed_seconds = {0: 10}
-    window.queue_item_status = {0: "Completed"}
-    window.queue_last_outcome = "completed"
-    window.queue_cancel_summary_shown = False
+    setattr(window, "queue_run_active", True)
+    setattr(window, "queue_started_at", 123456789.0)
+    setattr(window, "queue_elapsed_seconds", 10)
+    setattr(window, "queue_item_started_at", {0: 123456789.0})
+    setattr(window, "queue_item_elapsed_seconds", {0: 10})
+    setattr(window, "queue_item_status", {0: "Completed"})
+    setattr(window, "queue_last_outcome", "completed")
+    setattr(window, "queue_cancel_summary_shown", False)
 
     # Track calls
-    save_called = False
-    enable_disable_called = False
+    save_called: list[bool] = []
+    enable_disable_called: list[bool] = []
 
     def mock_save_current_queue_state() -> None:
-        nonlocal save_called
-        save_called = True
+        save_called.append(True)
         # Call the actual save_current_queue_state to make sure it runs fine and doesn't crash
         gui_module.abogen.save_current_queue_state(window)
 
     def mock_enable_disable_queue_buttons() -> None:
-        nonlocal enable_disable_called
-        enable_disable_called = True
+        enable_disable_called.append(True)
 
     setattr(window, "save_current_queue_state", mock_save_current_queue_state)
     setattr(window, "enable_disable_queue_buttons", mock_enable_disable_queue_buttons)
@@ -159,7 +157,7 @@ def test_queue_completion_clears_queue(tmp_path: Path, monkeypatch) -> None:
     # Verify that the queue state properties are cleared/reset
     assert window.queued_items == []
     assert window.current_queue_index == 0
-    assert window.queue_run_active is False
+    assert not window.queue_run_active
     assert window.queue_started_at is None
     assert window.queue_elapsed_seconds == 0
     assert window.queue_item_started_at == {}
@@ -167,8 +165,8 @@ def test_queue_completion_clears_queue(tmp_path: Path, monkeypatch) -> None:
     assert window.queue_item_status == {}
     assert window.queue_last_outcome is None
     assert window.queue_cancel_summary_shown is False
-    assert save_called is True
-    assert enable_disable_called is True
+    assert len(save_called) >= 1
+    assert len(enable_disable_called) == 1
 
     # The save file should have been deleted (since is_completed is True)
     save_file = settings_dir / "last_queue.json"

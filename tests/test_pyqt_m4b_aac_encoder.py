@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import sys
 import types
-from typing import Any, cast
 
 if "soundfile" not in sys.modules:
     soundfile_stub = types.ModuleType("soundfile")
@@ -15,16 +14,25 @@ from abogen.pyqt.conversion import ConversionThread
 
 
 class _SignalStub:
+    """Stub simulating a PyQt signal for logging in unit tests."""
+
     def __init__(self) -> None:
+        """Initialize call recording list."""
         self.calls: list[object] = []
 
     def emit(self, payload: object) -> None:
+        """Record an emitted payload.
+
+        Args:
+            payload: Emitted log object.
+        """
         self.calls.append(payload)
 
 
 def _make_worker() -> ConversionThread:
+    """Create an uninitialized ConversionThread instance for encoder argument testing."""
     worker = ConversionThread.__new__(ConversionThread)
-    worker.log_updated = cast(Any, _SignalStub())
+    setattr(worker, "log_updated", _SignalStub())
     worker.m4b_aac_mode = "aac_lc"
     worker._ffmpeg_audio_encoders_cache = None
     return worker

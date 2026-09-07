@@ -9,6 +9,7 @@ and rolls up texts for EPUB, Markdown, and PDF file types.
 
 import sys
 import unittest
+from typing import Any, cast
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication, QTreeWidget, QTreeWidgetItem
@@ -30,9 +31,11 @@ class TestHierarchicalChapters(unittest.TestCase):
         self.dialog.book_path = "mock_book.epub"
 
         class MockParser:
-            file_type = "epub"
+            """Minimal mock book parser stub supplying the expected file type."""
 
-        self.dialog.parser = MockParser()
+            file_type: str = "epub"
+
+        self.dialog.parser = cast(Any, MockParser())
 
         # Bind the actual methods under test to the mock dialog
         setattr(
