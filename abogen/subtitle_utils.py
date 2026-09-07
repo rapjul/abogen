@@ -1,5 +1,8 @@
 import platform
 import re
+from collections.abc import Mapping
+from enum import Enum
+from typing import Any
 
 from abogen.constants import SAMPLE_VOICE_TEXTS
 from abogen.utils import (
@@ -36,6 +39,510 @@ _LINUX_CONTROL_CHARS_PATTERN = re.compile(
 _MACOS_ILLEGAL_CHARS_PATTERN = re.compile(r"[:]")
 _LINUX_ILLEGAL_CHARS_PATTERN = re.compile(r"[/\x00]")
 _URL_PATTERN = re.compile(r"https?://\S+|www\.\S+")
+
+_CLOSING_DELIMS = "\"'”’»›)]}」』"
+PUNCTUATION_SENTENCE = ".!?।。！？"
+PUNCTUATION_SENTENCE_COMMA = ".!?,।。！？、，"
+
+
+class SubtitleMode(str, Enum):
+    """Subtitle generation mode."""
+
+    DISABLED = "Disabled"
+    LINE = "Line"
+    SENTENCE = "Sentence"
+    SENTENCE_COMMA = "Sentence + Comma"
+    SENTENCE_HIGHLIGHT = "Sentence + Highlighting"
+
+    @classmethod
+    def from_str(cls, value: str) -> "SubtitleMode":
+        """Parse from user input: case-insensitive, strips whitespace."""
+        normalized = value.strip()
+        for member in cls:
+            if member.value.lower() == normalized.lower():
+                return member
+        raise ValueError(f"Invalid SubtitleMode: {value!r}. Valid: {[m.value for m in cls]}")
+
+
+class Language(str, Enum):
+    """Supported language codes for subtitle and TTS processing."""
+
+    EN_US = "en-US"
+    EN_GB = "en-GB"
+    ES = "es"
+    FR = "fr"
+    HI = "hi"
+    IT = "it"
+    JA = "ja"
+    PT_BR = "pt-BR"
+    ZH = "zh"
+    DE = "de"
+
+    @classmethod
+    def from_str(cls, value: str) -> "Language":
+        """Parse from user input: case-insensitive."""
+        if isinstance(value, Language):
+            return value
+        normalized = value.strip()
+        for member in cls:
+            if member.value.lower() == normalized.lower():
+                return member
+        return cls.EN_US
+
+
+def is_sentence_boundary(
+    token: dict[str, Any],
+    current_sentence: list[dict[str, Any]],
+    separator: str,
+) -> bool:
+    """Check whether token ends a sentence, considering closing quotes and brackets.
+
+    Args:
+        token (dict[str, Any]): The current token being evaluated.
+        current_sentence (list[dict[str, Any]]): Tokens accumulated in the current sentence group.
+        separator (str): Regex separator pattern for sentence terminals.
+
+    Returns:
+        bool: True if the token represents a sentence boundary.
+    """
+    ws = token.get("whitespace", "") or ""
+    if not ws:
+        return False
+
+    # For Line mode, a newline in whitespace or text marks line boundary
+    if separator == r"\n":
+        return "\n" in ws or "\n" in str(token.get("text", ""))
+
+    text = str(token.get("text", ""))
+    if re.search(rf"{separator}[{re.escape(_CLOSING_DELIMS)}]*$", text):
+        return True
+
+    if len(current_sentence) >= 2 and text and all(c in _CLOSING_DELIMS for c in text):
+        prev_text = str(current_sentence[-2].get("text", ""))
+        if re.search(rf"{separator}[{re.escape(_CLOSING_DELIMS)}]*$", prev_text):
+            return True
+
+    return False
+
+
+def apply_fallback_end_time(
+    subtitle_entries: list[tuple[float, float, str]],
+    fallback_end_time: float | None,
+) -> None:
+    """Apply fallback end time to the last entry if needed.
+
+    Args:
+        subtitle_entries (list[tuple[float, float, str]]): List of subtitle entries.
+        fallback_end_time (float | None): Fallback end timestamp in seconds.
+    """
+    if subtitle_entries and fallback_end_time is not None:
+        last_entry = subtitle_entries[-1]
+        start, end, text = last_entry
+        if end is None or end <= start or end <= 0:
+            subtitle_entries[-1] = (start, fallback_end_time, text)
+
+
+def prepare_text_for_tts(
+    text: str,
+    *,
+    normalization_overrides: Mapping[str, Any] | None = None,
+) -> str:
+    """Apply text normalization before TTS synthesis.
+
+    Args:
+        text (str): Raw input text to normalize.
+        normalization_overrides (Mapping[str, Any] | None): Optional runtime normalization settings overrides.
+
+    Returns:
+        str: Fully normalized text ready for TTS processing.
+    """
+    from abogen.kokoro_text_normalization import (
+        DEFAULT_APOSTROPHE_CONFIG,
+        normalize_for_pipeline,
+    )
+    from abogen.normalization_settings import (
+        _SETTINGS_DEFAULTS,
+        apply_overrides,
+        build_apostrophe_config,
+    )
+
+    settings = dict(_SETTINGS_DEFAULTS)
+    if normalization_overrides:
+        settings = apply_overrides(settings, normalization_overrides)
+    config = build_apostrophe_config(settings=settings, base=DEFAULT_APOSTROPHE_CONFIG)
+    return normalize_for_pipeline(text, config=config, settings=settings)
+
+
+def process_subtitle_tokens(
+    tokens_with_timestamps: list[dict[str, Any]],
+    subtitle_entries: list[tuple[float, float, str]],
+    max_subtitle_words: int = 50,
+    subtitle_mode: str | SubtitleMode = "Sentence",
+    language: Any = "en-US",
+    use_spacy_segmentation: bool = False,
+    fallback_end_time: float | None = None,
+) -> None:
+    """Process TTS tokens into subtitle entries according to the subtitle mode.
+
+    Modifies subtitle_entries in-place by appending new subtitle entries.
+
+    Args:
+        tokens_with_timestamps (list[dict[str, Any]]): List of token dictionaries with
+            'start', 'end', 'text', and 'whitespace' keys.
+        subtitle_entries (list[tuple[float, float, str]]): List to append subtitle tuples to.
+        max_subtitle_words (int): Maximum number of words allowed per subtitle entry.
+        subtitle_mode (str | SubtitleMode): One of 'Disabled', 'Line', 'Sentence',
+            'Sentence + Comma', 'Sentence + Highlighting', or a word-count string like '5'.
+        language (Any): Language code (e.g. 'en-US', 'a', 'b', 'es') or Language enum.
+        use_spacy_segmentation (bool): Whether to use spaCy for sentence boundary detection.
+        fallback_end_time (float | None): Fallback end time for the final entry if none available.
+    """
+    if not tokens_with_timestamps:
+        return
+
+    if hasattr(subtitle_mode, "value"):
+        mode_str = str(subtitle_mode.value)
+    else:
+        mode_str = str(subtitle_mode).strip()
+
+    if mode_str in (SubtitleMode.DISABLED.value, "Disabled"):
+        return
+
+    if hasattr(language, "value"):
+        lang_str = str(language.value)
+    else:
+        lang_str = str(language)
+    lang_lower = lang_str.lower()
+    is_english = lang_lower in (
+        "a",
+        "b",
+        "en",
+        "en-us",
+        "en_us",
+        "en-gb",
+        "en_gb",
+        "american english",
+        "british english",
+    )
+    spacy_lang = "b" if ("gb" in lang_lower or lang_lower == "b") else "a"
+
+    if mode_str in (SubtitleMode.SENTENCE_HIGHLIGHT.value, "Sentence + Highlighting"):
+        separator = rf"[{PUNCTUATION_SENTENCE}]"
+        current_sentence: list[dict[str, Any]] = []
+        word_count = 0
+
+        for token in tokens_with_timestamps:
+            current_sentence.append(token)
+            word_count += 1
+
+            is_boundary = is_sentence_boundary(token, current_sentence, separator)
+            if is_boundary or word_count >= max_subtitle_words:
+                if current_sentence:
+                    start_time = current_sentence[0].get("start", 0.0)
+                    end_time = current_sentence[-1].get("end", start_time)
+
+                    karaoke_text = ""
+                    for t in current_sentence:
+                        text_val = str(t.get("text", ""))
+                        ws_val = t.get("whitespace", "") or ""
+                        if r"{\k" in text_val:
+                            karaoke_text += f"{text_val}{ws_val}"
+                        else:
+                            duration = (
+                                (t["end"] - t["start"])
+                                if t.get("end") is not None and t.get("start") is not None
+                                else 0.5
+                            )
+                            try:
+                                duration_cs = int(duration * 100)
+                            except (ValueError, OverflowError, TypeError):
+                                duration_cs = 50
+                            karaoke_text += f"{{\\kf{duration_cs}}}{text_val}{ws_val}"
+
+                    text_stripped = karaoke_text.strip()
+                    if text_stripped:
+                        subtitle_entries.append((start_time, end_time, text_stripped))
+                    current_sentence = []
+                    word_count = 0
+
+        if current_sentence:
+            start_time = current_sentence[0].get("start", 0.0)
+            end_time = current_sentence[-1].get("end", start_time)
+
+            karaoke_text = ""
+            for t in current_sentence:
+                text_val = str(t.get("text", ""))
+                ws_val = t.get("whitespace", "") or ""
+                if r"{\k" in text_val:
+                    karaoke_text += f"{text_val}{ws_val}"
+                else:
+                    duration = (
+                        (t["end"] - t["start"])
+                        if t.get("end") is not None and t.get("start") is not None
+                        else 0.5
+                    )
+                    try:
+                        duration_cs = int(duration * 100)
+                    except (ValueError, OverflowError, TypeError):
+                        duration_cs = 50
+                    karaoke_text += f"{{\\kf{duration_cs}}}{text_val}{ws_val}"
+
+            text_stripped = karaoke_text.strip()
+            if text_stripped:
+                subtitle_entries.append((start_time, end_time, text_stripped))
+
+        apply_fallback_end_time(subtitle_entries, fallback_end_time)
+        return
+
+    elif mode_str in (
+        SubtitleMode.SENTENCE.value,
+        SubtitleMode.SENTENCE_COMMA.value,
+        SubtitleMode.LINE.value,
+        "Sentence",
+        "Sentence + Comma",
+        "Line",
+    ):
+        use_spacy = use_spacy_segmentation and mode_str != "Line" and is_english
+        if use_spacy:
+            from abogen.spacy_utils import get_spacy_model
+
+            nlp = get_spacy_model(spacy_lang)
+            if nlp:
+                full_text = "".join(
+                    str(t.get("text", "")) + (t.get("whitespace") or "")
+                    for t in tokens_with_timestamps
+                )
+                doc = nlp(full_text)
+                sentence_boundaries = [sent.end_char for sent in doc.sents]
+
+                if mode_str in (SubtitleMode.SENTENCE_COMMA.value, "Sentence + Comma"):
+                    comma_positions = [i + 1 for i, c in enumerate(full_text) if c == ","]
+                    sentence_boundaries.extend(comma_positions)
+
+                # Ellipsis & Paragraph breaks
+                for m in re.finditer(
+                    r"\.{2,}(?=[\s\"'”’»›)\]}]|$)|…(?=[\s\"'”’»›)\]}]|$)", full_text
+                ):
+                    sentence_boundaries.append(m.end())
+                for m in re.finditer(r"\n{2,}", full_text):
+                    sentence_boundaries.append(m.end())
+                sentence_boundaries = sorted(set(sentence_boundaries))
+
+                # Multi-sentence single FakeToken handling
+                if len(tokens_with_timestamps) == 1 and len(sentence_boundaries) > 1:
+                    single = tokens_with_timestamps[0]
+                    start_time = single.get("start", 0.0)
+                    end_time = single.get("end")
+                    duration = (
+                        (end_time - start_time)
+                        if (
+                            end_time is not None
+                            and start_time is not None
+                            and end_time > start_time
+                        )
+                        else 0.0
+                    )
+
+                    prev_pos = 0
+                    cur_start = start_time if start_time is not None else 0.0
+                    total_chars = max(len(full_text), 1)
+
+                    for i, b_pos in enumerate(sentence_boundaries):
+                        piece = full_text[prev_pos:b_pos].strip()
+                        if not piece:
+                            prev_pos = b_pos
+                            continue
+                        if i == len(sentence_boundaries) - 1:
+                            cur_end = end_time if end_time is not None else (cur_start + 1.0)
+                        else:
+                            cur_end = cur_start + duration * len(piece) / total_chars
+                        subtitle_entries.append((cur_start, cur_end, piece))
+                        cur_start = cur_end
+                        prev_pos = b_pos
+
+                    if prev_pos < len(full_text):
+                        remainder = full_text[prev_pos:].strip()
+                        if remainder:
+                            remainder_end = (
+                                end_time
+                                if end_time is not None
+                                else (
+                                    fallback_end_time
+                                    if fallback_end_time is not None
+                                    else cur_start
+                                )
+                            )
+                            subtitle_entries.append((cur_start, remainder_end, remainder))
+
+                    apply_fallback_end_time(subtitle_entries, fallback_end_time)
+                    return
+
+                # Normal multi-token spaCy processing
+                current_sentence = []
+                word_count = 0
+                current_char_pos = 0
+                boundary_idx = 0
+
+                for token in tokens_with_timestamps:
+                    current_sentence.append(token)
+                    word_count += 1
+                    text_len = len(str(token.get("text", ""))) + len(token.get("whitespace") or "")
+                    current_char_pos += text_len
+
+                    at_boundary = (
+                        boundary_idx < len(sentence_boundaries)
+                        and current_char_pos >= sentence_boundaries[boundary_idx]
+                    )
+                    if at_boundary or word_count >= max_subtitle_words:
+                        if current_sentence:
+                            start_time = current_sentence[0].get("start", 0.0)
+                            end_time = current_sentence[-1].get("end", start_time)
+                            sentence_text = "".join(
+                                str(t.get("text", "")) + (t.get("whitespace") or "")
+                                for t in current_sentence
+                            ).strip()
+                            if sentence_text:
+                                subtitle_entries.append((start_time, end_time, sentence_text))
+                            current_sentence = []
+                            word_count = 0
+                        while (
+                            boundary_idx < len(sentence_boundaries)
+                            and current_char_pos >= sentence_boundaries[boundary_idx]
+                        ):
+                            boundary_idx += 1
+
+                if current_sentence:
+                    start_time = current_sentence[0].get("start", 0.0)
+                    end_time = current_sentence[-1].get("end", start_time)
+                    sentence_text = "".join(
+                        str(t.get("text", "")) + (t.get("whitespace") or "")
+                        for t in current_sentence
+                    ).strip()
+                    if sentence_text:
+                        subtitle_entries.append((start_time, end_time, sentence_text))
+
+                apply_fallback_end_time(subtitle_entries, fallback_end_time)
+                return
+
+        # Fallback regex-based processing
+        if mode_str in (SubtitleMode.LINE.value, "Line"):
+            separator = r"\n"
+        elif mode_str in (SubtitleMode.SENTENCE.value, "Sentence"):
+            separator = rf"[{PUNCTUATION_SENTENCE}]"
+        else:
+            separator = rf"[{PUNCTUATION_SENTENCE_COMMA}]"
+
+        current_sentence = []
+        word_count = 0
+
+        for token in tokens_with_timestamps:
+            current_sentence.append(token)
+            word_count += 1
+
+            is_boundary = is_sentence_boundary(token, current_sentence, separator)
+            if is_boundary or word_count >= max_subtitle_words:
+                if current_sentence:
+                    start_time = current_sentence[0].get("start", 0.0)
+                    end_time = current_sentence[-1].get("end", start_time)
+                    sentence_text = "".join(
+                        str(t.get("text", "")) + (t.get("whitespace") or "")
+                        for t in current_sentence
+                    ).strip()
+                    if sentence_text:
+                        subtitle_entries.append((start_time, end_time, sentence_text))
+                    current_sentence = []
+                    word_count = 0
+
+        if current_sentence:
+            start_time = current_sentence[0].get("start", 0.0)
+            end_time = current_sentence[-1].get("end", start_time)
+            sentence_text = "".join(
+                str(t.get("text", "")) + (t.get("whitespace") or "") for t in current_sentence
+            ).strip()
+
+            if len(current_sentence) == 1:
+                split_pat = (
+                    r"\n+"
+                    if separator == r"\n"
+                    else rf"(?<={separator})\s+|(?<={separator}[{re.escape(_CLOSING_DELIMS)}])\s+"
+                )
+                parts = [p.strip() for p in re.split(split_pat, sentence_text) if p.strip()]
+                if len(parts) > 1:
+                    d = (
+                        (end_time - start_time)
+                        if (
+                            end_time is not None
+                            and start_time is not None
+                            and end_time > start_time
+                        )
+                        else 0.0
+                    )
+                    total_len = max(len(sentence_text), 1)
+                    cur_s = start_time if start_time is not None else 0.0
+                    for i, p in enumerate(parts):
+                        if i == len(parts) - 1 and end_time is not None:
+                            e = end_time
+                        else:
+                            e = cur_s + d * len(p) / total_len
+                        subtitle_entries.append((cur_s, e, p))
+                        cur_s = e
+                    current_sentence = []
+
+            if current_sentence and sentence_text:
+                safe_start = start_time if start_time is not None else 0.0
+                safe_end = (
+                    end_time
+                    if end_time is not None
+                    else (fallback_end_time if fallback_end_time is not None else safe_start)
+                )
+                subtitle_entries.append((safe_start, safe_end, sentence_text))
+
+        apply_fallback_end_time(subtitle_entries, fallback_end_time)
+        return
+
+    else:
+        try:
+            target_words = int(mode_str.split()[0])
+            target_words = min(target_words, max_subtitle_words)
+        except (ValueError, IndexError):
+            target_words = 1
+
+        current_group: list[dict[str, Any]] = []
+        space_count = 0
+
+        for token in tokens_with_timestamps:
+            current_group.append(token)
+            if token.get("whitespace", "") == " ":
+                space_count += 1
+                if space_count >= target_words:
+                    text = "".join(
+                        str(t.get("text", "")) + (t.get("whitespace") or "") for t in current_group
+                    ).strip()
+                    if text:
+                        subtitle_entries.append(
+                            (
+                                current_group[0].get("start", 0.0),
+                                current_group[-1].get("end", 0.0),
+                                text,
+                            )
+                        )
+                    current_group = []
+                    space_count = 0
+
+        if current_group:
+            text = "".join(
+                str(t.get("text", "")) + (t.get("whitespace") or "") for t in current_group
+            ).strip()
+            if text:
+                subtitle_entries.append(
+                    (
+                        current_group[0].get("start", 0.0),
+                        current_group[-1].get("end", 0.0),
+                        text,
+                    )
+                )
+
+        apply_fallback_end_time(subtitle_entries, fallback_end_time)
 
 
 def clean_subtitle_text(text):
