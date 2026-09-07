@@ -41,7 +41,7 @@ def _is_valid_image_bytes(data: bytes | None) -> bool:
     """
     if not data or len(data) < 8:
         return False
-    head = bytes(data[:64]).strip().lower()
+    head = data[:64].strip().lower()
     return not (head.startswith((b"<?xml", b"<html", b"<!doctype", b"<svg", b"{\\", b"/*")))
 
 
@@ -54,7 +54,7 @@ def _guess_image_extension(image_bytes: bytes | None) -> str:
     Returns:
         The matched extension including leading dot (.png, .jpg, .gif, .webp, .bmp).
     """
-    head = bytes(image_bytes[:16]) if image_bytes else b""
+    head = image_bytes[:16] if image_bytes else b""
     if head.startswith(b"\x89PNG\r\n\x1a\n"):
         return ".png"
     if head.startswith(b"\xff\xd8\xff"):

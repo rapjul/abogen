@@ -32,7 +32,7 @@ def _normalize_targets(voices: Iterable[str] | None) -> set[str]:
     for voice in voices:
         if not voice:
             continue
-        voice_id = str(voice).strip()
+        voice_id = voice.strip()
         if not voice_id:
             continue
         if voice_id in VOICES_INTERNAL:

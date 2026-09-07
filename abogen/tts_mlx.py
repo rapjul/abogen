@@ -250,7 +250,7 @@ class MLXKokoroPipeline:
             # Cast through `object` to satisfy type checker overlap validation without
             # altering the runtime string.
             loaded_model: object = load_model(cast(Path, cast(object, quantization.model_path)))
-            self._model = cast(_TTSModel, cast(object, loaded_model))
+            self._model = cast(_TTSModel, loaded_model)
 
         self._lang_code = lang_code
         self._quantization = quantization

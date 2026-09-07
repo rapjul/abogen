@@ -9,6 +9,7 @@ import subprocess
 import sys
 import warnings
 from collections import deque
+from collections.abc import Sequence
 from functools import lru_cache
 from pathlib import Path
 from threading import Thread
@@ -490,10 +491,26 @@ def clean_text(text, *args, **kwargs):
     return text
 
 
-default_encoding = sys.getfilesystemencoding()
+default_encoding: str = sys.getfilesystemencoding()
 
 
-def create_process(cmd, stdin=None, text=True, capture_output=False):
+def create_process(
+    cmd: str | Sequence[str],
+    stdin: Any = None,
+    text: bool = True,
+    capture_output: bool = False,
+) -> subprocess.Popen[Any]:
+    """Create and start a subprocess with standardized logging and output streaming.
+
+    Args:
+        cmd: Command string or sequence of command arguments to execute.
+        stdin: Optional input stream or file descriptor to pipe into the process standard input.
+        text: Whether to treat process streams as text rather than binary.
+        capture_output: Whether to capture output silently rather than streaming to stdout.
+
+    Returns:
+        The started Popen process instance.
+    """
     import logging
 
     logger = logging.getLogger(__name__)
@@ -514,7 +531,7 @@ def create_process(cmd, stdin=None, text=True, capture_output=False):
             "Security Warning: create_process called with string command. Prefer using a list of arguments to avoid shell injection risks."
         )
 
-    kwargs = {
+    kwargs: dict[str, Any] = {
         "shell": use_shell,
         "stdout": subprocess.PIPE,
         "stderr": subprocess.STDOUT,

@@ -856,7 +856,7 @@ def _format_iso_duration(value: float) -> str:
     hours, remainder_seconds = divmod(total_seconds, 3600)
     minutes, seconds = divmod(remainder_seconds, 60)
     seconds_with_fraction = seconds + remainder
-    if float(seconds_with_fraction).is_integer():
+    if seconds_with_fraction.is_integer():
         seconds_text = f"{int(seconds_with_fraction)}"
     else:
         seconds_text = f"{seconds_with_fraction:.3f}".rstrip("0").rstrip(".")

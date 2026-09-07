@@ -162,9 +162,9 @@ class SupertonicPipeline:
         total_steps: int = 5,
         max_chunk_length: int = 300,
     ) -> None:
-        self.sample_rate = int(sample_rate)
-        self.total_steps = int(total_steps)
-        self.max_chunk_length = int(max_chunk_length)
+        self.sample_rate = sample_rate
+        self.total_steps = total_steps
+        self.max_chunk_length = max_chunk_length
 
         # Configure GPU providers before importing TTS
         _configure_supertonic_gpu()
@@ -188,9 +188,9 @@ class SupertonicPipeline:
         total_steps: int | None = None,
     ) -> Iterator[SupertonicSegment]:
         voice_name = (voice or "").strip() or "M1"
-        steps = int(total_steps) if total_steps is not None else self.total_steps
+        steps = total_steps if total_steps is not None else self.total_steps
         steps = max(2, min(15, steps))
-        speed_value = float(speed) if speed is not None else 1.0
+        speed_value = speed if speed is not None else 1.0
         speed_value = max(0.7, min(2.0, speed_value))
 
         style = self._tts.get_voice_style(voice_name=voice_name)
