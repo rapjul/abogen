@@ -4932,14 +4932,14 @@ class abogen(QWidget):
             self.config["fix_nonstandard_punctuation"] = self.fix_nonstandard_punctuation
             save_config(self.config)
 
-    def cleanup_conversion_thread(self):
-        """Stop conversion work and wait for dependency loading to finish."""
+    def cleanup_conversion_thread(self) -> None:
+        """Stop conversion work and wait for dependency loading to finish with bounded timeouts."""
         if (
             self.conversion_pipeline_load_thread is not None
             and self.conversion_pipeline_load_thread.isRunning()
         ):
             self.conversion_pipeline_load_thread.requestInterruption()
-            self.conversion_pipeline_load_thread.wait()
+            self.conversion_pipeline_load_thread.wait(1000)
 
         # Stop conversion thread
         if (
@@ -4948,16 +4948,18 @@ class abogen(QWidget):
             and self.conversion_thread.isRunning()
         ):
             self.conversion_thread.cancel()
-            self.conversion_thread.wait()
+            if not self.conversion_thread.wait(2000):
+                self.conversion_thread.terminate()
+                self.conversion_thread.wait(1000)
 
-    def cleanup_preview_threads(self):
+    def cleanup_preview_threads(self) -> None:
         """Stop preview dependency loading, generation, and playback workers."""
         if (
             self.preview_pipeline_load_thread is not None
             and self.preview_pipeline_load_thread.isRunning()
         ):
             self.preview_pipeline_load_thread.requestInterruption()
-            self.preview_pipeline_load_thread.wait()
+            self.preview_pipeline_load_thread.wait(1000)
 
         # Stop preview generation thread
         if (
@@ -4966,7 +4968,7 @@ class abogen(QWidget):
             and self.preview_thread.isRunning()
         ):
             self.preview_thread.terminate()
-            self.preview_thread.wait()
+            self.preview_thread.wait(1000)
 
         # Stop audio playback thread
         if (
@@ -4975,7 +4977,7 @@ class abogen(QWidget):
             and self.play_audio_thread.isRunning()
         ):
             self.play_audio_thread.stop()
-            self.play_audio_thread.wait()
+            self.play_audio_thread.wait(1000)
 
         # Cleanup pygame mixer if initialized
         try:

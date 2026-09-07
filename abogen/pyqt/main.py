@@ -173,9 +173,12 @@ if platform.system() == "Linux":
         os.environ["QT_QPA_PLATFORM"] = "wayland"
 
 
-def main():
+def main() -> None:
     """Main entry point for console usage."""
     app = QApplication(sys.argv)
+
+    # Clean up process sleep inhibition on exit
+    app.aboutToQuit.connect(prevent_sleep_end)
 
     # Set application icon using get_resource_path from utils
     icon_path = get_resource_path("abogen.assets", "icon.ico")
@@ -191,7 +194,12 @@ def main():
 
     ex = abogen()
     ex.show()
-    sys.exit(app.exec())
+    rc = app.exec()
+
+    # Restore the default Qt message handler BEFORE interpreter shutdown.
+    # A Python message handler invoked during Qt teardown segfaults (SIGSEGV).
+    qInstallMessageHandler(None)
+    sys.exit(rc)
 
 
 if __name__ == "__main__":
