@@ -2,7 +2,7 @@
 name = "abogen"
 description = "Generate audiobooks from EPUBs, PDFs and text with synchronized captions."
 readme = "README.md"
-requires-python = ">=3.10, <3.13"
+requires-python = ">=3.11, <3.15"
 license = "MIT"
 authors = [{ name = "Deniz Şafak", email = "denizsafak98@gmail.com" }]
 keywords = [
@@ -51,9 +51,10 @@ dependencies = [
 classifiers = [
   "Intended Audience :: End Users/Desktop",
   "Operating System :: OS Independent",
-  "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Topic :: Multimedia :: Sound/Audio :: Conversion",
   "Topic :: Multimedia :: Sound/Audio :: Sound Synthesis",
   "Topic :: Multimedia :: Sound/Audio :: Speech",
@@ -62,21 +63,21 @@ classifiers = [
 
 dynamic = ["version"]
 
-[project.gui-scripts]
-abogen = "abogen.pyqt.main:main"
-
-[project.scripts]
-abogen-cli = "abogen.webui.app:main"
-abogen-pyqt = "abogen.pyqt.main:main"
-abogen-web = "abogen.webui.app:main"
-# Run after every `uv tool install` or `uv pip install` to re-apply patches
-abogen-apply-patches = "abogen.scripts.apply_patches:main"
-
 [project.urls]
 Documentation = "https://github.com/denizsafak/abogen"
 Homepage = "https://github.com/denizsafak/abogen"
 Issues = "https://github.com/denizsafak/abogen/issues"
 Repository = "https://github.com/denizsafak/abogen"
+
+[project.scripts]
+# Run after every `uv tool install` or `uv pip install` to re-apply patches
+abogen-apply-patches = "abogen.scripts.apply_patches:main"
+abogen-cli = "abogen.webui.app:main"
+abogen-pyqt = "abogen.pyqt.main:main"
+abogen-web = "abogen.webui.app:main"
+
+[project.gui-scripts]
+abogen = "abogen.pyqt.main:main"
 
 # --- OPTIONAL DEPENDENCIES ---
 
@@ -89,13 +90,10 @@ cuda126 = ["torch; sys_platform == 'win32'"]
 cuda130 = ["torch; sys_platform == 'win32'"]
 # Development dependencies               # uv tool install abogen[dev]
 dev = ["build", "pytest"]
-# AMD GPU (Linux) (ROCm 6.4)             # uv tool install abogen[rocm]
-rocm = [
-  "torch; sys_platform == 'linux'",
-  "pytorch-triton-rocm; sys_platform == 'linux'"
-]
 # Apple Silicon acceleration via MLX       # uv tool install abogen[mlx]
 mlx = ["mlx-audio>=0.5.2; sys_platform == 'darwin'"]
+# AMD GPU (Linux) (ROCm 6.4)             # uv tool install abogen[rocm]
+rocm = ["torch; sys_platform == 'linux'", "pytorch-triton-rocm; sys_platform == 'linux'"]
 
 [dependency-groups]
 dev = [
@@ -126,15 +124,40 @@ packages = ["abogen"]
 path = "abogen/VERSION"
 pattern = "^(?P<version>.+)$"
 
-[tool.pytest]
-filterwarnings = [
-  "ignore:builtin type .* has no __module__ attribute:DeprecationWarning",
-  "ignore:Importing 'parser.split_arg_string' is deprecated:DeprecationWarning",
-]
-
 [tool.pyright]
 venvPath = "."
 venv = ".venv"
+
+[tool.pytest]
+filterwarnings = [
+  "ignore:Importing 'parser.split_arg_string' is deprecated:DeprecationWarning",
+  "ignore:builtin type .* has no __module__ attribute:DeprecationWarning",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.lint]
+ignore = [
+  "LOG015",  # Root logger calls (used throughout desktop GUI)
+  "S110",  # try-except-pass (used in fallback extractors)
+  "S112",  # try-except-continue (used in fallback extractors)
+  "DTZ005",  # datetime.now() without tz (local timestamps for filenames)
+  "DTZ006",  # datetime.fromtimestamp() without tz
+  "SIM115",  # open() without with (long-lived worker stream file handles)
+  "SIM102",  # collapsible-if (nested ifs with separate comments)
+  "B023",  # loop variable binding in synchronous inner helpers
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["BLE001", "B009", "B010", "S101"]
+"abogen/pyqt/**" = ["BLE001"]
+"abogen/webui/**" = ["BLE001"]
+"abogen/predownload_gui.py" = ["BLE001"]
+"abogen/book_parser.py" = ["BLE001"]
+"abogen/text_extractor.py" = ["BLE001"]
+"build_pypi.py" = ["EXE001", "BLE001"]
 
 [tool.ty.environment]
 python = ".venv"
