@@ -99,8 +99,8 @@ mlx = ["mlx-audio>=0.5.2; sys_platform == 'darwin'"]
 
 [dependency-groups]
 dev = [
-  "pytest>=9.0.2",
-  "ruff>=0.15.7",
+  "pytest>=9.1.1",
+  "ruff>=0.16.5",
 ]
 
 [build-system]
