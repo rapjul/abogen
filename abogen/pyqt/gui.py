@@ -1375,6 +1375,7 @@ class abogen(QWidget):
         enable = self.selected_lang in SUPPORTED_LANGUAGES_FOR_SUBTITLE_GENERATION
         self.subtitle_combo.setEnabled(enable)
         self._sync_subtitle_format_enabled_state()
+        self.update_subtitle_options_availability()
         # loading gif for preview button
         loading_gif_path = get_resource_path("abogen.assets", "loading.gif")
         if loading_gif_path:
@@ -2521,6 +2522,7 @@ class abogen(QWidget):
         self.subtitle_combo.setEnabled(enable)
         self.selected_lang = lang
         self._sync_subtitle_format_enabled_state()
+        self.update_subtitle_options_availability()
 
     def populate_profiles_in_voice_combo(self):
         # preserve current voice or profile
