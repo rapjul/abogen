@@ -13,16 +13,24 @@ QueueManager = queue_manager_module.QueueManager
 file_dialog_paths = importlib.import_module("abogen.pyqt.file_dialog_paths")
 
 
-def _build_manager(*, current_attrs: dict[str, object]):
+def _build_manager(*, current_attrs: dict[str, object]) -> QueueManager:
+    """Build a mock QueueManager for batch add tests.
+
+    Args:
+        current_attrs: Default queue attributes dictionary.
+
+    Returns:
+        QueueManager: Mocked QueueManager instance.
+    """
     manager = QueueManager.__new__(QueueManager)
     manager.queue = []
     manager.parent_gui = None
     manager.config = {"last_input_folder": ""}
     manager.last_input_folder = ""
     manager._document_checked_chapters = {}
-    manager.get_current_attributes = lambda: dict(current_attrs)
-    manager.process_queue = lambda: None
-    manager.update_button_states = lambda: None
+    setattr(manager, "get_current_attributes", lambda: dict(current_attrs))
+    setattr(manager, "process_queue", lambda: None)
+    setattr(manager, "update_button_states", lambda: None)
     return manager
 
 
@@ -189,7 +197,9 @@ def test_add_more_files_remembers_and_syncs_last_folder(
     )
 
     added_files: list[list[str]] = []
-    manager.add_files_from_paths = lambda files: added_files.append(list(files))
+    monkeypatch.setattr(
+        manager, "add_files_from_paths", lambda files: added_files.append(list(files))
+    )
 
     saved_configs: list[dict[str, object]] = []
     monkeypatch.setattr(

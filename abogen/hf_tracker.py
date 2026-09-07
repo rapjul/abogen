@@ -46,4 +46,4 @@ def tracked_hf_hub_download(*args: Any, **kwargs: Any) -> Any:
     return hf_hub_download(*args, **kwargs)
 
 
-huggingface_hub.hf_hub_download = tracked_hf_hub_download
+setattr(huggingface_hub, "hf_hub_download", tracked_hf_hub_download)  # noqa: B010

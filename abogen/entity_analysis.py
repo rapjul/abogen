@@ -8,7 +8,7 @@ import time
 from collections import Counter
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, TypedDict
 
 try:  # pragma: no cover - fallback when spaCy not available during tests
     import spacy  # type: ignore[import-not-found]
@@ -18,6 +18,16 @@ except ImportError:  # pragma: no cover - spaCy optional during runtime bootstra
 _Language = Any  # type: ignore[misc,assignment]
 Doc = Any  # type: ignore[misc,assignment]
 Span = Any  # type: ignore[misc,assignment]
+
+
+class IndexEntry(TypedDict):
+    """Metadata entry tracking token occurrence counts and sentence samples."""
+
+    token: str
+    normalized: str
+    category: str
+    count: int
+    samples: list[str]
 
 
 _TITLE_PREFIXES = (
@@ -302,7 +312,7 @@ def extract_entities(
         return _empty_result(cache_key, str(exc))
 
     records: dict[tuple[str, str], EntityRecord] = {}
-    tokens_for_index: dict[str, dict[str, Any]] = {}
+    tokens_for_index: dict[str, IndexEntry] = {}
     processed_tokens = 0
 
     for chapter_index, text in chapter_texts:
@@ -343,14 +353,15 @@ def extract_entities(
             processed_tokens += 1
             index_entry = tokens_for_index.get(key)
             if index_entry is None:
-                index_entry = {
+                new_entry: IndexEntry = {
                     "token": record.label,
                     "normalized": key,
                     "category": category,
                     "count": 0,
                     "samples": [],
                 }
-                tokens_for_index[key] = index_entry
+                tokens_for_index[key] = new_entry
+                index_entry = new_entry
             index_entry["count"] += 1
             if sentence and len(index_entry["samples"]) < 3:
                 if sentence not in index_entry["samples"]:

@@ -33,7 +33,7 @@ if (
     importlib.util.find_spec("soundfile") is None and "soundfile" not in sys.modules
 ):  # pragma: no cover - import guard
     stub = ModuleType("soundfile")
-    stub.write = _soundfile_write_stub  # type: ignore[attr-defined]
+    setattr(stub, "write", _soundfile_write_stub)
     sys.modules["soundfile"] = stub
 
 
@@ -43,9 +43,9 @@ def _static_ffmpeg_add_paths_stub(*_args, **_kwargs) -> None:  # pragma: no cove
 
 if "static_ffmpeg" not in sys.modules:  # pragma: no cover - import guard
     ffmpeg_module = ModuleType("static_ffmpeg")
-    ffmpeg_module.add_paths = _static_ffmpeg_add_paths_stub  # type: ignore[attr-defined]
+    setattr(ffmpeg_module, "add_paths", _static_ffmpeg_add_paths_stub)
     ffmpeg_run = ModuleType("static_ffmpeg.run")
-    ffmpeg_run.LOCK_FILE = ""  # type: ignore[attr-defined]
-    ffmpeg_module.run = ffmpeg_run  # type: ignore[attr-defined]
+    setattr(ffmpeg_run, "LOCK_FILE", "")
+    setattr(ffmpeg_module, "run", ffmpeg_run)
     sys.modules["static_ffmpeg"] = ffmpeg_module
     sys.modules["static_ffmpeg.run"] = ffmpeg_run

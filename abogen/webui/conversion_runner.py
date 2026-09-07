@@ -1494,7 +1494,8 @@ def _apply_m4b_chapters_with_mutagen(
     try:
         from fractions import Fraction
 
-        from mutagen.mp4 import MP4, MP4Chapter  # type: ignore[import]
+        from mutagen.mp4 import MP4
+        from mutagen.mp4 import Chapter as MP4Chapter  # type: ignore[import]
     except ImportError:
         job.add_log(
             "Unable to write MP4 chapter atoms because mutagen is not installed.",
@@ -1533,7 +1534,7 @@ def _apply_m4b_chapters_with_mutagen(
             except (TypeError, ValueError):
                 end_seconds = None
             if end_seconds is not None and end_seconds > start_seconds:
-                chapter_atom.end = Fraction(round(end_seconds * 1000), 1000)
+                setattr(chapter_atom, "end", Fraction(round(end_seconds * 1000), 1000))  # noqa: B010
 
         chapter_objects.append(chapter_atom)
 

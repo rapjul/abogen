@@ -43,6 +43,8 @@ class TestBookHandlerDuplicatesHierarchy(unittest.TestCase):
 
         self.assertIsNotNone(item_intro)
         self.assertIsNotNone(item_summary)
+        assert item_intro is not None
+        assert item_summary is not None
 
         # Intro should be normal
         self.assertEqual(item_intro.text(0), "Intro")

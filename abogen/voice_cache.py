@@ -3,18 +3,18 @@ from __future__ import annotations
 import os
 import threading
 from collections.abc import Callable, Iterable
+from typing import Any
+
+
+class LocalEntryNotFoundError(Exception):
+    """Exception raised when a voice asset is not found locally in the cache."""
+
 
 try:  # pragma: no cover - optional dependency guard
     from huggingface_hub import hf_hub_download  # type: ignore
-    from huggingface_hub.utils import LocalEntryNotFoundError  # type: ignore
+    from huggingface_hub.errors import LocalEntryNotFoundError  # type: ignore[assignment]
 except ImportError:  # pragma: no cover - import fallback
-    hf_hub_download = None  # type: ignore[assignment]
-    LocalEntryNotFoundError = None  # type: ignore[assignment]
-
-if LocalEntryNotFoundError is None:  # pragma: no cover - fallback for tests
-
-    class LocalEntryNotFoundError(Exception):
-        pass
+    hf_hub_download: Any = None
 
 
 from abogen.constants import VOICES_INTERNAL

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import logging
 import time
 
 from abogen.webui.service import (
@@ -96,11 +97,11 @@ def test_job_add_log_emits_to_stream(tmp_path):
 
     captured_buffers = []
     for handler in list(_JOB_LOGGER.handlers):
-        if not hasattr(handler, "setStream"):
+        if not isinstance(handler, logging.StreamHandler):
             continue
         buffer = io.StringIO()
-        original_stream = getattr(handler, "stream", None)
-        handler.setStream(buffer)  # type: ignore[attr-defined]
+        original_stream = handler.stream
+        handler.setStream(buffer)
         captured_buffers.append((handler, original_stream, buffer))
 
     assert captured_buffers, "Expected job logger to have stream handlers"
@@ -110,8 +111,8 @@ def test_job_add_log_emits_to_stream(tmp_path):
         outputs = [buffer.getvalue() for _, _, buffer in captured_buffers]
     finally:
         for handler, original_stream, _ in captured_buffers:
-            if hasattr(handler, "setStream"):
-                handler.setStream(original_stream)  # type: ignore[attr-defined]
+            if isinstance(handler, logging.StreamHandler):
+                handler.setStream(original_stream)
 
     assert any("Test log line" in output for output in outputs)
     assert job.logs[-1].message == "Test log line"
@@ -141,15 +142,15 @@ def test_job_add_log_handles_exception(tmp_path, capsys):
     # Mock the logger to raise an exception
     original_log = _JOB_LOGGER.log
 
-    def side_effect(*args, **kwargs):
+    def side_effect(*args: object, **kwargs: object) -> None:
         raise RuntimeError("Logger exploded")
 
-    _JOB_LOGGER.log = side_effect
+    setattr(_JOB_LOGGER, "log", side_effect)
 
     try:
         job.add_log("This should trigger fallback", level="info")
     finally:
-        _JOB_LOGGER.log = original_log
+        setattr(_JOB_LOGGER, "log", original_log)
 
     captured = capsys.readouterr()
     assert "Logging failed for job job-fail-test" in captured.err

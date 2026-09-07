@@ -24,7 +24,7 @@ def qapp() -> Generator[QApplication, None, None]:
         QApplication: Global Qt application instance.
     """
     app = QApplication.instance()
-    if app is None:
+    if not isinstance(app, QApplication):
         app = QApplication([])
     yield app
 

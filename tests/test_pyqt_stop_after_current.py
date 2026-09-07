@@ -79,11 +79,11 @@ def test_stop_queue_after_current_item(tmp_path: Path, monkeypatch: pytest.Monke
     buttons_enabled = []
 
     # Mock callbacks to verify stopping logic
-    window.update_log = lambda msg: None
-    window.save_current_queue_state = lambda: None
-    window.show_queue_summary = lambda outcome: summary_shown.append(outcome)
-    window.enable_disable_queue_buttons = lambda: buttons_enabled.append(True)
-    window.start_next_queued_item = lambda: pytest.fail("Should not start next item")
+    setattr(window, "update_log", lambda msg: None)
+    setattr(window, "save_current_queue_state", lambda: None)
+    setattr(window, "show_queue_summary", lambda outcome: summary_shown.append(outcome))
+    setattr(window, "enable_disable_queue_buttons", lambda: buttons_enabled.append(True))
+    setattr(window, "start_next_queued_item", lambda: pytest.fail("Should not start next item"))
 
     # Call the conversion finished handler
     window.queue_item_conversion_finished()

@@ -3100,7 +3100,7 @@ class ConversionThread(QThread):
                 is_last = (
                     is_timestamp_text or (use_gaps and idx == len(subtitles)) or end_time is None
                 )
-                if is_last:
+                if is_last or end_time is None:
                     time_str = (
                         f"{h1:02d}:{m1:02d}:{s1:02d}"
                         + (f",{ms1:03d}" if ms1 > 0 else "")

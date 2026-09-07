@@ -8,7 +8,7 @@ if "soundfile" not in sys.modules:
         def __init__(self, *args: object, **kwargs: object) -> None:
             raise RuntimeError("soundfile is not installed in the test environment")
 
-    soundfile_stub.SoundFile = _SoundFileStub  # type: ignore[attr-defined]
+    setattr(soundfile_stub, "SoundFile", _SoundFileStub)
     sys.modules["soundfile"] = soundfile_stub
 
 if "static_ffmpeg" not in sys.modules:
@@ -17,7 +17,7 @@ if "static_ffmpeg" not in sys.modules:
 if "ebooklib" not in sys.modules:
     ebooklib_stub = types.ModuleType("ebooklib")
     ebooklib_epub_stub = types.ModuleType("ebooklib.epub")
-    ebooklib_stub.epub = ebooklib_epub_stub  # type: ignore[attr-defined]
+    setattr(ebooklib_stub, "epub", ebooklib_epub_stub)
     sys.modules["ebooklib"] = ebooklib_stub
     sys.modules["ebooklib.epub"] = ebooklib_epub_stub
 
@@ -34,7 +34,7 @@ if "markdown" not in sys.modules:
         def convert(self, text: str) -> str:
             return text
 
-    markdown_stub.Markdown = _MarkdownStub  # type: ignore[attr-defined]
+    setattr(markdown_stub, "Markdown", _MarkdownStub)
     sys.modules["markdown"] = markdown_stub
 
 if "bs4" not in sys.modules:
@@ -56,8 +56,8 @@ if "bs4" not in sys.modules:
     class _NavigableStringStub(str):
         pass
 
-    bs4_stub.BeautifulSoup = _BeautifulSoupStub  # type: ignore[attr-defined]
-    bs4_stub.NavigableString = _NavigableStringStub  # type: ignore[attr-defined]
+    setattr(bs4_stub, "BeautifulSoup", _BeautifulSoupStub)
+    setattr(bs4_stub, "NavigableString", _NavigableStringStub)
     sys.modules["bs4"] = bs4_stub
 
 

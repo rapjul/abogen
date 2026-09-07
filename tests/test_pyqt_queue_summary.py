@@ -188,10 +188,10 @@ def test_preview_voice_handles_none_preview_thread_without_attribute_error() -> 
     window.preview_playing = False
     window.preview_thread = None
 
-    def _raise_sentinel():
+    def _raise_sentinel() -> str:
         raise RuntimeError("sentinel")
 
-    window._get_preview_cache_path = _raise_sentinel
+    setattr(window, "_get_preview_cache_path", _raise_sentinel)
 
     with pytest.raises(RuntimeError, match="sentinel"):
         window.preview_voice()

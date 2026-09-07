@@ -10,6 +10,7 @@ import importlib
 import importlib.util
 
 from PyQt6.QtCore import QThread, pyqtSignal
+from PyQt6.QtGui import QCloseEvent
 from PyQt6.QtWidgets import (
     QDialog,
     QHBoxLayout,
@@ -559,8 +560,14 @@ class PreDownloadDialog(QDialog):
             self.worker.wait(2000)
         self.accept()
 
-    def closeEvent(self, event) -> None:
+    def closeEvent(self, a0: QCloseEvent | None) -> None:
+        """Handle dialog close event to cancel any running background worker.
+
+        Args:
+            a0: The close event.
+        """
         if self.worker and self.worker.isRunning():
             self.worker.cancel()
             self.worker.wait(2000)
-        super().closeEvent(event)
+        if a0 is not None:
+            super().closeEvent(a0)

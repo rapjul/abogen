@@ -69,7 +69,7 @@ def test_chunking_preserves_actual_chapter_numbers_starting_at_111(
     monkeypatch.setattr(dialog, "get_split_book", lambda: True)
     monkeypatch.setattr(dialog, "get_split_chapters_count", lambda: 20)
     parser_mock = type("MockParser", (), {"file_type": "epub"})()
-    dialog.parser = parser_mock
+    setattr(dialog, "parser", parser_mock)
     monkeypatch.setattr(dialog, "_get_epub_selected_text", lambda: (full_text, {"id1"}))
 
     chunks, _ = dialog.get_selected_text()
@@ -99,7 +99,7 @@ def test_chunking_single_chapter_in_chunk(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(dialog, "get_split_book", lambda: True)
     monkeypatch.setattr(dialog, "get_split_chapters_count", lambda: 10)
     parser_mock = type("MockParser", (), {"file_type": "epub"})()
-    dialog.parser = parser_mock
+    setattr(dialog, "parser", parser_mock)
     monkeypatch.setattr(dialog, "_get_epub_selected_text", lambda: (full_text, {"id1"}))
 
     chunks, _ = dialog.get_selected_text()

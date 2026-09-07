@@ -13,15 +13,15 @@ class MockItem:
 
 
 class TestSelectionHeuristics(unittest.TestCase):
-    def test_pyqt_heuristics(self):
+    def test_pyqt_heuristics(self) -> None:
+        """Test PyQt chapter selection exclusion heuristics against typical titles."""
         # We can't easily instantiate HandlerDialog without a real file and QApplication.
         # But we can use a mock that implements the logic or just use the method from the class.
 
         # Since _should_exclude_by_title doesn't use self, we can call it on the class or a dummy instance
         class DummyHandler:
-            pass
+            _should_exclude_by_title = HandlerDialog._should_exclude_by_title
 
-        DummyHandler._should_exclude_by_title = HandlerDialog._should_exclude_by_title
         handler = DummyHandler()
 
         # Test cases: title, expected_excluded
@@ -61,7 +61,8 @@ class TestSelectionHeuristics(unittest.TestCase):
             result = handler._should_exclude_by_title(item)
             self.assertEqual(result, expected, f"Failed PyQt check for title: '{title}'")
 
-    def test_webui_heuristics(self):
+    def test_webui_heuristics(self) -> None:
+        """Test WebUI chapter preselection heuristic score calculations."""
         # should_preselect_chapter(title, text, index, total_count) -> bool (True = selected)
         # supplement_score(title, text, index) -> float (Higher = more likely de-selected)
 
