@@ -3,6 +3,8 @@ import shutil
 import sys
 import time
 import unittest
+from typing import Any
+from unittest.mock import patch
 
 from PyQt6.QtWidgets import QApplication
 
@@ -88,6 +90,12 @@ class TestBookHandlerRegression(unittest.TestCase):
     def test_split_chapters_spinbox_multiples_of_10(self) -> None:
         """Test that the split chapters spinbox limits values to multiples of 10."""
         dialog = HandlerDialog(self.sample_epub_path)
+        if (
+            hasattr(dialog, "_loader_thread")
+            and dialog._loader_thread is not None
+            and dialog._loader_thread.isRunning()
+        ):
+            dialog._loader_thread.wait()
 
         # Check default configuration
         self.assertEqual(dialog.split_chapters_spinbox.minimum(), 10)
@@ -116,6 +124,61 @@ class TestBookHandlerRegression(unittest.TestCase):
         self.assertEqual(dialog.get_split_chapters_count(), 100)
 
         # Cleanup
+        dialog.close()
+
+    def test_substitution_display_cutoff_and_wrap(self) -> None:
+        """Test that substitution status label has word wrap, max width, and truncates long text."""
+        dialog = HandlerDialog(self.sample_epub_path)
+        if (
+            hasattr(dialog, "_loader_thread")
+            and dialog._loader_thread is not None
+            and dialog._loader_thread.isRunning()
+        ):
+            dialog._loader_thread.wait()
+
+        # 1. Verify widget layout properties on fr_error_label
+        self.assertTrue(dialog.fr_error_label.wordWrap())
+        self.assertLessEqual(dialog.fr_error_label.maximumWidth(), 850)
+
+        # 2. Verify static truncation helper
+        short_text: str = "simple text"
+        self.assertEqual(
+            dialog._truncate_substitution_text(short_text, max_length=40), "simple text"
+        )
+
+        long_multiline: str = (
+            "Line one\n\nLine two with   extra   spaces\nand more content exceeding forty chars"
+        )
+        truncated: str = dialog._truncate_substitution_text(long_multiline, max_length=40)
+        self.assertLessEqual(len(truncated), 40)
+        self.assertTrue(truncated.endswith("…"))
+        self.assertNotIn("\n", truncated)
+
+        # 3. Test saving a long substitution rule
+        mock_cfg: dict[str, Any] = {
+            "word_substitutions_list": "",
+            "word_substitutions_enabled": False,
+        }
+        with (
+            patch("abogen.utils.load_config", return_value=mock_cfg),
+            patch("abogen.utils.save_config") as mock_save,
+        ):
+            dialog.fr_find_input.setText(
+                "Very long find term that exceeds the standard label width constraint"
+            )
+            dialog.fr_replace_input.setText("Replacement snippet")
+            dialog._save_to_word_substitutions()
+
+            mock_save.assert_called_once()
+            label_text: str = dialog.fr_error_label.text()
+            self.assertIn("…", label_text)
+            self.assertIn("Saved substitution:", label_text)
+            # Full rule should be present in tooltip
+            self.assertEqual(
+                dialog.fr_error_label.toolTip(),
+                "Saved substitution: 'Very long find term that exceeds the standard label width constraint' ➔ 'Replacement snippet'",
+            )
+
         dialog.close()
 
 

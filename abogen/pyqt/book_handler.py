@@ -35,6 +35,7 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QMenu,
     QPushButton,
+    QSizePolicy,
     QSpinBox,
     QSplitter,
     QTextEdit,
@@ -926,7 +927,14 @@ class HandlerDialog(QDialog):
 
         # Row 4: Error/Warning Label
         self.fr_error_label = QLabel("", self.find_replace_frame)
-        self.fr_error_label.setStyleSheet("color: #d9534f; font-weight: bold; font-size: 11px;")
+        self.fr_error_label.setWordWrap(True)
+        self.fr_error_label.setMaximumWidth(800)
+        self.fr_error_label.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred
+        )
+        self.fr_error_label.setStyleSheet(
+            "QLabel { color: #d9534f; font-weight: bold; font-size: 11px; max-width: 800px; }"
+        )
         fr_layout.addWidget(self.fr_error_label)
 
         self.find_replace_frame.hide()
@@ -1234,11 +1242,13 @@ class HandlerDialog(QDialog):
         speed = self._get_playback_speed()
 
         title = current.text(0)
+        display_title = title if len(title) <= 120 else f"{title[:119]}…"
         self.chapter_stats_label.setText(
-            f"{title}\n"
+            f"{display_title}\n"
             f"Chars:\u00a0{char_count:,} | Words:\u00a0{word_count:,} | Paragraphs:\u00a0{paragraphs}\n"
             f"Est.\u00a0Audio:\u00a0{duration_str} ({speed:.2f}x speed)"
         )
+        self.chapter_stats_label.setToolTip(title)
 
     def toggle_edit_mode(self) -> None:
         """Toggle direct text editing mode in the chapter preview pane."""
@@ -1296,6 +1306,7 @@ class HandlerDialog(QDialog):
 
         find_text = self.fr_find_input.text()
         self.fr_error_label.setText("")
+        self.fr_error_label.setToolTip("")
 
         if not find_text:
             self.fr_match_count_label.setText("0 matches")
@@ -1315,7 +1326,11 @@ class HandlerDialog(QDialog):
                 for m in pattern.finditer(doc_text):
                     matches.append((m.start(), m.end()))
             except re.error as e:
+                self.fr_error_label.setStyleSheet(
+                    "QLabel { color: #d9534f; font-weight: bold; font-size: 11px; max-width: 800px; }"
+                )
                 self.fr_error_label.setText(f"Invalid regex: {e.msg}")
+                self.fr_error_label.setToolTip(f"Invalid regex: {e.msg}")
                 self.fr_match_count_label.setText("0 matches")
                 self.previewEdit.setExtraSelections([])
                 return
@@ -1329,7 +1344,11 @@ class HandlerDialog(QDialog):
                 for m in pattern.finditer(doc_text):
                     matches.append((m.start(), m.end()))
             except Exception as e:
+                self.fr_error_label.setStyleSheet(
+                    "QLabel { color: #d9534f; font-weight: bold; font-size: 11px; max-width: 800px; }"
+                )
                 self.fr_error_label.setText(f"Search error: {e}")
+                self.fr_error_label.setToolTip(f"Search error: {e}")
                 self.fr_match_count_label.setText("0 matches")
                 self.previewEdit.setExtraSelections([])
                 return
@@ -1460,7 +1479,11 @@ class HandlerDialog(QDialog):
                 pattern = re.compile(pattern_str, flags)
                 new_text = pattern.sub(replace_text, text)
         except Exception as e:
+            self.fr_error_label.setStyleSheet(
+                "QLabel { color: #d9534f; font-weight: bold; font-size: 11px; max-width: 800px; }"
+            )
             self.fr_error_label.setText(f"Replace failed: {e}")
+            self.fr_error_label.setToolTip(f"Replace failed: {e}")
             return
 
         self.previewEdit.setPlainText(new_text)
@@ -1472,14 +1495,41 @@ class HandlerDialog(QDialog):
         self._update_count_label()
         self._search_matches()
 
+    @staticmethod
+    def _truncate_substitution_text(text: str, max_length: int = 40) -> str:
+        """Truncate and sanitize substitution text for display in status labels.
+
+        Args:
+            text: Raw input string to format.
+            max_length: Maximum allowed character length before truncation. Defaults to 40.
+
+        Returns:
+            Cleaned single-line string truncated with an ellipsis if needed.
+        """
+        collapsed = " ".join(text.split())
+        if len(collapsed) > max_length:
+            return f"{collapsed[: max_length - 1]}…"
+        return collapsed
+
     def _save_to_word_substitutions(self) -> None:
         """Save the current find & replace pair into global Word Substitutions."""
-        find_text = self.fr_find_input.text().strip()
-        replace_text = self.fr_replace_input.text().strip()
+        raw_find = self.fr_find_input.text().strip()
+        raw_replace = self.fr_replace_input.text().strip()
+
+        # Sanitize newlines so line-based substitution storage is preserved
+        find_text = re.sub(r"[\r\n]+", " ", raw_find).strip()
+        replace_text = re.sub(r"[\r\n]+", " ", raw_replace).strip()
 
         if not find_text:
+            self.fr_error_label.setStyleSheet(
+                "QLabel { color: #d9534f; font-weight: bold; font-size: 11px; max-width: 800px; }"
+            )
             self.fr_error_label.setText("Enter a search term to save substitution.")
+            self.fr_error_label.setToolTip("")
             return
+
+        disp_find = self._truncate_substitution_text(find_text, max_length=40)
+        disp_replace = self._truncate_substitution_text(replace_text, max_length=40)
 
         try:
             from abogen.utils import load_config, save_config
@@ -1495,14 +1545,25 @@ class HandlerDialog(QDialog):
                 cfg["word_substitutions_list"] = updated_sub_list
                 cfg["word_substitutions_enabled"] = True
                 save_config(cfg)
-                self.fr_error_label.setStyleSheet("QLabel { color: #28a745; font-weight: bold; }")
-                self.fr_error_label.setText(f"Saved substitution: '{find_text}' ➔ '{replace_text}'")
+                self.fr_error_label.setStyleSheet(
+                    "QLabel { color: #28a745; font-weight: bold; font-size: 11px; max-width: 800px; }"
+                )
+                self.fr_error_label.setText(f"Saved substitution: '{disp_find}' ➔ '{disp_replace}'")
+                self.fr_error_label.setToolTip(
+                    f"Saved substitution: '{find_text}' ➔ '{replace_text}'"
+                )
             else:
-                self.fr_error_label.setStyleSheet("QLabel { color: #888; font-style: italic; }")
+                self.fr_error_label.setStyleSheet(
+                    "QLabel { color: #888; font-style: italic; font-size: 11px; max-width: 800px; }"
+                )
                 self.fr_error_label.setText("Substitution rule already exists.")
+                self.fr_error_label.setToolTip(f"Rule: '{find_text}' ➔ '{replace_text}'")
         except Exception as e:
-            self.fr_error_label.setStyleSheet("QLabel { color: #d9534f; font-weight: bold; }")
+            self.fr_error_label.setStyleSheet(
+                "QLabel { color: #d9534f; font-weight: bold; font-size: 11px; max-width: 800px; }"
+            )
             self.fr_error_label.setText(f"Failed to save substitution: {e}")
+            self.fr_error_label.setToolTip("")
 
     def uncheck_short_chapters(self) -> None:
         """Uncheck chapters that contain less than 500 characters of text."""
