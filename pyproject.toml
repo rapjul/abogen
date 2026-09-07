@@ -89,7 +89,7 @@ cuda126 = ["torch; sys_platform == 'win32'"]
 # NVIDIA GPU (Windows) (CUDA 13.0)       # uv tool install abogen[cuda130]
 cuda130 = ["torch; sys_platform == 'win32'"]
 # Development dependencies               # uv tool install abogen[dev]
-dev = ["build", "pytest"]
+dev = ["build", "pyright>=1.1.411", "pytest", "ruff>=0.16.5", "ty>=0.0.76"]
 # Apple Silicon acceleration via MLX       # uv tool install abogen[mlx]
 mlx = ["mlx-audio>=0.5.2; sys_platform == 'darwin'"]
 # AMD GPU (Linux) (ROCm 6.4)             # uv tool install abogen[rocm]
@@ -97,8 +97,10 @@ rocm = ["torch; sys_platform == 'linux'", "pytorch-triton-rocm; sys_platform == 
 
 [dependency-groups]
 dev = [
+  "pyright>=1.1.411",
   "pytest>=9.1.1",
   "ruff>=0.16.5",
+  "ty>=0.0.76",
 ]
 
 [build-system]
