@@ -6,10 +6,9 @@ import os
 import re
 from typing import Any, ClassVar
 
-import ebooklib
-import fitz
 from PyQt6.QtCore import (
     QEvent,
+    QObject,
     QPoint,
     QSize,
     Qt,
@@ -18,6 +17,7 @@ from PyQt6.QtCore import (
 )
 from PyQt6.QtGui import (
     QColor,
+    QKeyEvent,
     QKeySequence,
     QMovie,
     QShortcut,
@@ -154,9 +154,9 @@ class HandlerDialog(QDialog):
     _chapter_depth_limit = 99
 
     # Cache for processed book content to avoid reprocessing
-    # Key: (book_path, modification_time, file_type)
+    # Key: (book_path, modification_time, file_type, replace_single_newlines)
     # Value: dict with content_texts, content_lengths, doc_content (for epub), markdown_toc (for markdown)
-    _content_cache: ClassVar[dict[tuple[str, float, str], dict[str, Any]]] = {}
+    _content_cache: ClassVar[dict[tuple[str, float, str, bool], dict[str, Any]]] = {}
 
     class _LoaderThread(QThread):
         """Minimal QThread that runs a callable and emits an error string on exception."""
@@ -180,7 +180,8 @@ class HandlerDialog(QDialog):
             cls._content_cache.clear()
             logging.info("Cleared all content cache")
         else:
-            keys_to_remove = [key for key in cls._content_cache if key[0] == book_path]
+            book_path_str = str(book_path)
+            keys_to_remove = [key for key in cls._content_cache if key[0] == book_path_str]
             for key in keys_to_remove:
                 del cls._content_cache[key]
             if keys_to_remove:
@@ -509,12 +510,12 @@ class HandlerDialog(QDialog):
             self.deselect_all_btn.setToolTip(f"Clear selection for all {item_type}.")
 
         # Update checkboxes and tooltips
-        if getattr(self, "save_chapters_checkbox", None) is not None:
+        if self.save_chapters_checkbox is not None:
             self.save_chapters_checkbox.setText(checkbox_text)
             self.save_chapters_checkbox.setToolTip(
                 f"Save each selected {singular_item} as a separate output file."
             )
-        if getattr(self, "merge_chapters_checkbox", None) is not None:
+        if self.merge_chapters_checkbox is not None:
             self.merge_chapters_checkbox.setToolTip(
                 f"Create one additional merged output containing all selected {item_type}."
             )
@@ -538,10 +539,10 @@ class HandlerDialog(QDialog):
         replace_single_newlines = cfg.get("replace_single_newlines", True)
 
         cache_key = (
-            self.book_path,
-            mod_time,
-            self.parser.file_type,
-            replace_single_newlines,
+            str(self.book_path),
+            float(mod_time),
+            str(self.parser.file_type),
+            bool(replace_single_newlines),
         )
 
         # Check if content is already cached
@@ -1162,12 +1163,14 @@ class HandlerDialog(QDialog):
             float: Speed multiplier (e.g. 1.0, 1.25).
         """
         try:
-            parent = self.parent()
+            parent: Any = self.parent()
             if parent is not None:
-                if hasattr(parent, "speed_slider"):
-                    return float(parent.speed_slider.value() / 100.0)
-                if hasattr(parent, "speed"):
-                    return float(parent.speed)
+                speed_slider = getattr(parent, "speed_slider", None)
+                if speed_slider is not None and hasattr(speed_slider, "value"):
+                    return float(speed_slider.value() / 100.0)
+                speed_val = getattr(parent, "speed", None)
+                if speed_val is not None:
+                    return float(speed_val)
 
             from abogen.utils import load_config
 
@@ -1612,9 +1615,15 @@ class HandlerDialog(QDialog):
                 item.setHidden(True)
             iterator += 1
 
-    def eventFilter(self, obj, event):
-        if obj == self.treeWidget and event.type() == QEvent.Type.KeyPress:
-            key = event.key()
+    def eventFilter(self, a0: QObject | None, a1: QEvent | None) -> bool:
+        if (
+            a0 is not None
+            and a1 is not None
+            and a0 == self.treeWidget
+            and a1.type() == QEvent.Type.KeyPress
+            and isinstance(a1, QKeyEvent)
+        ):
+            key = a1.key()
 
             is_check_key = key in (
                 Qt.Key.Key_Y,
@@ -1669,7 +1678,7 @@ class HandlerDialog(QDialog):
                     self._update_checked_set_from_tree()
                 return True
 
-        return super().eventFilter(obj, event)
+        return super().eventFilter(a0, a1) if a0 is not None and a1 is not None else False
 
     def _update_checkbox_states(self):
         self._update_count_label()
@@ -1963,6 +1972,8 @@ class HandlerDialog(QDialog):
         iterator = QTreeWidgetItemIterator(self.treeWidget)
         while iterator.value():
             item = iterator.value()
+            if item is None:
+                break
             if not (item.flags() & Qt.ItemFlag.ItemIsUserCheckable):
                 iterator += 1
                 continue
@@ -1980,6 +1991,8 @@ class HandlerDialog(QDialog):
                 if is_parent:
                     for i in range(item.childCount()):
                         child = item.child(i)
+                        if child is None:
+                            continue
                         if child.flags() & Qt.ItemFlag.ItemIsUserCheckable:
                             child_is_duplicate = bool(child.data(0, Qt.ItemDataRole.UserRole + 1))
                             if child_is_duplicate or self._should_exclude_by_title(child):
@@ -2002,6 +2015,8 @@ class HandlerDialog(QDialog):
         iterator = QTreeWidgetItemIterator(self.treeWidget)
         while iterator.value():
             item = iterator.value()
+            if item is None:
+                break
             if not (item.flags() & Qt.ItemFlag.ItemIsUserCheckable):
                 iterator += 1
                 continue
@@ -2021,6 +2036,8 @@ class HandlerDialog(QDialog):
                 if is_parent:
                     for i in range(item.childCount()):
                         child = item.child(i)
+                        if child is None:
+                            continue
                         if child.flags() & Qt.ItemFlag.ItemIsUserCheckable:
                             child_is_duplicate = bool(child.data(0, Qt.ItemDataRole.UserRole + 1))
                             if child_is_duplicate or self._should_exclude_by_title(child):
@@ -2044,6 +2061,8 @@ class HandlerDialog(QDialog):
         iterator = QTreeWidgetItemIterator(self.treeWidget)
         while iterator.value():
             item = iterator.value()
+            if item is None:
+                break
             if not (item.flags() & Qt.ItemFlag.ItemIsUserCheckable):
                 iterator += 1
                 continue
@@ -2066,6 +2085,8 @@ class HandlerDialog(QDialog):
         iterator = QTreeWidgetItemIterator(self.treeWidget)
         while iterator.value():
             item = iterator.value()
+            if item is None:
+                break
             if item.checkState(0) == Qt.CheckState.Checked:
                 identifier = item.data(0, Qt.ItemDataRole.UserRole)
                 if identifier:
@@ -2254,209 +2275,9 @@ class HandlerDialog(QDialog):
         html_content += "</body></html>"
         self.previewEdit.setHtml(html_content)
 
-    def _extract_book_metadata(self):
-        metadata = {
-            "title": None,
-            "authors": [],
-            "description": None,
-            "cover_image": None,
-            "publisher": None,
-            "publication_year": None,
-            "language": None,
-            "series": None,
-            "series_index": None,
-        }
-
-        if self.parser.file_type == "epub":
-            try:
-                title_items = self.book.get_metadata("DC", "title")
-                if title_items and len(title_items) > 0:
-                    metadata["title"] = title_items[0][0]
-            except Exception as e:
-                logging.warning(f"Error extracting title metadata: {e}")
-
-            try:
-                author_items = self.book.get_metadata("DC", "creator")
-                if author_items:
-                    metadata["authors"] = [author[0] for author in author_items if len(author) > 0]
-            except Exception as e:
-                logging.warning(f"Error extracting author metadata: {e}")
-
-            try:
-                desc_items = self.book.get_metadata("DC", "description")
-                if desc_items and len(desc_items) > 0:
-                    metadata["description"] = desc_items[0][0]
-            except Exception as e:
-                logging.warning(f"Error extracting description metadata: {e}")
-
-            try:
-                publisher_items = self.book.get_metadata("DC", "publisher")
-                if publisher_items and len(publisher_items) > 0:
-                    metadata["publisher"] = publisher_items[0][0]
-            except Exception as e:
-                logging.warning(f"Error extracting publisher metadata: {e}")
-
-            # Try to extract publication year
-            try:
-                date_items = self.book.get_metadata("DC", "date")
-                if date_items and len(date_items) > 0:
-                    date_str = date_items[0][0]
-                    # Try to extract just the year from the date string
-                    year_match = re.search(r"\b(19|20)\d{2}\b", date_str)
-                    if year_match:
-                        metadata["publication_year"] = year_match.group(0)
-                    else:
-                        metadata["publication_year"] = date_str
-            except Exception as e:
-                logging.warning(f"Error extracting publication date metadata: {e}")
-
-            try:
-                language_items = self.book.get_metadata("DC", "language")
-                if language_items and len(language_items) > 0:
-                    metadata["language"] = language_items[0][0]
-            except Exception as e:
-                logging.warning(f"Error extracting language metadata: {e}")
-
-            try:
-                meta_items = self.book.get_metadata("OPF", "meta")
-            except Exception as e:
-                logging.warning(f"Error extracting OPF metadata: {e}")
-                meta_items = []
-
-            series_name = None
-            series_index = None
-            for value, attrs in meta_items or []:
-                attrs_dict = attrs or {}
-                name = str(attrs_dict.get("name") or "").strip().casefold()
-                prop = str(attrs_dict.get("property") or "").strip().casefold()
-                content = attrs_dict.get("content")
-                candidate = content if content is not None else value
-                candidate_text = str(candidate or "").strip()
-                if not candidate_text:
-                    continue
-
-                if name in {"calibre:series", "series"} and series_name is None:
-                    series_name = candidate_text
-                    continue
-                if (
-                    name
-                    in {
-                        "calibre:series_index",
-                        "calibre:seriesindex",
-                        "series_index",
-                        "seriesindex",
-                    }
-                    and series_index is None
-                ):
-                    series_index = candidate_text
-                    continue
-                if prop.endswith("belongs-to-collection") and series_name is None:
-                    series_name = candidate_text
-
-            metadata["series"] = series_name
-            metadata["series_index"] = series_index
-
-            for item in self.book.get_items_of_type(ebooklib.ITEM_COVER):
-                metadata["cover_image"] = item.get_content()
-                break
-
-            if not metadata["cover_image"]:
-                for item in self.book.get_items_of_type(ebooklib.ITEM_IMAGE):
-                    if "cover" in item.get_name().lower():
-                        metadata["cover_image"] = item.get_content()
-                        break
-        elif self.parser.file_type == "markdown":
-            # Extract metadata from markdown frontmatter or first heading
-            if self.markdown_text:
-                # Try to extract YAML frontmatter
-                frontmatter_match = re.match(
-                    r"^---\s*\n(.*?)\n---\s*\n", self.markdown_text, re.DOTALL
-                )
-                if frontmatter_match:
-                    try:
-                        frontmatter = frontmatter_match.group(1)
-                        # Simple YAML-like parsing for common fields
-                        title_match = re.search(
-                            r"^title:\s*(.+)$",
-                            frontmatter,
-                            re.MULTILINE | re.IGNORECASE,
-                        )
-                        if title_match:
-                            metadata["title"] = title_match.group(1).strip().strip("\"'")
-
-                        author_match = re.search(
-                            r"^author:\s*(.+)$",
-                            frontmatter,
-                            re.MULTILINE | re.IGNORECASE,
-                        )
-                        if author_match:
-                            metadata["authors"] = [author_match.group(1).strip().strip("\"'")]
-
-                        desc_match = re.search(
-                            r"^description:\s*(.+)$",
-                            frontmatter,
-                            re.MULTILINE | re.IGNORECASE,
-                        )
-                        if desc_match:
-                            metadata["description"] = desc_match.group(1).strip().strip("\"'")
-
-                        date_match = re.search(
-                            r"^date:\s*(.+)$", frontmatter, re.MULTILINE | re.IGNORECASE
-                        )
-                        if date_match:
-                            date_str = date_match.group(1).strip().strip("\"'")
-                            year_match = re.search(r"\b(19|20)\d{2}\b", date_str)
-                            if year_match:
-                                metadata["publication_year"] = year_match.group(0)
-                    except Exception as e:
-                        logging.warning(f"Error parsing markdown frontmatter: {e}")
-
-                # Fallback: use first H1 header as title if no frontmatter title
-                if not metadata["title"] and self.markdown_toc:
-                    # Find the first level 1 header
-                    first_h1 = next((h for h in self.markdown_toc if h["level"] == 1), None)
-                    if first_h1:
-                        metadata["title"] = first_h1["name"]
-        else:
-            pdf_info = self.pdf_doc.metadata
-            if pdf_info:
-                metadata["title"] = pdf_info.get("title", None)
-
-                author = pdf_info.get("author", None)
-                if author:
-                    metadata["authors"] = [author]
-
-                metadata["description"] = pdf_info.get("subject", None)
-
-                keywords = pdf_info.get("keywords", None)
-                if keywords:
-                    if metadata["description"]:
-                        metadata["description"] += f"\n\nKeywords: {keywords}"
-                    else:
-                        metadata["description"] = f"Keywords: {keywords}"
-
-                metadata["publisher"] = pdf_info.get("creator", None)
-
-                # Try to extract publication date from PDF metadata
-                if "creationDate" in pdf_info:
-                    date_str = pdf_info["creationDate"]
-                    year_match = re.search(r"D:(\d{4})", date_str)
-                    if year_match:
-                        metadata["publication_year"] = year_match.group(1)
-                elif "modDate" in pdf_info:
-                    date_str = pdf_info["modDate"]
-                    year_match = re.search(r"D:(\d{4})", date_str)
-                    if year_match:
-                        metadata["publication_year"] = year_match.group(1)
-
-            if len(self.pdf_doc) > 0:
-                try:
-                    pix = self.pdf_doc[0].get_pixmap(matrix=fitz.Matrix(2, 2))
-                    metadata["cover_image"] = pix.tobytes("png")
-                except Exception:
-                    pass
-
-        return metadata
+    def _extract_book_metadata(self) -> dict[str, Any]:
+        """Extract book metadata by delegating to the underlying parser."""
+        return self.parser.get_metadata()
 
     def get_selected_text(self):
         # If a background loader thread is running, wait for it to finish to
@@ -2597,14 +2418,15 @@ class HandlerDialog(QDialog):
             if not metadata.get("cover_image") and hasattr(self.parser, "_extract_book_metadata"):
                 try:
                     parser_meta = self.parser._extract_book_metadata()
-                    if parser_meta.get("cover_image"):
-                        metadata["cover_image"] = parser_meta["cover_image"]
-                    if not metadata.get("authors") and parser_meta.get("authors"):
-                        metadata["authors"] = parser_meta["authors"]
-                    if not metadata.get("series") and parser_meta.get("series"):
-                        metadata["series"] = parser_meta["series"]
-                    if not metadata.get("series_index") and parser_meta.get("series_index"):
-                        metadata["series_index"] = parser_meta["series_index"]
+                    if parser_meta is not None:
+                        if parser_meta.get("cover_image"):
+                            metadata["cover_image"] = parser_meta["cover_image"]
+                        if not metadata.get("authors") and parser_meta.get("authors"):
+                            metadata["authors"] = parser_meta["authors"]
+                        if not metadata.get("series") and parser_meta.get("series"):
+                            metadata["series"] = parser_meta["series"]
+                        if not metadata.get("series_index") and parser_meta.get("series_index"):
+                            metadata["series_index"] = parser_meta["series_index"]
                 except Exception as exc:
                     logging.debug(f"Failed to re-extract parser metadata: {exc}")
 
@@ -2810,6 +2632,8 @@ class HandlerDialog(QDialog):
         curr = parent
         while curr is not None and curr.parent() is not None:
             ancestor_parent = curr.parent()
+            if ancestor_parent is None:
+                break
             ancestor_index = ancestor_parent.indexOfChild(curr)
             ancestor_is_last = ancestor_index == ancestor_parent.childCount() - 1
             parts.insert(0, "   " if ancestor_is_last else "│  ")
@@ -2855,6 +2679,8 @@ class HandlerDialog(QDialog):
         iterator = QTreeWidgetItemIterator(self.treeWidget)
         while iterator.value():
             item = iterator.value()
+            if item is None:
+                break
             item_order_counter += 1
             check_state = item.checkState(0)
             is_announcement = bool(item.data(0, Qt.ItemDataRole.UserRole + 2))
@@ -2933,6 +2759,8 @@ class HandlerDialog(QDialog):
         iterator = QTreeWidgetItemIterator(self.treeWidget)
         while iterator.value():
             item = iterator.value()
+            if item is None:
+                break
             item_order_counter += 1
             check_state = item.checkState(0)
             is_announcement = bool(item.data(0, Qt.ItemDataRole.UserRole + 2))
@@ -3025,6 +2853,8 @@ class HandlerDialog(QDialog):
         iterator = QTreeWidgetItemIterator(self.treeWidget)
         while iterator.value():
             item = iterator.value()
+            if item is None:
+                break
             if item.checkState(0) == Qt.CheckState.Checked:
                 identifier = item.data(0, Qt.ItemDataRole.UserRole)
                 if identifier:
@@ -3055,6 +2885,8 @@ class HandlerDialog(QDialog):
 
         while iterator.value():
             item = iterator.value()
+            if item is None:
+                break
             if item.checkState(0) == Qt.CheckState.Checked:
                 identifier = item.data(0, Qt.ItemDataRole.UserRole)
                 if (
@@ -3108,7 +2940,11 @@ class HandlerDialog(QDialog):
         HandlerDialog._save_as_project = self.save_as_project
 
     def get_save_chapters_separately(self):
-        return self.save_chapters_separately if self.save_chapters_checkbox.isEnabled() else False
+        return (
+            self.save_chapters_separately
+            if (self.save_chapters_checkbox is not None and self.save_chapters_checkbox.isEnabled())
+            else False
+        )
 
     def get_merge_chapters_at_end(self):
         return self.merge_chapters_at_end

@@ -1,5 +1,6 @@
 # pyright: reportAttributeAccessIssue=false, reportOptionalMemberAccess=false, reportOptionalSubscript=false
 import base64
+import ctypes
 import gc
 import hashlib  # Added for cache path generation
 import html
@@ -13,7 +14,7 @@ import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import psutil
 from PyQt6.QtCore import (
@@ -35,15 +36,22 @@ from PyQt6.QtCore import (
 from PyQt6.QtGui import (
     QAction,
     QActionGroup,
+    QCloseEvent,
     QColor,
     QDesktopServices,
+    QDragEnterEvent,
+    QDragLeaveEvent,
+    QDropEvent,
     QFontMetrics,
     QIcon,
+    QMouseEvent,
     QMovie,
     QPainter,
     QPalette,
     QPixmap,
     QPolygon,
+    QResizeEvent,
+    QStandardItemModel,
     QTextCursor,
 )
 from PyQt6.QtWidgets import (
@@ -130,14 +138,15 @@ class ElidedLabel(QLabel):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.setMinimumWidth(1)  # Allow it to be smaller than its text hint
 
-    def setText(self, text):
+    def setText(self, a0: str | None) -> None:
         """Set the full text and update the elided display."""
-        self._full_text = text or ""
+        self._full_text = a0 or ""
         self._update_elided_text()
 
-    def resizeEvent(self, event):
+    def resizeEvent(self, a0: QResizeEvent | None) -> None:
         """Handle resize events by re-eliding the text."""
-        super().resizeEvent(event)
+        if a0 is not None:
+            super().resizeEvent(a0)
         self._update_elided_text()
 
     def _update_elided_text(self):
@@ -164,11 +173,6 @@ class ElidedLabel(QLabel):
         return hint
 
 
-# Import ctypes for Windows-specific taskbar icon
-if platform.system() == "Windows":
-    import ctypes
-
-
 class DarkTitleBarEventFilter(QObject):
     def __init__(self, is_windows, get_dark_mode_func, set_title_bar_dark_mode_func):
         super().__init__()
@@ -176,13 +180,13 @@ class DarkTitleBarEventFilter(QObject):
         self.get_dark_mode = get_dark_mode_func
         self.set_title_bar_dark_mode = set_title_bar_dark_mode_func
 
-    def eventFilter(self, obj, event):
-        if event.type() == QEvent.Type.Show:
+    def eventFilter(self, a0: QObject | None, a1: QEvent | None) -> bool:
+        if a1 is not None and a1.type() == QEvent.Type.Show:
             # Only apply to QWidget windows
-            if isinstance(obj, QWidget) and obj.isWindow():
+            if isinstance(a0, QWidget) and a0.isWindow():
                 if self.is_windows and self.get_dark_mode():
-                    self.set_title_bar_dark_mode(obj, True)
-        return super().eventFilter(obj, event)
+                    self.set_title_bar_dark_mode(a0, True)
+        return super().eventFilter(a0, a1) if a0 is not None and a1 is not None else False
 
 
 class ShowWarningSignalEmitter(QObject):  # New class to handle signal emission
@@ -254,8 +258,7 @@ class PipelineLoadThread(QThread):
 
 
 class IconProvider(QFileIconProvider):
-    def icon(self, fileInfo):
-        return super().icon(fileInfo)
+    pass
 
 
 LOG_COLOR_MAP = {
@@ -337,8 +340,9 @@ class InputBox(QLabel):
         self.go_to_folder_btn.clicked.connect(self.on_go_to_folder_clicked)
         self.go_to_folder_btn.hide()
 
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
+    def resizeEvent(self, a0: QResizeEvent | None) -> None:
+        if a0 is not None:
+            super().resizeEvent(a0)
         margin = 12
         self.clear_btn.move(self.width() - self.clear_btn.width() - margin, margin)
         self.chapters_btn.move(margin, self.height() - self.chapters_btn.height() - margin)
@@ -365,7 +369,7 @@ class InputBox(QLabel):
         buffer = QBuffer()
         buffer.open(QIODevice.OpenModeFlag.WriteOnly)
         pixmap.save(buffer, "PNG")
-        img_data = base64.b64encode(bytes(buffer.data())).decode()  # pyright: ignore[reportArgumentType]
+        img_data = base64.b64encode(bytes(buffer.data().data())).decode()
 
         size_str = self._human_readable_size(os.path.getsize(file_path))
         name = os.path.basename(file_path)
@@ -541,47 +545,49 @@ class InputBox(QLabel):
             size /= 1024.0
         return f"{size:.{decimal_places}f} PB"
 
-    def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
+    def mousePressEvent(self, ev: QMouseEvent | None) -> None:
+        if ev is not None and ev.button() == Qt.MouseButton.LeftButton:
             window = self._main_window()
             if window is not None:
                 window.open_file_dialog()
 
-    def dragEnterEvent(self, event):
-        if event.mimeData().hasUrls():
-            urls = event.mimeData().urls()
-            if urls:
-                ext = urls[0].toLocalFile().lower()
-                if ext.endswith(
-                    (
-                        ".txt",
-                        ".epub",
-                        ".pdf",
-                        ".md",
-                        ".markdown",
-                        ".srt",
-                        ".ass",
-                        ".vtt",
-                    )
-                ):
-                    event.acceptProposedAction()
-                    # Set hover style based on current state
-                    if self.styleSheet().find(self.STYLE_ACTIVE) != -1:
-                        self.setStyleSheet(
-                            f"QLabel {{ {self.STYLE_ACTIVE} }} QLabel:hover {{ {self.STYLE_ACTIVE_HOVER} }} {self.STYLE_ACTIVE_HOVER}"
+    def dragEnterEvent(self, a0: QDragEnterEvent | None) -> None:
+        if a0 is not None:
+            mime = a0.mimeData()
+            if mime is not None and mime.hasUrls():
+                urls = mime.urls()
+                if urls:
+                    ext = urls[0].toLocalFile().lower()
+                    if ext.endswith(
+                        (
+                            ".txt",
+                            ".epub",
+                            ".pdf",
+                            ".md",
+                            ".markdown",
+                            ".srt",
+                            ".ass",
+                            ".vtt",
                         )
-                    elif self.styleSheet().find(self.STYLE_ERROR) != -1:
-                        self.setStyleSheet(
-                            f"QLabel {{ {self.STYLE_ERROR} }} QLabel:hover {{ {self.STYLE_ERROR_HOVER} }} {self.STYLE_ERROR_HOVER}"
-                        )
-                    else:
-                        self.setStyleSheet(
-                            f"QLabel {{ {self.STYLE_DEFAULT} }} QLabel:hover {{ {self.STYLE_DEFAULT_HOVER} }} {self.STYLE_DEFAULT_HOVER}"
-                        )
-                    return
-        event.ignore()
+                    ):
+                        a0.acceptProposedAction()
+                        # Set hover style based on current state
+                        if self.styleSheet().find(self.STYLE_ACTIVE) != -1:
+                            self.setStyleSheet(
+                                f"QLabel {{ {self.STYLE_ACTIVE} }} QLabel:hover {{ {self.STYLE_ACTIVE_HOVER} }} {self.STYLE_ACTIVE_HOVER}"
+                            )
+                        elif self.styleSheet().find(self.STYLE_ERROR) != -1:
+                            self.setStyleSheet(
+                                f"QLabel {{ {self.STYLE_ERROR} }} QLabel:hover {{ {self.STYLE_ERROR_HOVER} }} {self.STYLE_ERROR_HOVER}"
+                            )
+                        else:
+                            self.setStyleSheet(
+                                f"QLabel {{ {self.STYLE_DEFAULT} }} QLabel:hover {{ {self.STYLE_DEFAULT_HOVER} }} {self.STYLE_DEFAULT_HOVER}"
+                            )
+                        return
+            a0.ignore()
 
-    def dragLeaveEvent(self, event):
+    def dragLeaveEvent(self, a0: QDragLeaveEvent | None) -> None:
         # Restore the style based on current state
         if self.styleSheet().find(self.STYLE_ACTIVE) != -1:
             self.setStyleSheet(
@@ -595,57 +601,61 @@ class InputBox(QLabel):
             self.setStyleSheet(
                 f"QLabel {{ {self.STYLE_DEFAULT} }} QLabel:hover {{ {self.STYLE_DEFAULT_HOVER} }}"
             )
-        event.accept()
+        if a0 is not None:
+            a0.accept()
 
-    def dropEvent(self, event):
-        if event.mimeData().hasUrls():
-            urls = event.mimeData().urls()
-            if not urls:
-                event.ignore()
-                return
-            file_path = urls[0].toLocalFile()
-            win = self._main_window()
-            if win is None:
-                event.ignore()
-                return
-            if file_path.lower().endswith(".txt"):
+    def dropEvent(self, a0: QDropEvent | None) -> None:
+        if a0 is None:
+            return
+        mime = a0.mimeData()
+        if mime is None or not mime.hasUrls():
+            a0.ignore()
+            return
+        urls = mime.urls()
+        if not urls:
+            a0.ignore()
+            return
+        file_path = urls[0].toLocalFile()
+        win = self._main_window()
+        if win is None:
+            a0.ignore()
+            return
+        if file_path.lower().endswith(".txt"):
+            win.selected_file, win.selected_file_type = file_path, "txt"
+            win.displayed_file_path = file_path  # Set the displayed file path for text files
+            self.set_file_info(file_path)
+            a0.acceptProposedAction()
+        elif (
+            file_path.lower().endswith(".epub")
+            or file_path.lower().endswith(".pdf")
+            or file_path.lower().endswith((".md", ".markdown"))
+            or file_path.lower().endswith((".srt", ".ass", ".vtt"))
+        ):
+            # Determine file type
+            if file_path.lower().endswith(".epub"):
+                file_type = "epub"
+            elif file_path.lower().endswith(".pdf"):
+                file_type = "pdf"
+            elif file_path.lower().endswith((".srt", ".ass", ".vtt")):
+                # For subtitle files, treat them like txt files (direct processing)
                 win.selected_file, win.selected_file_type = file_path, "txt"
-                win.displayed_file_path = file_path  # Set the displayed file path for text files
+                win.displayed_file_path = file_path
                 self.set_file_info(file_path)
-                event.acceptProposedAction()
-            elif (
-                file_path.lower().endswith(".epub")
-                or file_path.lower().endswith(".pdf")
-                or file_path.lower().endswith((".md", ".markdown"))
-                or file_path.lower().endswith((".srt", ".ass", ".vtt"))
-            ):
-                # Determine file type
-                if file_path.lower().endswith(".epub"):
-                    file_type = "epub"
-                elif file_path.lower().endswith(".pdf"):
-                    file_type = "pdf"
-                elif file_path.lower().endswith((".srt", ".ass", ".vtt")):
-                    # For subtitle files, treat them like txt files (direct processing)
-                    win.selected_file, win.selected_file_type = file_path, "txt"
-                    win.displayed_file_path = file_path
-                    self.set_file_info(file_path)
-                    event.acceptProposedAction()
-                    return
-                else:
-                    file_type = "markdown"
-
-                # Just store the file path but don't set the file info yet
-                win.selected_file_type = file_type
-                win.selected_book_path = file_path
-                win.open_book_file(
-                    file_path  # This will handle the dialog and setting file info
-                )
-                event.acceptProposedAction()
+                a0.acceptProposedAction()
+                return
             else:
-                self.set_error("Please drop a .txt, .epub, .pdf, .md, .srt, .ass, or .vtt file.")
-                event.ignore()
+                file_type = "markdown"
+
+            # Just store the file path but don't set the file info yet
+            win.selected_file_type = file_type
+            win.selected_book_path = file_path
+            win.open_book_file(
+                file_path  # This will handle the dialog and setting file info
+            )
+            a0.acceptProposedAction()
         else:
-            event.ignore()
+            self.set_error("Please drop a .txt, .epub, .pdf, .md, .srt, .ass, or .vtt file.")
+            a0.ignore()
 
     def on_chapters_clicked(self):
         win = self._main_window()
@@ -1054,7 +1064,7 @@ class QueueRestoreDialog(QDialog):
         self,
         parent: QWidget | None = None,
         items_count: int = 0,
-        items_info: list[str] | None = None,
+        items_info: list[dict[str, Any]] | None = None,
         missing_files: list[str] | None = None,
         has_completed: bool = False,
     ) -> None:
@@ -1063,7 +1073,7 @@ class QueueRestoreDialog(QDialog):
         Args:
             parent: Parent widget.
             items_count: Number of valid items in the queue.
-            items_info: List of strings summarizing each valid item (e.g. filename (char_count)).
+            items_info: List of dictionaries summarizing each valid item.
             missing_files: List of names of missing files that will be skipped.
             has_completed: Whether there are completed items in the last queue session.
         """
@@ -1119,7 +1129,9 @@ class QueueRestoreDialog(QDialog):
 
             # Enable word wrap and layout constraints
             table.setWordWrap(True)
-            table.verticalHeader().setVisible(False)
+            vheader = table.verticalHeader()
+            if vheader is not None:
+                vheader.setVisible(False)
             table.setRowCount(len(items_info))
 
             for row, item_data in enumerate(items_info):
@@ -1232,6 +1244,9 @@ class abogen(QWidget):
         self.chapter_depth_limit = 99
         self.input_box_cleared_by_queue = False
         self.save_as_project = False
+        self.save_chunks_in_folder: bool = False
+        self.selected_files_to_queue: list[tuple[str, str]] = []
+        self.book_metadata: dict[str, Any] = {}
         self.pdf_has_bookmarks = False
         self.conversion_thread: ConversionThread | None = None
         self.preview_thread: VoicePreviewThread | None = None
@@ -1309,8 +1324,7 @@ class abogen(QWidget):
         icon_path = get_resource_path("abogen.assets", "icon.ico")
         if icon_path:
             self.setWindowIcon(QIcon(icon_path))
-            # Set taskbar icon for Windows
-            if platform.system() == "Windows":
+            if platform.system() == "Windows" and hasattr(ctypes, "windll"):
                 ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("abogen")
 
         # Queued items list
@@ -1745,9 +1759,11 @@ class abogen(QWidget):
             if hasattr(self, "subtitle_mode") and self.subtitle_mode == "Sentence + Highlighting":
                 idx_srt = self.subtitle_format_combo.findData("srt")
                 if idx_srt >= 0:
-                    item = self.subtitle_format_combo.model().item(idx_srt)
-                    if item is not None:
-                        item.setEnabled(False)
+                    combo_model = self.subtitle_format_combo.model()
+                    if isinstance(combo_model, QStandardItemModel):
+                        item = combo_model.item(idx_srt)
+                        if item is not None:
+                            item.setEnabled(False)
                 # If current selection is SRT, switch to centered narrow ASS
                 if self.subtitle_format_combo.currentData() == "srt":
                     new_idx = self.subtitle_format_combo.findData("ass_centered_narrow")
@@ -2127,6 +2143,7 @@ class abogen(QWidget):
                 # Use "abogen" prefix for cache files
                 # Extract base name without extension
                 base_name = os.path.splitext(os.path.basename(book_path))[0]
+                book_metadata = getattr(dialog, "book_metadata", {}) or {}
 
                 if self.save_as_project:
                     # Map project base folder to the configured save location.
@@ -2273,6 +2290,7 @@ class abogen(QWidget):
             return
 
         editing = False
+        edit_file: str | None = None
         is_cache_file = False
         # If path is explicitly provided, use it
         if file_path and os.path.exists(file_path):
@@ -2292,7 +2310,7 @@ class abogen(QWidget):
             is_cache_file = get_user_cache_path() in self.selected_file
 
         dialog = TextboxDialog(self)
-        if editing:
+        if editing and edit_file:
             try:
                 with open(edit_file, "r", encoding="utf-8", errors="ignore") as f:
                     dialog.text_edit.setText(f.read())
@@ -2311,7 +2329,7 @@ class abogen(QWidget):
                 self._show_error_message_box("Textbox Error", "Text cannot be empty.")
                 return
             try:
-                if editing:
+                if editing and edit_file:
                     with open(edit_file, "w", encoding="utf-8") as f:
                         f.write(text)
                     # Update the display path to the edited file
@@ -2331,7 +2349,7 @@ class abogen(QWidget):
                     self.input_box.set_file_info(tmp)
                     # Hide chapters button since we're using custom text now
                     self.input_box.chapters_btn.hide()
-                    if hasattr(self, "conversion_thread"):
+                    if self.conversion_thread is not None:
                         self.conversion_thread.is_direct_text = True
             except Exception as e:
                 self._show_error_message_box("Textbox Error", f"Could not process text input:\n{e}")
@@ -2416,31 +2434,32 @@ class abogen(QWidget):
         allowed_modes = ["Disabled", "Line", "Sentence", "Sentence + Comma"]
 
         model = self.subtitle_combo.model()
-        for i in range(self.subtitle_combo.count()):
-            text = self.subtitle_combo.itemText(i)
-            item = model.item(i)
-            if not item:
-                continue
+        if isinstance(model, QStandardItemModel):
+            for i in range(self.subtitle_combo.count()):
+                text = self.subtitle_combo.itemText(i)
+                item = model.item(i)
+                if not item:
+                    continue
 
-            if is_english:
-                item.setEnabled(True)
-            else:
-                if text in allowed_modes:
+                if is_english:
                     item.setEnabled(True)
                 else:
-                    item.setEnabled(False)
+                    if text in allowed_modes:
+                        item.setEnabled(True)
+                    else:
+                        item.setEnabled(False)
 
-        # If current selection is disabled, switch to a valid one
-        current_idx = self.subtitle_combo.currentIndex()
-        current_item = model.item(current_idx)
+            # If current selection is disabled, switch to a valid one
+            current_idx = self.subtitle_combo.currentIndex()
+            current_item = model.item(current_idx)
 
-        if current_item and not current_item.isEnabled():
-            # Switch to "Sentence" if available, else "Disabled"
-            sentence_idx = self.subtitle_combo.findText("Sentence")
-            if sentence_idx >= 0:
-                self.subtitle_combo.setCurrentIndex(sentence_idx)
-            else:
-                self.subtitle_combo.setCurrentIndex(0)  # Disabled
+            if current_item and not current_item.isEnabled():
+                # Switch to "Sentence" if available, else "Disabled"
+                sentence_idx = self.subtitle_combo.findText("Sentence")
+                if sentence_idx >= 0:
+                    self.subtitle_combo.setCurrentIndex(sentence_idx)
+                else:
+                    self.subtitle_combo.setCurrentIndex(0)  # Disabled
 
         self.subtitle_mode = self.subtitle_combo.currentText()
 
@@ -2597,7 +2616,9 @@ class abogen(QWidget):
 
     def _refresh_window_size_for_log_toggle(self):
         def _resize_after_layout():
-            self.layout().activate()
+            layout = self.layout()
+            if layout is not None:
+                layout.activate()
             self.adjustSize()
             target_height = self.minimumSizeHint().height()
             if self.log_text_collapsed:
@@ -2616,21 +2637,23 @@ class abogen(QWidget):
     def _rebuild_log_display(self):
         """Rebuild the log display by re-filtering stored log lines."""
         sb = self.log_text.verticalScrollBar()
-        previous_value = sb.value()
-        was_at_bottom = previous_value == sb.maximum()
+        previous_value = sb.value() if sb is not None else 0
+        was_at_bottom = sb is not None and previous_value == sb.maximum()
         self._suspend_log_autoscroll = True
         self.log_text.clear()
         for message in self.log_message_buffer:
             self._update_log_main_thread(message, store=False)
         self._suspend_log_autoscroll = False
-        if was_at_bottom:
-            sb.setValue(sb.maximum())
-        else:
-            sb.setValue(min(previous_value, sb.maximum()))
+        if sb is not None:
+            if was_at_bottom:
+                sb.setValue(sb.maximum())
+            else:
+                sb.setValue(min(previous_value, sb.maximum()))
 
     def update_log(self, message):
         # Use signal-based approach for thread-safe logging
-        if QThread.currentThread() != QApplication.instance().thread():
+        app = QApplication.instance()
+        if app is not None and QThread.currentThread() != app.thread():
             # We're in a background thread, emit signal for the main thread
             self.log_signal.emit_log(message)
             return
@@ -2651,12 +2674,16 @@ class abogen(QWidget):
                 current_item = self.queued_items[self.current_queue_index]
                 if getattr(current_item, "logs", None) is None:
                     current_item.logs = []
-                current_item.logs.append(message)
+                logs_list = current_item.logs
+                if isinstance(logs_list, list):
+                    logs_list.append(message)
 
         txt = self.log_text
         sb = txt.verticalScrollBar()
-        at_bottom = (not getattr(self, "_suspend_log_autoscroll", False)) and (
-            sb.value() == sb.maximum()
+        at_bottom = (
+            (not getattr(self, "_suspend_log_autoscroll", False))
+            and sb is not None
+            and sb.value() == sb.maximum()
         )
 
         cursor = txt.textCursor()
@@ -2726,16 +2753,17 @@ class abogen(QWidget):
         cursor.insertText("\n")
 
         doc = txt.document()
-        excess = doc.blockCount() - self.log_window_max_lines
-        if excess > 0:
-            start = doc.findBlockByNumber(0).position()
-            end = doc.findBlockByNumber(excess).position()
-            trim_cursor = QTextCursor(doc)
-            trim_cursor.setPosition(start)
-            trim_cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
-            trim_cursor.removeSelectedText()
+        if doc is not None:
+            excess = doc.blockCount() - self.log_window_max_lines
+            if excess > 0:
+                start = doc.findBlockByNumber(0).position()
+                end = doc.findBlockByNumber(excess).position()
+                trim_cursor = QTextCursor(doc)
+                trim_cursor.setPosition(start)
+                trim_cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+                trim_cursor.removeSelectedText()
 
-        if at_bottom:
+        if at_bottom and sb is not None:
             sb.setValue(sb.maximum())
 
     def _show_queue_item_logs_dialog(self, queue_item):
@@ -2932,10 +2960,10 @@ class abogen(QWidget):
 
     def add_to_queue(self):
         # For epub/pdf, always use the converted txt file (selected_file)
-        files_to_queue = []
+        files_to_queue: list[tuple[str | None, str]] = []
         if self.selected_file_type in ["epub", "pdf", "md", "markdown"]:
             if hasattr(self, "selected_files_to_queue") and self.selected_files_to_queue:
-                files_to_queue = self.selected_files_to_queue
+                files_to_queue = cast(list[tuple[str | None, str]], self.selected_files_to_queue)
             else:
                 files_to_queue = [(self.selected_file, "")]
         else:
@@ -2969,6 +2997,8 @@ class abogen(QWidget):
         added_any = False
 
         for file_to_queue, chunk_suffix in files_to_queue:
+            if not file_to_queue:
+                continue
             save_base_path = self.displayed_file_path if self.displayed_file_path else file_to_queue
 
             c_count = self.char_count
@@ -2985,7 +3015,9 @@ class abogen(QWidget):
                 from abogen.subtitle_utils import sanitize_name_for_os
 
                 book_metadata = getattr(self, "book_metadata", {}) or {}
-                proper_name = book_metadata.get("title") or Path(save_base_path).stem
+                proper_name = book_metadata.get("title") or (
+                    Path(save_base_path).stem if save_base_path else ""
+                )
 
                 # Remove {To Ch...} suffix from proper name when creating subfolder.
                 # This handles cases like `{To Ch 37}` or `{To Ch. Count of 136}`.
@@ -2998,6 +3030,9 @@ class abogen(QWidget):
             item_output_folder = self.selected_output_folder
             if folder_name and item_output_folder:
                 item_output_folder = str(Path(item_output_folder) / folder_name)
+
+            if not file_to_queue:
+                continue
 
             item_queue = QueuedItem(
                 file_name=file_to_queue,
@@ -3163,7 +3198,7 @@ class abogen(QWidget):
             # Prepare items list serialization
             serialized_items = []
             for item in self.queued_items:
-                if dataclasses.is_dataclass(item):
+                if dataclasses.is_dataclass(item) and not isinstance(item, type):
                     serialized_items.append(dataclasses.asdict(item))
                 else:
                     # Fallback to dict
@@ -3237,7 +3272,7 @@ class abogen(QWidget):
                     ):
                         item_kwargs[field.name] = None
 
-                item = QueuedItem(**item_kwargs)
+                item = QueuedItem(**cast(Any, item_kwargs))
 
                 # Determine display name
                 display_name = file_path.name
@@ -3755,7 +3790,7 @@ class abogen(QWidget):
             mlx_only=mlx_only,
             parent=self,
         )
-        self.conversion_pipeline_load_thread.loaded.connect(
+        cast(Any, self.conversion_pipeline_load_thread.loaded).connect(
             self._dispatch_conversion_pipeline_loaded,
             Qt.ConnectionType.QueuedConnection,
         )
@@ -3771,6 +3806,14 @@ class abogen(QWidget):
 
         # Check if override was active (this determines which settings were ACTUALLY used)
         override_active = self.config.get("queue_override_settings", False)
+        g_voice = ""
+        g_lang = ""
+        g_speed = 1.0
+        g_sub_mode = ""
+        g_format = ""
+        g_newlines = True
+        g_silent_gaps = False
+        g_speed_method = ""
 
         # If override is ON, capture the global settings that were used for processing
         if override_active:
@@ -4110,7 +4153,8 @@ class abogen(QWidget):
             self.controls_widget.hide()
             self.finish_widget.show()
             sb = self.log_text.verticalScrollBar()
-            sb.setValue(sb.maximum())
+            if sb is not None:
+                sb.setValue(sb.maximum())
             save_config(self.config)
             # Show queue summary if more than one item
             if self.queued_items:
@@ -4519,7 +4563,7 @@ class abogen(QWidget):
             mlx_only=False,
             parent=self,
         )
-        self.preview_pipeline_load_thread.loaded.connect(
+        cast(Any, self.preview_pipeline_load_thread.loaded).connect(
             self._on_pipeline_loaded_for_preview,
             Qt.ConnectionType.QueuedConnection,
         )
@@ -4579,8 +4623,8 @@ class abogen(QWidget):
                     else None
                 )
         else:
-            lang = self.selected_voice[0]
-            voice = self.selected_voice
+            lang = self.selected_voice[0] if self.selected_voice else "a"
+            voice = self.selected_voice or "af_heart"
 
         self.update_log((gpu_message, gpu_available))
 
@@ -4682,7 +4726,13 @@ class abogen(QWidget):
         copy_payload = str(message)
         if details_text:
             copy_payload += f"\n\nDetails:\n{details_text}"
-        copy_btn.clicked.connect(lambda: QApplication.clipboard().setText(copy_payload))
+
+        def _copy_error_payload() -> None:
+            cb = QApplication.clipboard()
+            if cb is not None:
+                cb.setText(copy_payload)
+
+        copy_btn.clicked.connect(_copy_error_payload)
         box.exec()
 
     def _show_filesystem_error_message(self, title, error, action):
@@ -4730,7 +4780,7 @@ class abogen(QWidget):
 
     def cancel_conversion(self):
         is_thread_running = (
-            hasattr(self, "conversion_thread") and self.conversion_thread.isRunning()
+            self.conversion_thread is not None and self.conversion_thread.isRunning()
         )
         if self.is_converting or is_thread_running:
             box = QMessageBox(self)
@@ -4742,14 +4792,15 @@ class abogen(QWidget):
             if box.exec() != QMessageBox.StandardButton.Yes:
                 return
         try:
-            if hasattr(self, "conversion_thread") and self.conversion_thread.isRunning():
+            if self.conversion_thread is not None and self.conversion_thread.isRunning():
+                thread_to_cancel = self.conversion_thread
                 if not hasattr(self, "_conversion_lock"):
                     self._conversion_lock = threading.Lock()
 
                 def _cancel():
                     with self._conversion_lock:
-                        self.conversion_thread.cancel()  # <-- Use cancel() method
-                        self.conversion_thread.wait()
+                        thread_to_cancel.cancel()  # <-- Use cancel() method
+                        thread_to_cancel.wait()
 
                 threading.Thread(target=_cancel, daemon=True).start()
 
@@ -4807,10 +4858,13 @@ class abogen(QWidget):
         # If highlighting mode selected, SRT is not supported. Disable SRT option and
         # switch away from it if currently selected.
         try:
+            from PyQt6.QtGui import QStandardItemModel
+
             idx_srt = self.subtitle_format_combo.findData("srt")
+            model = self.subtitle_format_combo.model()
             if mode == "Sentence + Highlighting":
-                if idx_srt >= 0:
-                    item = self.subtitle_format_combo.model().item(idx_srt)
+                if idx_srt >= 0 and isinstance(model, QStandardItemModel):
+                    item = model.item(idx_srt)
                     if item is not None:
                         item.setEnabled(False)
                 # If current format is SRT, switch to a compatible ASS format
@@ -4821,8 +4875,8 @@ class abogen(QWidget):
                         self.set_subtitle_format(self.subtitle_format_combo.itemData(new_idx))
             else:
                 # Re-enable SRT option when not in highlighting mode
-                if idx_srt >= 0:
-                    item = self.subtitle_format_combo.model().item(idx_srt)
+                if idx_srt >= 0 and isinstance(model, QStandardItemModel):
+                    item = model.item(idx_srt)
                     if item is not None:
                         item.setEnabled(True)
         except Exception:
@@ -4927,7 +4981,7 @@ class abogen(QWidget):
         except Exception:
             pass
 
-    def closeEvent(self, event):
+    def closeEvent(self, a0: QCloseEvent | None) -> None:
         if self.is_converting:
             box = QMessageBox(self)
             box.setIcon(QMessageBox.Icon.Warning)
@@ -4938,13 +4992,16 @@ class abogen(QWidget):
             if box.exec() == QMessageBox.StandardButton.Yes:
                 self.cleanup_conversion_thread()
                 self.cleanup_preview_threads()
-                event.accept()
+                if a0 is not None:
+                    a0.accept()
             else:
-                event.ignore()
+                if a0 is not None:
+                    a0.ignore()
         else:
             self.cleanup_conversion_thread()
             self.cleanup_preview_threads()
-            event.accept()
+            if a0 is not None:
+                a0.accept()
 
     def show_chapter_options_dialog(self, chapter_count):
         """Show dialog to ask user about chapter processing options when chapters are detected in a .txt file"""
@@ -4956,7 +5013,7 @@ class abogen(QWidget):
             # Dialog always accepts (Yes or No), never cancels the conversion
             dialog.exec()
             treat_as_subtitle = dialog.use_timestamps()
-            if hasattr(self, "conversion_thread") and self.conversion_thread.isRunning():
+            if self.conversion_thread is not None and self.conversion_thread.isRunning():
                 self.conversion_thread.set_timestamp_response(treat_as_subtitle)
             return
 
@@ -4968,7 +5025,7 @@ class abogen(QWidget):
             options = dialog.get_options()
             if options.get("apply_scope") == "all":
                 self._set_queue_chapter_options_defaults(options)
-            if hasattr(self, "conversion_thread") and self.conversion_thread.isRunning():
+            if self.conversion_thread is not None and self.conversion_thread.isRunning():
                 self.conversion_thread.set_chapter_options(options)
         else:
             self.cancel_conversion()
@@ -4998,22 +5055,27 @@ class abogen(QWidget):
 
     def apply_theme(self, theme):
 
-        app = QApplication.instance()
+        app: Any = QApplication.instance()
+        if app is None:
+            return
         is_windows = platform.system() == "Windows"
-        available_styles = [s.lower() for s in QStyleFactory]
+        style_keys = QStyleFactory.keys()
+        available_styles = [s.lower() for s in style_keys]
 
         def is_windows_dark_mode():
-            try:
-                import winreg
+            if sys.platform == "win32":
+                try:
+                    import winreg
 
-                with winreg.OpenKey(
-                    winreg.HKEY_CURRENT_USER,
-                    r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
-                ) as key:
-                    value, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
-                    return value == 0
-            except Exception:
-                return False
+                    with winreg.OpenKey(
+                        winreg.HKEY_CURRENT_USER,
+                        r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
+                    ) as key:
+                        value, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
+                        return value == 0
+                except Exception:
+                    return False
+            return False
 
         # --- Theme selection logic ---
         def set_dark_palette():
@@ -5078,7 +5140,7 @@ class abogen(QWidget):
 
         # --- Dark title bar support for Windows ---
         def set_title_bar_dark_mode(window, enable):
-            if is_windows:
+            if is_windows and hasattr(ctypes, "windll"):
                 try:
                     window.update()
                     DWMWA_USE_IMMERSIVE_DARK_MODE = 20
@@ -5289,33 +5351,29 @@ class abogen(QWidget):
         menu.addAction(self.silent_gaps_action)
 
         # Subtitle speed adjustment method
-        speed_method_menu = menu.addMenu("Subtitle speed adjustment method")
-        speed_method_menu.setToolTip(
-            "Choose how subtitle audio speed is adjusted:\n"
-            "  - TTS Regeneration: better quality, slower\n"
-            "  - FFmpeg Time-stretch: faster, may sound less natural"
-        )
-
-        speed_method_group = QActionGroup(self)
-        speed_method_group.setExclusive(True)
-
-        for method, label in [
-            ("tts", "TTS Regeneration (better quality)"),
-            ("ffmpeg", "FFmpeg Time-stretch (better speed)"),
-        ]:
-            action = QAction(label, speed_method_menu)
-            action.setCheckable(True)
-            action.setChecked(self.subtitle_speed_method == method)
-            action.setToolTip(
-                "Regenerate subtitle audio with:"
-                "\n  - TTS for quality, or"
-                "\n  - FFmpeg time-stretch for speed."
+        speed_method_menu = menu.addMenu("Subtitle generation speed method")
+        if speed_method_menu is not None:
+            speed_method_menu.setToolTip(
+                "Choose how speech speed adjustments affect generated subtitle timings:\n"
+                "• Match Kokoro Speed Factor: Timings directly match speed factor (recommended for Kokoro)\n"
+                "• Dynamic Sentence/Audio Scaling: Timings adapt dynamically to generated sentence audio durations"
             )
-            action.triggered.connect(lambda checked, m=method: self.toggle_subtitle_speed_method(m))
-            speed_method_group.addAction(action)
-            speed_method_menu.addAction(action)
+            speed_method_group = QActionGroup(self)
+            speed_method_group.setExclusive(True)
 
-        self.speed_method_group = speed_method_group
+            methods = [
+                ("kokoro", "Match Kokoro Speed Factor (Default)"),
+                ("sentence", "Dynamic Sentence/Audio Scaling"),
+            ]
+            for method_id, label in methods:
+                action = QAction(label, speed_method_menu)
+                action.setCheckable(True)
+                action.setChecked(self.subtitle_speed_method == method_id)
+                action.triggered.connect(
+                    lambda checked, m=method_id: self.toggle_subtitle_speed_method(m)
+                )
+                speed_method_group.addAction(action)
+                speed_method_menu.addAction(action)
 
         # Add separator
         menu.addSeparator()
@@ -5337,6 +5395,7 @@ class abogen(QWidget):
             mlx_available = is_mlx_available()
         except ImportError:
             mlx_available = False
+            MLXQuantization = ()  # type: ignore
 
         if mlx_available:
             menu.addSeparator()
@@ -5346,35 +5405,36 @@ class abogen(QWidget):
             mlx_action.setCheckable(True)
             mlx_action.setChecked(self.use_mlx_backend)
             mlx_action.setToolTip(
-                "Use the MLX framework for faster TTS on Apple Silicon.\n"
-                "Falls back to PyTorch if MLX is unavailable."
+                "Use Apple Silicon MLX backend for faster inference.\n"
+                "Only available on Apple Silicon (M1/M2/M3/M4) Macs."
             )
             mlx_action.triggered.connect(lambda checked: self._toggle_mlx_backend(checked))
             menu.addAction(mlx_action)
 
             # MLX quantization submenu
             mlx_quant_menu = menu.addMenu("MLX model quantization")
-            mlx_quant_menu.setToolTip(
-                "Select the quantization level for the MLX Kokoro model.\n"
-                "Lower precision = faster inference but slightly lower quality."
-            )
-            mlx_quant_group = QActionGroup(self)
-            mlx_quant_group.setExclusive(True)
-
-            for quant in MLXQuantization:
-                label = f"{quant.display_label}\n  Speed: {quant.speed_description}  |  Quality: {quant.quality_description}"
-                action = QAction(quant.display_label, mlx_quant_menu)
-                action.setCheckable(True)
-                action.setChecked(self.mlx_quantization == quant.name)
-                action.setToolTip(
-                    f"Speed: {quant.speed_description}\nQuality: {quant.quality_description}"
+            if mlx_quant_menu is not None:
+                mlx_quant_menu.setToolTip(
+                    "Select the quantization level for the MLX Kokoro model.\n"
+                    "Lower precision = faster inference but slightly lower quality."
                 )
-                action.triggered.connect(lambda checked, q=quant: self._set_mlx_quantization(q))
-                mlx_quant_group.addAction(action)
-                mlx_quant_menu.addAction(action)
+                mlx_quant_group = QActionGroup(self)
+                mlx_quant_group.setExclusive(True)
 
-            # Enable/disable quantization menu based on MLX toggle
-            mlx_quant_menu.setEnabled(self.use_mlx_backend)
+                for quant in MLXQuantization:
+                    label = f"{quant.display_label}\n  Speed: {quant.speed_description}  |  Quality: {quant.quality_description}"
+                    action = QAction(quant.display_label, mlx_quant_menu)
+                    action.setCheckable(True)
+                    action.setChecked(self.mlx_quantization == quant.name)
+                    action.setToolTip(
+                        f"Speed: {quant.speed_description}\nQuality: {quant.quality_description}"
+                    )
+                    action.triggered.connect(lambda checked, q=quant: self._set_mlx_quantization(q))
+                    mlx_quant_group.addAction(action)
+                    mlx_quant_menu.addAction(action)
+
+                # Enable/disable quantization menu based on MLX toggle
+                mlx_quant_menu.setEnabled(self.use_mlx_backend)
 
         # Add "Pre-download models and voices for offline use" option
         predownload_action = QAction("Pre-download models and voices for offline use", self)

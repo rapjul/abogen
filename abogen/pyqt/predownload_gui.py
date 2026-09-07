@@ -11,7 +11,7 @@ import importlib.util
 from typing import ClassVar
 
 from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
-from PyQt6.QtGui import QPalette
+from PyQt6.QtGui import QCloseEvent, QPalette
 from PyQt6.QtWidgets import (
     QCheckBox,
     QDialog,
@@ -914,8 +914,9 @@ class PreDownloadDialog(QDialog):
             self.worker.wait(2000)
         self.accept()
 
-    def closeEvent(self, event) -> None:
+    def closeEvent(self, a0: QCloseEvent | None) -> None:
         if self.worker and self.worker.isRunning():
             self.worker.cancel()
             self.worker.wait(2000)
-        super().closeEvent(event)
+        if a0 is not None:
+            super().closeEvent(a0)

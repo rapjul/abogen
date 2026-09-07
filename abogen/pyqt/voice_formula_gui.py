@@ -4,9 +4,20 @@ import json
 import os
 import platform
 import re
+from typing import Any
 
-from PyQt6.QtCore import QPoint, QRect, QSize, Qt, QTimer
-from PyQt6.QtGui import QAction, QIcon, QPixmap
+from PyQt6.QtCore import QEvent, QObject, QPoint, QRect, QSize, Qt, QTimer
+from PyQt6.QtGui import (
+    QAction,
+    QCloseEvent,
+    QEnterEvent,
+    QIcon,
+    QKeyEvent,
+    QPixmap,
+    QResizeEvent,
+    QShowEvent,
+    QWheelEvent,
+)
 from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -19,6 +30,7 @@ from PyQt6.QtWidgets import (
     QInputDialog,
     QLabel,
     QLayout,
+    QLayoutItem,
     QListWidget,
     QListWidgetItem,
     QMenu,
@@ -86,37 +98,38 @@ class FlowLayout(QLayout):
         while item:
             item = self.takeAt(0)
 
-    def addItem(self, item):
-        self._item_list.append(item)
+    def addItem(self, a0: QLayoutItem | None) -> None:
+        if a0 is not None:
+            self._item_list.append(a0)
 
-    def count(self):
+    def count(self) -> int:
         return len(self._item_list)
 
-    def expandingDirections(self):
+    def expandingDirections(self) -> Qt.Orientation:
         return Qt.Orientation(0)
 
-    def hasHeightForWidth(self):
+    def hasHeightForWidth(self) -> bool:
         return True
 
-    def sizeHint(self):
+    def sizeHint(self) -> QSize:
         return self.minimumSize()
 
-    def itemAt(self, index):
+    def itemAt(self, index: int) -> QLayoutItem | None:
         if 0 <= index < len(self._item_list):
             return self._item_list[index]
         return None
 
-    def takeAt(self, index):
+    def takeAt(self, index: int) -> QLayoutItem | None:
         if 0 <= index < len(self._item_list):
             return self._item_list.pop(index)
         return None
 
-    def heightForWidth(self, width):
-        return self._do_layout(QRect(0, 0, width, 0), True)
+    def heightForWidth(self, a0: int) -> int:
+        return self._do_layout(QRect(0, 0, a0, 0), True)
 
-    def setGeometry(self, rect):
-        super().setGeometry(rect)
-        self._do_layout(rect, False)
+    def setGeometry(self, a0: QRect) -> None:
+        super().setGeometry(a0)
+        self._do_layout(a0, False)
 
     def minimumSize(self):
         size = QSize()
@@ -134,17 +147,21 @@ class FlowLayout(QLayout):
 
         for item in self._item_list:
             parent_widget = self.parentWidget()
-            style = parent_widget.style() if parent_widget is not None else self.style()
-            layout_spacing_x = style.layoutSpacing(
-                QSizePolicy.ControlType.PushButton,
-                QSizePolicy.ControlType.PushButton,
-                Qt.Orientation.Horizontal,
-            )
-            layout_spacing_y = style.layoutSpacing(
-                QSizePolicy.ControlType.PushButton,
-                QSizePolicy.ControlType.PushButton,
-                Qt.Orientation.Vertical,
-            )
+            style = parent_widget.style() if parent_widget is not None else None
+            if style is not None:
+                layout_spacing_x = style.layoutSpacing(
+                    QSizePolicy.ControlType.PushButton,
+                    QSizePolicy.ControlType.PushButton,
+                    Qt.Orientation.Horizontal,
+                )
+                layout_spacing_y = style.layoutSpacing(
+                    QSizePolicy.ControlType.PushButton,
+                    QSizePolicy.ControlType.PushButton,
+                    Qt.Orientation.Vertical,
+                )
+            else:
+                layout_spacing_x = 0
+                layout_spacing_y = 0
             space_x = spacing if spacing >= 0 else layout_spacing_x
             space_y = spacing if spacing >= 0 else layout_spacing_y
 
@@ -276,15 +293,18 @@ class VoiceMixer(QWidget):
         self.setLayout(layout)
         self.toggle_inputs()
 
-    def showEvent(self, event):
-        super().showEvent(event)
+    def showEvent(self, a0: QShowEvent | None) -> None:
+        if a0 is not None:
+            super().showEvent(a0)
         # Apply slider styling once when widget is shown and has access to parent
         if not self._slider_style_applied:
             self._slider_style_applied = True
 
             # Fix slider in Windows
             if platform.system() == "Windows":
-                appstyle = QApplication.instance().style().objectName().lower()
+                app: Any = QApplication.instance()
+                app_style = app.style() if (app is not None and hasattr(app, "style")) else None
+                appstyle = app_style.objectName().lower() if app_style is not None else ""
                 if appstyle != "windowsvista":
                     # Set custom groove color for disabled state using COLORS["GREY_BACKGROUND"]
                     self.slider.setStyleSheet(
@@ -299,10 +319,10 @@ class VoiceMixer(QWidget):
             else:
                 # Apply same fix for Light theme on non-Windows systems
                 # Get theme from parent window's config
-                parent_window = self.window()
+                parent_window: Any = self.window()
                 theme = "system"
                 while parent_window:
-                    if hasattr(parent_window, "config"):
+                    if hasattr(parent_window, "config") and isinstance(parent_window.config, dict):
                         theme = parent_window.config.get("theme", "system")
                         break
                     parent_window = parent_window.parent()
@@ -381,15 +401,20 @@ class HoverLabel(QLabel):
         self.delete_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.delete_button.hide()
 
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
+    def resizeEvent(self, a0: QResizeEvent | None) -> None:
+        if a0 is not None:
+            super().resizeEvent(a0)
         # Position the button in the top-right corner with a small margin
         self.delete_button.move(self.width() - 16, +0)
 
-    def enterEvent(self, event):
+    def enterEvent(self, event: QEnterEvent | None) -> None:
+        if event is not None:
+            super().enterEvent(event)
         self.delete_button.show()
 
-    def leaveEvent(self, event):
+    def leaveEvent(self, a0: QEvent | None) -> None:
+        if a0 is not None:
+            super().leaveEvent(a0)
         self.delete_button.hide()
 
 
@@ -470,7 +495,6 @@ class VoiceFormulaDialog(QDialog):
         profile_layout.addWidget(self.profile_list)
         self.profile_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.profile_list.customContextMenuRequested.connect(self.show_profile_context_menu)
-        self.profile_list.setItemWidget = self.profile_list.setItemWidget  # for type hints
         # Save and management buttons
         mgmt_layout = QVBoxLayout()
         self.btn_import_profiles = QPushButton("Import profile(s)")
@@ -555,7 +579,9 @@ class VoiceFormulaDialog(QDialog):
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.scroll_area.viewport().installEventFilter(self)
+        viewport = self.scroll_area.viewport()
+        if viewport is not None:
+            viewport.installEventFilter(self)
 
         self.voice_list_widget = QWidget()
         self.voice_list_layout = QHBoxLayout()
@@ -598,8 +624,9 @@ class VoiceFormulaDialog(QDialog):
         splitter.addWidget(mixer_widget)
         splitter.setStretchFactor(1, 1)
         # set as main layout
-        self.setLayout(QHBoxLayout())
-        self.layout().addWidget(splitter)
+        layout = QHBoxLayout()
+        layout.addWidget(splitter)
+        self.setLayout(layout)
 
         # Connect profile actions
         self.profile_list.currentRowChanged.connect(self.on_profile_selection_changed)
@@ -614,31 +641,32 @@ class VoiceFormulaDialog(QDialog):
         # Update profile colors on initialization to show status
         self.update_profile_list_colors()
 
-    def keyPressEvent(self, event):
-        # Bind Delete key to delete_profile when a profile is selected
-        if event.key() == Qt.Key.Key_Delete and self.profile_list.hasFocus():
-            item = self.profile_list.currentItem()
-            if item:
-                self.delete_profile(item)
-                return
-        super().keyPressEvent(event)
+    def keyPressEvent(self, a0: QKeyEvent | None) -> None:
+        if a0 is not None:
+            # Bind Delete key to delete_profile when a profile is selected
+            if a0.key() == Qt.Key.Key_Delete and self.profile_list.hasFocus():
+                item = self.profile_list.currentItem()
+                if item:
+                    self.delete_profile(item)
+                    return
+            super().keyPressEvent(a0)
 
     def _has_unsaved_changes(self):
         # Only return True if there are actually modified (yellow background) profiles
         for i in range(self.profile_list.count()):
             item = self.profile_list.item(i)
             # Only consider as unsaved if profile is marked dirty (yellow background)
-            if item.text().startswith("*"):
+            if item is not None and item.text().startswith("*"):
                 return True
         return False
 
     def _prompt_save_changes(self):
-        dirty_indices = [
-            i
-            for i in range(self.profile_list.count())
-            if self.profile_list.item(i).text().startswith("*")
-        ]
-        parent = self.parent()
+        dirty_indices = []
+        for i in range(self.profile_list.count()):
+            item = self.profile_list.item(i)
+            if item is not None and item.text().startswith("*"):
+                dirty_indices.append(i)
+        parent: Any = self.parent()
         if len(dirty_indices) > 1:
             msg = f"You have unsaved changes in {len(dirty_indices)} profiles. Do you want to save all?"
             ret = QMessageBox.question(
@@ -654,7 +682,10 @@ class VoiceFormulaDialog(QDialog):
                 # Save all using stored states
                 profiles = load_profiles()
                 for i in dirty_indices:
-                    name = self.profile_list.item(i).text().lstrip("*")
+                    item = self.profile_list.item(i)
+                    if item is None:
+                        continue
+                    name = item.text().lstrip("*")
                     state = self._profile_states.get(name)
                     if state is not None:
                         profiles[name] = state
@@ -670,8 +701,9 @@ class VoiceFormulaDialog(QDialog):
                 # clear markers
                 for i in dirty_indices:
                     item = self.profile_list.item(i)
-                    n = item.text().lstrip("*")
-                    item.setText(n)
+                    if item is not None:
+                        n = item.text().lstrip("*")
+                        item.setText(n)
                 self.update_profile_save_buttons()
                 self.update_profile_list_colors()
                 return True
@@ -680,9 +712,10 @@ class VoiceFormulaDialog(QDialog):
                 self._profile_states.clear()
                 for i in dirty_indices:
                     item = self.profile_list.item(i)
-                    n = item.text().lstrip("*")
-                    item.setText(n)
-                    self._profile_dirty[n] = False
+                    if item is not None:
+                        n = item.text().lstrip("*")
+                        item.setText(n)
+                        self._profile_dirty[n] = False
                 self.update_profile_save_buttons()
                 self.update_profile_list_colors()
                 # reload current profile
@@ -712,6 +745,8 @@ class VoiceFormulaDialog(QDialog):
             if ret == QMessageBox.StandardButton.Save:
                 for i in range(self.profile_list.count()):
                     item = self.profile_list.item(i)
+                    if item is None:
+                        continue
                     name = item.text().lstrip("*")
                     if (
                         self._profile_dirty.get(name, False)
@@ -727,6 +762,8 @@ class VoiceFormulaDialog(QDialog):
                 profiles = load_profiles()
                 for i in range(self.profile_list.count()):
                     item = self.profile_list.item(i)
+                    if item is None:
+                        continue
                     name = item.text().lstrip("*")
                     self._profile_dirty[name] = False
                     if item.text().startswith("*"):
@@ -895,8 +932,14 @@ class VoiceFormulaDialog(QDialog):
         for mixer in self.voice_mixers:
             mixer.checkbox.setChecked(False)
 
-    def eventFilter(self, source, event):
-        if source is self.scroll_area.viewport() and event.type() == event.Type.Wheel:
+    def eventFilter(self, a0: QObject | None, a1: QEvent | None) -> bool:
+        if (
+            a0 is not None
+            and a1 is not None
+            and a0 is self.scroll_area.viewport()
+            and a1.type() == QEvent.Type.Wheel
+            and isinstance(a1, QWheelEvent)
+        ):
             # Skip if over an enabled slider
             if any(
                 mixer.slider.underMouse() and mixer.slider.isEnabled()
@@ -906,10 +949,11 @@ class VoiceFormulaDialog(QDialog):
 
             # Horizontal scrolling
             horiz_bar = self.scroll_area.horizontalScrollBar()
-            delta = -120 if event.angleDelta().y() > 0 else 120
-            horiz_bar.setValue(horiz_bar.value() + delta)
+            if horiz_bar is not None:
+                delta = -120 if a1.angleDelta().y() > 0 else 120
+                horiz_bar.setValue(horiz_bar.value() + delta)
             return True
-        return super().eventFilter(source, event)
+        return super().eventFilter(a0, a1) if a0 is not None and a1 is not None else False
 
     def load_profile_state(self, profile_name):
         name = profile_name.lstrip("*")
@@ -976,7 +1020,7 @@ class VoiceFormulaDialog(QDialog):
             # Remove * marker
             for i in range(self.profile_list.count()):
                 item = self.profile_list.item(i)
-                if item.text().lstrip("*") == name:
+                if item is not None and item.text().lstrip("*") == name:
                     item.setText(name)
                     break
             self.update_profile_list_colors()
@@ -990,6 +1034,8 @@ class VoiceFormulaDialog(QDialog):
         zero = []
         for i in range(self.profile_list.count()):
             item = self.profile_list.item(i)
+            if item is None:
+                continue
             name = item.text().lstrip("*")
             weights = profiles.get(name, {}).get("voices", [])
             total = 0
@@ -1017,7 +1063,7 @@ class VoiceFormulaDialog(QDialog):
             for i, name in reversed(zero):
                 self.profile_list.takeItem(i)
                 delete_profile(name)
-            parent = self.parent()
+            parent: Any = self.parent()
             if hasattr(parent, "populate_profiles_in_voice_combo"):
                 parent.populate_profiles_in_voice_combo()
             self.update_profile_list_colors()
@@ -1033,7 +1079,7 @@ class VoiceFormulaDialog(QDialog):
         if self.profile_list.count() == 0:
             # Update subtitle_mode to match combo before closing
             if self.subtitle_combo:
-                parent = self.parent()
+                parent: Any = self.parent()
                 if parent is not None:
                     parent.subtitle_mode = self.subtitle_combo.currentText()
             self.reject()
@@ -1067,7 +1113,7 @@ class VoiceFormulaDialog(QDialog):
 
     def reject(self):
         # Restore parent's profile/mix state on cancel
-        parent = self.parent()
+        parent: Any = self.parent()
         if parent is not None:
             if hasattr(self, "_original_profile_name"):
                 parent.selected_profile_name = self._original_profile_name
@@ -1080,9 +1126,9 @@ class VoiceFormulaDialog(QDialog):
             return
         super().reject()
 
-    def closeEvent(self, event):
+    def closeEvent(self, a0: QCloseEvent | None) -> None:
         # Restore parent's profile/mix state on close
-        parent = self.parent()
+        parent: Any = self.parent()
         if parent is not None:
             if hasattr(self, "_original_profile_name"):
                 parent.selected_profile_name = self._original_profile_name
@@ -1090,12 +1136,15 @@ class VoiceFormulaDialog(QDialog):
                 parent.mixed_voice_state = self._original_mixed_voice_state
         # Prompt to save if unsaved changes, then check for zero-weight error after save
         if self._has_unsaved_changes() and not self._prompt_save_changes():
-            event.ignore()
+            if a0 is not None:
+                a0.ignore()
             return
         if self._handle_zero_weight_profiles():
-            event.ignore()
+            if a0 is not None:
+                a0.ignore()
             return
-        super().closeEvent(event)
+        if a0 is not None:
+            super().closeEvent(a0)
 
     def _parse_rgba_to_qcolor(self, rgba_str):
         from PyQt6.QtCore import Qt
@@ -1143,9 +1192,11 @@ class VoiceFormulaDialog(QDialog):
                 continue
             profiles = load_profiles()
             # Remove 'New profile' placeholder if not persisted in JSON
+            first_item = self.profile_list.item(0)
             if (
                 self.profile_list.count() == 1
-                and self.profile_list.item(0).text() == "New profile"
+                and first_item is not None
+                and first_item.text() == "New profile"
                 and "New profile" not in profiles
             ):
                 self.profile_list.takeItem(0)
@@ -1167,7 +1218,7 @@ class VoiceFormulaDialog(QDialog):
             for vm in self.voice_mixers:
                 vm.checkbox.setChecked(False)
                 vm.spin_box.setValue(1.0)
-            parent = self.parent()
+            parent: Any = self.parent()
             if hasattr(parent, "populate_profiles_in_voice_combo"):
                 parent.populate_profiles_in_voice_combo()
             break
@@ -1291,7 +1342,7 @@ class VoiceFormulaDialog(QDialog):
                 )
             if self.profile_list.count() > 0:
                 self.profile_list.setCurrentRow(0)
-            parent = self.parent()
+            parent: Any = self.parent()
             if hasattr(parent, "populate_profiles_in_voice_combo"):
                 parent.populate_profiles_in_voice_combo()
             self._virtual_new_profile = False
@@ -1311,7 +1362,13 @@ class VoiceFormulaDialog(QDialog):
         menu.addAction(dup_act)
         menu.addAction(export_act)
         menu.addAction(delete_act)
-        act = menu.exec(self.profile_list.viewport().mapToGlobal(pos))
+        viewport = self.profile_list.viewport()
+        global_pos = (
+            viewport.mapToGlobal(pos)
+            if viewport is not None
+            else self.profile_list.mapToGlobal(pos)
+        )
+        act = menu.exec(global_pos)
         if act == rename_act:
             self.rename_profile(item)
         elif act == delete_act:
@@ -1413,7 +1470,7 @@ class VoiceFormulaDialog(QDialog):
                 if self.current_profile == old:
                     self.current_profile = new
 
-            parent = self.parent()
+            parent: Any = self.parent()
             if hasattr(parent, "populate_profiles_in_voice_combo"):
                 parent.populate_profiles_in_voice_combo()
             break
@@ -1440,7 +1497,7 @@ class VoiceFormulaDialog(QDialog):
             delete_profile(name)
             row = self.profile_list.row(item)
             self.profile_list.takeItem(row)
-            parent = self.parent()
+            parent: Any = self.parent()
             if hasattr(parent, "populate_profiles_in_voice_combo"):
                 parent.populate_profiles_in_voice_combo()
         self.update_profile_save_buttons()
@@ -1466,7 +1523,7 @@ class VoiceFormulaDialog(QDialog):
         self.profile_list.addItem(
             QListWidgetItem(QIcon(get_resource_path("abogen.assets", "profile.png")), new)
         )
-        parent = self.parent()
+        parent: Any = self.parent()
         if hasattr(parent, "populate_profiles_in_voice_combo"):
             parent.populate_profiles_in_voice_combo()
         self.update_profile_save_buttons()
@@ -1475,10 +1532,14 @@ class VoiceFormulaDialog(QDialog):
     def update_profile_save_buttons(self):
         # Remove all save buttons first
         for i in range(self.profile_list.count()):
-            self.profile_list.setItemWidget(self.profile_list.item(i), None)
+            item = self.profile_list.item(i)
+            if item is not None:
+                self.profile_list.setItemWidget(item, None)
         # Add save button to dirty profiles
         for i in range(self.profile_list.count()):
             item = self.profile_list.item(i)
+            if item is None:
+                continue
             name = item.text().lstrip("*")
             if item.text().startswith("*"):
                 widget = SaveButtonWidget(self.profile_list, name, self.save_profile_by_name)
@@ -1491,6 +1552,8 @@ class VoiceFormulaDialog(QDialog):
         profiles = self._cached_profiles
         for i in range(self.profile_list.count()):
             item = self.profile_list.item(i)
+            if item is None:
+                continue
             name = item.text().lstrip("*")
             if self._virtual_new_profile and name == "New profile" or item.text().startswith("*"):
                 color = self._parse_rgba_to_qcolor(COLORS.get("YELLOW_BACKGROUND"))
@@ -1520,14 +1583,17 @@ class VoiceFormulaDialog(QDialog):
         self.btn_preview_mix.setEnabled(False)
         self.btn_preview_mix.setText("Loading...")
         self._loading = True
-        parent = self.parent()
+        parent: Any = self.parent()
         if parent and hasattr(parent, "preview_voice"):
             # Apply mixed voices and selected language
             parent.mixed_voice_state = self.get_selected_voices()
             parent.selected_profile_name = None
             lang = self.language_combo.currentData()
             parent.selected_lang = lang
-            parent.subtitle_combo.setEnabled(lang in SUPPORTED_LANGUAGES_FOR_SUBTITLE_GENERATION)
+            if hasattr(parent, "subtitle_combo") and parent.subtitle_combo is not None:
+                parent.subtitle_combo.setEnabled(
+                    lang in SUPPORTED_LANGUAGES_FOR_SUBTITLE_GENERATION
+                )
             # Reset start flag and trigger preview
             self._started = False
             parent.preview_voice()
