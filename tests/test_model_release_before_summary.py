@@ -2,14 +2,15 @@ from __future__ import annotations
 
 import importlib
 import re
+from pathlib import Path
 
 gui_module = importlib.import_module("abogen.pyqt.gui")
 
 
-def _read_gui_source():
+def _read_gui_source() -> str:
     path = gui_module.__file__
-    with open(path, "r", encoding="utf-8") as fh:
-        return fh.read()
+    assert path is not None
+    return Path(path).read_text(encoding="utf-8")
 
 
 def test_source_has_purge_before_completed():

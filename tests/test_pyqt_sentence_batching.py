@@ -42,7 +42,7 @@ def _make_worker() -> ConversionThread:
     worker.tts_batch_target_floor_chars = 40
     worker.tts_batch_max_floor_chars = 60
     worker.use_sentence_char_batching = True
-    worker.log_updated = _SignalStub()
+    setattr(worker, "log_updated", _SignalStub())
     return worker
 
 
@@ -99,7 +99,7 @@ def test_iter_tts_results_fallback_retries_failed_batch_with_split_pattern() -> 
     assert call_patterns[1] == "\\n"
     assert any(
         isinstance(call, tuple) and "Sentence-batch synth failed" in str(call[0])
-        for call in worker.log_updated.calls
+        for call in getattr(worker.log_updated, "calls", [])
     )
 
 
@@ -172,7 +172,7 @@ def test_auto_shrink_triggers_after_repeated_batch_failures() -> None:
     assert 0 <= worker.batch_failure_count < worker.batch_shrink_failure_threshold
     assert any(
         isinstance(call, tuple) and "Auto-shrunk batch sizes" in str(call[0])
-        for call in worker.log_updated.calls
+        for call in getattr(worker.log_updated, "calls", [])
     )
 
 
@@ -255,7 +255,7 @@ def test_apply_device_specific_defaults_mps_low_memory_tier() -> None:
     worker.tts_batch_min_chars = worker.DEFAULT_TTS_BATCH_MIN_CHARS
     worker.tts_batch_target_chars = worker.DEFAULT_TTS_BATCH_TARGET_CHARS
     worker.tts_batch_max_chars = worker.DEFAULT_TTS_BATCH_MAX_CHARS
-    worker._get_total_memory_gb = lambda: 16
+    setattr(worker, "_get_total_memory_gb", lambda: 16)
 
     worker._apply_device_specific_batch_defaults("mps")
 
@@ -275,7 +275,7 @@ def test_apply_device_specific_defaults_mps_high_memory_tier() -> None:
     worker.tts_batch_min_chars = worker.DEFAULT_TTS_BATCH_MIN_CHARS
     worker.tts_batch_target_chars = worker.DEFAULT_TTS_BATCH_TARGET_CHARS
     worker.tts_batch_max_chars = worker.DEFAULT_TTS_BATCH_MAX_CHARS
-    worker._get_total_memory_gb = lambda: 64
+    setattr(worker, "_get_total_memory_gb", lambda: 64)
 
     worker._apply_device_specific_batch_defaults("mps")
 

@@ -32,7 +32,7 @@ def test_supertonic_pipeline_strips_unsupported_characters_and_retries():
     pipeline.sample_rate = 24000
     pipeline.total_steps = 5
     pipeline.max_chunk_length = 1000
-    pipeline._tts = _DummyTTS()
+    setattr(pipeline, "_tts", _DummyTTS())
 
     segs = list(pipeline("Hello • world", voice="M1", speed=1.0))
     assert len(segs) == 1
@@ -47,7 +47,7 @@ def test_supertonic_pipeline_drops_chunk_if_only_unsupported_characters():
     pipeline.sample_rate = 24000
     pipeline.total_steps = 5
     pipeline.max_chunk_length = 1000
-    pipeline._tts = _DummyTTS()
+    setattr(pipeline, "_tts", _DummyTTS())
 
     segs = list(pipeline("•", voice="M1", speed=1.0))
     assert segs == []

@@ -1151,7 +1151,7 @@ class ConversionThread(QThread):
         self.start_time = start_time  # Store start_time
         self.total_char_count = total_char_count  # Use passed total character count
         self.processed_char_count = 0  # Initialize processed character count
-        self.display_path = None  # Add variable for display path
+        self.display_path: str | None = None  # Add variable for display path
         self.save_base_path = save_base_path  # Store the save base path
         self.chunk_suffix = chunk_suffix  # Store chunk suffix if splitting into chunks
         self.ffmpeg_proc = None

@@ -83,7 +83,7 @@ def _make_run_worker(
     merge_chapters_at_end: bool,
     subtitle_speed_method: str = "tts",
     use_silent_gaps: bool = False,
-    kpipeline_class=_StopAfterConfigPipeline,
+    kpipeline_class: Any = _StopAfterConfigPipeline,
 ) -> ConversionThread:
     worker = ConversionThread(
         file_name=file_name,
@@ -115,8 +115,8 @@ def _make_run_worker(
     worker.save_chapters_separately = save_chapters_separately
     worker.merge_chapters_at_end = merge_chapters_at_end
     worker.separate_chapters_format = "wav"
-    worker.log_updated = _SignalStub()
-    worker.conversion_finished = _SignalStub()
+    setattr(worker, "log_updated", _SignalStub())
+    setattr(worker, "conversion_finished", _SignalStub())
     return worker
 
 
@@ -127,7 +127,8 @@ def _run_and_collect_logs(monkeypatch, worker: ConversionThread) -> str:
         lambda _callback: None,
     )
     worker.run()
-    return "\n".join(worker.log_updated.messages)
+    messages: list[str] = getattr(worker.log_updated, "messages", [])
+    return "\n".join(messages)
 
 
 def test_pyqt_format_metadata_tags_includes_extended_epub_fields() -> None:
@@ -533,9 +534,10 @@ def test_pyqt_write_m4b_mp4_atoms_writes_text_freeform_and_cover(monkeypatch) ->
     class _FakeMP4Cover(bytes):
         FORMAT_PNG = 14
         FORMAT_JPEG = 13
+        imageformat: int | None
 
         def __new__(cls, data, imageformat=None):
-            obj = bytes.__new__(cls, data)
+            obj = super().__new__(cls, data)
             obj.imageformat = imageformat
             return obj
 
@@ -809,10 +811,10 @@ def test_run_routes_subtitle_input_to_subtitle_processor(monkeypatch) -> None:
 
     calls = []
 
-    def _process_subtitle_file_stub(_tts, base_path, is_timestamp_text=False):
+    def _process_subtitle_file_stub(tts, base_path, is_timestamp_text=False):
         calls.append((base_path, is_timestamp_text))
 
-    worker._process_subtitle_file = _process_subtitle_file_stub
+    setattr(worker, "_process_subtitle_file", _process_subtitle_file_stub)
 
     logs = _run_and_collect_logs(monkeypatch, worker)
 
@@ -833,10 +835,10 @@ def test_run_routes_timestamp_text_to_subtitle_processor(monkeypatch) -> None:
 
     calls = []
 
-    def _process_subtitle_file_stub(_tts, base_path, is_timestamp_text=False):
+    def _process_subtitle_file_stub(tts, base_path, is_timestamp_text=False):
         calls.append((base_path, is_timestamp_text))
 
-    worker._process_subtitle_file = _process_subtitle_file_stub
+    setattr(worker, "_process_subtitle_file", _process_subtitle_file_stub)
     worker._timestamp_response = True
     worker._timestamp_response_event.set()
 
@@ -854,7 +856,8 @@ def test_run_routes_timestamp_text_to_subtitle_processor(monkeypatch) -> None:
 
 def test_await_timestamp_processing_choice_returns_user_choice_and_clears_event() -> None:
     worker = ConversionThread.__new__(ConversionThread)
-    worker.chapters_detected = _SignalStub()
+    signal_stub = _SignalStub()
+    setattr(worker, "chapters_detected", signal_stub)
     worker.cancel_requested = False
     worker._timestamp_response_event = threading.Event()
     worker._timestamp_response = True
@@ -863,14 +866,15 @@ def test_await_timestamp_processing_choice_returns_user_choice_and_clears_event(
     decision = worker._await_timestamp_processing_choice()
 
     assert decision is True
-    assert worker.chapters_detected.messages == ["-1"]
+    assert signal_stub.messages == ["-1"]
     assert worker._timestamp_response_event.is_set() is False
     assert "_timestamp_response" not in worker.__dict__
 
 
 def test_await_timestamp_processing_choice_returns_none_when_cancelled() -> None:
     worker = ConversionThread.__new__(ConversionThread)
-    worker.chapters_detected = _SignalStub()
+    signal_stub = _SignalStub()
+    setattr(worker, "chapters_detected", signal_stub)
     worker.cancel_requested = True
     worker._timestamp_response_event = threading.Event()
     worker._timestamp_response = True
@@ -879,12 +883,13 @@ def test_await_timestamp_processing_choice_returns_none_when_cancelled() -> None
     decision = worker._await_timestamp_processing_choice()
 
     assert decision is None
-    assert worker.chapters_detected.messages == ["-1"]
+    assert signal_stub.messages == ["-1"]
 
 
 def test_await_timestamp_processing_choice_can_return_false() -> None:
     worker = ConversionThread.__new__(ConversionThread)
-    worker.chapters_detected = _SignalStub()
+    signal_stub = _SignalStub()
+    setattr(worker, "chapters_detected", signal_stub)
     worker.cancel_requested = False
     worker._timestamp_response_event = threading.Event()
     worker._timestamp_response = False
@@ -893,7 +898,7 @@ def test_await_timestamp_processing_choice_can_return_false() -> None:
     decision = worker._await_timestamp_processing_choice()
 
     assert decision is False
-    assert worker.chapters_detected.messages == ["-1"]
+    assert signal_stub.messages == ["-1"]
 
 
 def test_resolve_run_paths_queue_mode_prefers_save_base_path() -> None:

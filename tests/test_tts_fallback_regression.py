@@ -38,23 +38,23 @@ def _make_worker() -> ConversionThread:
     """Helper to create a ConversionThread worker for testing."""
     worker = ConversionThread.__new__(ConversionThread)
     worker.use_sentence_char_batching = True
-    worker.log_updated = _SignalStub()
+    setattr(worker, "log_updated", _SignalStub())
     worker.batch_failure_count = 0
     worker.batch_consecutive_successes = 0
     worker.batch_shrink_cooldown_remaining = 0
 
     # Mocking required methods and attributes used in fallback logic
-    worker._sentence_aware_char_batches = lambda text: [text]
-    worker._is_batch_shrink_eligible_exception = lambda exc: True
-    worker._auto_shrink_batch_sizes_if_needed = lambda: None
-    worker._auto_grow_batch_sizes_if_eligible = lambda: None
+    setattr(worker, "_sentence_aware_char_batches", lambda text: [text])
+    setattr(worker, "_is_batch_shrink_eligible_exception", lambda exc: True)
+    setattr(worker, "_auto_shrink_batch_sizes_if_needed", lambda: None)
+    setattr(worker, "_auto_grow_batch_sizes_if_eligible", lambda: None)
 
     # Mocking _iter_tts_results_for_segments to call tts directly
-    def mock_iter_tts_for_segments(tts, segments, voice, speed, pattern):
+    def mock_iter_tts_for_segments(tts, segments, loaded_voice, speed, split_pattern):
         for s in segments:
-            yield from tts(s, voice=voice, speed=speed, split_pattern=pattern)
+            yield from tts(s, voice=loaded_voice, speed=speed, split_pattern=split_pattern)
 
-    worker._iter_tts_results_for_segments = mock_iter_tts_for_segments
+    setattr(worker, "_iter_tts_results_for_segments", mock_iter_tts_for_segments)
 
     return worker
 
@@ -102,7 +102,7 @@ def test_fallback_prevents_duplication_on_partial_failure() -> None:
     # Verify partial batch log message was emitted to UI
     assert any(
         isinstance(call, tuple) and "Batch failed after 1 results" in str(call[0])
-        for call in worker.log_updated.calls
+        for call in getattr(worker.log_updated, "calls", [])
     )
 
 
@@ -137,5 +137,5 @@ def test_fallback_full_retry_when_no_results_yielded() -> None:
     # Verify standard fallback log message was emitted
     assert any(
         isinstance(call, tuple) and "Sentence-batch synth failed" in str(call[0])
-        for call in worker.log_updated.calls
+        for call in getattr(worker.log_updated, "calls", [])
     )

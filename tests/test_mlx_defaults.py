@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import sys
 import unittest
-from typing import Any
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 # Save original modules to restore later and prevent polluting other tests
@@ -38,10 +38,10 @@ class FakePyQt:
         return MagicMock()
 
 
-sys.modules["PyQt6"] = FakePyQt()
-sys.modules["PyQt6.QtCore"] = FakePyQt()
-sys.modules["PyQt6.QtGui"] = FakePyQt()
-sys.modules["PyQt6.QtWidgets"] = FakePyQt()
+sys.modules["PyQt6"] = cast(Any, FakePyQt())
+sys.modules["PyQt6.QtCore"] = cast(Any, FakePyQt())
+sys.modules["PyQt6.QtGui"] = cast(Any, FakePyQt())
+sys.modules["PyQt6.QtWidgets"] = cast(Any, FakePyQt())
 sys.modules["kokoro"] = MagicMock()
 sys.modules["soundfile"] = MagicMock()
 sys.modules["static_ffmpeg"] = MagicMock()
@@ -89,7 +89,7 @@ class TestMLXDefaults(unittest.TestCase):
         mock_is_mlx.return_value = True
 
         class DummyThread:
-            pass
+            use_mlx_backend: bool
 
         thread = DummyThread()
         # This matches the code in conversion.py

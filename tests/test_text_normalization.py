@@ -427,7 +427,7 @@ def test_currency_magnitude():
         ("$100", "one hundred dollars"),
     ]
 
-    settings = {
+    settings: dict[str, object] = {
         "normalization_numbers": True,
         "normalization_currency": True,
         "normalization_apostrophe_mode": "spacy",

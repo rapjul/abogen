@@ -20,6 +20,7 @@ import tempfile
 import unittest
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -49,7 +50,7 @@ class _FakeMLXResult:
     """Fake result object returned by ``model.generate``."""
 
     graphemes: str
-    audio: object  # Will be a list; the pipeline converts to numpy float32.
+    audio: Any  # Will be a list; the pipeline converts to numpy float32.
     tokens: object = None
 
 
@@ -237,7 +238,7 @@ class TestMLXKokoroPipelineUnavailable(unittest.TestCase):
 class TestMLXKokoroPipelineCall(unittest.TestCase):
     """Test :class:`MLXKokoroPipeline.__call__` behaviour."""
 
-    def _make_pipeline(self):
+    def _make_pipeline(self) -> tuple[Any, MagicMock, _FakeMLXResult]:
         """Create an :class:`MLXKokoroPipeline` with a mocked underlying model.
 
         Returns:

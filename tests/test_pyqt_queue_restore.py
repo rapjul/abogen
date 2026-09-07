@@ -17,7 +17,7 @@ if "static_ffmpeg" not in sys.modules:
     sys.modules["static_ffmpeg"] = types.ModuleType("static_ffmpeg")
 
 gui_module = importlib.import_module("abogen.pyqt.gui")
-QueuedItem = importlib.import_module("abogen.pyqt.queued_item").QueuedItem
+from abogen.pyqt.queued_item import QueuedItem
 
 
 class _MockDialog:
@@ -80,8 +80,8 @@ def test_save_and_restore_queue_workflow(tmp_path: Path, monkeypatch) -> None:
     window.queue_run_active = True
 
     # Stub logger and other dependencies used in check_restore_queue/save_current_queue_state
-    window.update_log = lambda msg: None
-    window.enable_disable_queue_buttons = lambda: None
+    setattr(window, "update_log", lambda msg: None)
+    setattr(window, "enable_disable_queue_buttons", lambda: None)
 
     # 1. Save state
     window.save_current_queue_state()
@@ -120,8 +120,7 @@ def test_queue_completion_clears_queue(tmp_path: Path, monkeypatch) -> None:
     # Mock get_user_settings_dir
     monkeypatch.setattr("abogen.utils.get_user_settings_dir", lambda: str(settings_dir))
 
-    # Create window instance stub
-    window: gui_module.abogen = gui_module.abogen.__new__(gui_module.abogen)
+    window = gui_module.abogen.__new__(gui_module.abogen)
 
     file_a = tmp_path / "test_file_a.txt"
     file_a.write_text("Hello A")
@@ -151,8 +150,8 @@ def test_queue_completion_clears_queue(tmp_path: Path, monkeypatch) -> None:
         nonlocal enable_disable_called
         enable_disable_called = True
 
-    window.save_current_queue_state = mock_save_current_queue_state
-    window.enable_disable_queue_buttons = mock_enable_disable_queue_buttons
+    setattr(window, "save_current_queue_state", mock_save_current_queue_state)
+    setattr(window, "enable_disable_queue_buttons", mock_enable_disable_queue_buttons)
 
     # Execute the queue_item_conversion_finished, incrementing current_queue_index to 1 (which equals len(queued_items))
     window.queue_item_conversion_finished()
