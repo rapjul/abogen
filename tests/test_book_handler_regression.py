@@ -180,7 +180,7 @@ class TestBookHandlerRegression(unittest.TestCase):
             # Full rule should be present in tooltip
             self.assertEqual(
                 dialog.fr_error_label.toolTip(),
-                "Saved substitution: 'Very long find term that exceeds the standard label width constraint' ➔ 'Replacement snippet'",
+                "Saved substitution: 'Very long find term that exceeds the standard label width constraint' ➔ 'Replacement snippet' [0 matches in book]",
             )
 
             # 4. Test saving a rule with empty replacement (removal)
@@ -193,7 +193,83 @@ class TestBookHandlerRegression(unittest.TestCase):
             self.assertIn("(remove text)", removal_label)
             self.assertEqual(
                 dialog.fr_error_label.toolTip(),
-                "Saved text removal: 'Author note to eliminate' ➔ (remove text)",
+                "Saved text removal: 'Author note to eliminate' ➔ (remove text) [0 matches in book]",
+            )
+
+        dialog.close()
+
+    def test_save_substitution_applies_across_all_chapters(self) -> None:
+        """Test that saving a substitution applies to all loaded chapters in memory."""
+        dialog = HandlerDialog(self.sample_epub_path)
+        if (
+            hasattr(dialog, "_loader_thread")
+            and dialog._loader_thread is not None
+            and dialog._loader_thread.isRunning()
+        ):
+            dialog._loader_thread.wait()
+
+        # Set up mock chapter contents
+        dialog.content_texts["ch1"] = "Hello world in chapter one. TargetWord is here."
+        dialog.content_lengths["ch1"] = len(dialog.content_texts["ch1"])
+
+        dialog.content_texts["ch2"] = "TargetWord appears twice: TargetWord."
+        dialog.content_lengths["ch2"] = len(dialog.content_texts["ch2"])
+
+        dialog.content_texts["ch3"] = "Nothing to change here."
+        dialog.content_lengths["ch3"] = len(dialog.content_texts["ch3"])
+
+        dialog._current_identifier = "ch1"
+        dialog.previewEdit.setPlainText(dialog.content_texts["ch1"])
+
+        mock_cfg: dict[str, Any] = {
+            "word_substitutions_list": "",
+            "word_substitutions_enabled": False,
+        }
+
+        with (
+            patch("abogen.utils.load_config", return_value=mock_cfg),
+            patch("abogen.utils.save_config"),
+        ):
+            dialog.fr_find_input.setText("TargetWord")
+            dialog.fr_replace_input.setText("ReplacementWord")
+            dialog._save_to_word_substitutions()
+
+            # Verify in-memory replacement across chapters
+            self.assertEqual(
+                dialog.content_texts["ch1"],
+                "Hello world in chapter one. ReplacementWord is here.",
+            )
+            self.assertEqual(
+                dialog.content_lengths["ch1"],
+                len(dialog.content_texts["ch1"]),
+            )
+
+            self.assertEqual(
+                dialog.content_texts["ch2"],
+                "ReplacementWord appears twice: ReplacementWord.",
+            )
+            self.assertEqual(
+                dialog.content_lengths["ch2"],
+                len(dialog.content_texts["ch2"]),
+            )
+
+            self.assertEqual(
+                dialog.content_texts["ch3"],
+                "Nothing to change here.",
+            )
+
+            # Verify active chapter preview was updated
+            self.assertEqual(
+                dialog.previewEdit.toPlainText(),
+                dialog.content_texts["ch1"],
+            )
+
+            # Verify status label feedback shows chapter and replacement count
+            status_text: str = dialog.fr_error_label.text()
+            self.assertIn("applied to 2 chapters, 3 replacements", status_text)
+            self.assertIn(
+                "[applied to 2 chapters, 3 replacements]",
+                dialog.fr_error_label.toolTip(),
             )
 
         dialog.close()

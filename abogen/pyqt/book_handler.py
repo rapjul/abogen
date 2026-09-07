@@ -1528,6 +1528,58 @@ class HandlerDialog(QDialog):
             return f"{collapsed[: max_length - 1]}…"
         return collapsed
 
+    def _apply_replacement_to_all_chapters(
+        self, find_text: str, replace_text: str
+    ) -> tuple[int, int]:
+        """Apply a find and replace substitution across all loaded chapters in memory.
+
+        Args:
+            find_text: The search term or regular expression pattern.
+            replace_text: The replacement text string.
+
+        Returns:
+            A tuple of (modified_chapters_count, total_replacements_count).
+        """
+        use_regex = self.fr_use_regex_cb.isChecked()
+        match_case = self.fr_match_case_cb.isChecked()
+        whole_word = self.fr_whole_word_cb.isChecked()
+
+        try:
+            if use_regex:
+                flags = 0 if match_case else re.IGNORECASE
+                pattern = re.compile(find_text, flags)
+            else:
+                pattern_str = re.escape(find_text)
+                if whole_word:
+                    pattern_str = rf"\b{pattern_str}\b"
+                flags = 0 if match_case else re.IGNORECASE
+                pattern = re.compile(pattern_str, flags)
+        except Exception:
+            return 0, 0
+
+        modified_chapters = 0
+        total_replacements = 0
+
+        for identifier, text in list(self.content_texts.items()):
+            if identifier == "info:bookinfo" or not isinstance(text, str):
+                continue
+
+            new_text, count = pattern.subn(replace_text, text)
+            if count > 0:
+                modified_chapters += 1
+                total_replacements += count
+                self.content_texts[identifier] = new_text
+                self.content_lengths[identifier] = len(new_text)
+
+                if identifier == self._current_identifier:
+                    self.previewEdit.setPlainText(new_text)
+                    current_item = self.treeWidget.currentItem()
+                    self._update_chapter_info_header(current_item, new_text)
+                    self._update_count_label()
+                    self._search_matches()
+
+        return modified_chapters, total_replacements
+
     def _save_to_word_substitutions(self) -> None:
         """Save the current find & replace pair into global Word Substitutions."""
         raw_find = self.fr_find_input.text().strip()
@@ -1549,6 +1601,33 @@ class HandlerDialog(QDialog):
         disp_replace = self._truncate_substitution_text(replace_text, max_length=40)
         escaped_find = html.escape(disp_find)
         escaped_replace = html.escape(disp_replace)
+
+        # Apply the rule in-memory across all loaded chapters in the current book
+        modified_chapters, total_replacements = self._apply_replacement_to_all_chapters(
+            find_text, replace_text
+        )
+
+        if modified_chapters > 1:
+            scope_desc = (
+                f" (applied to {modified_chapters} chapters, {total_replacements} replacements)"
+            )
+            tooltip_scope = (
+                f" [applied to {modified_chapters} chapters, {total_replacements} replacements]"
+            )
+        elif modified_chapters == 1:
+            scope_desc = (
+                f" (applied to 1 chapter, {total_replacements} replacements)"
+                if total_replacements > 1
+                else " (applied to 1 chapter)"
+            )
+            tooltip_scope = (
+                f" [applied to 1 chapter, {total_replacements} replacements]"
+                if total_replacements > 1
+                else " [applied to 1 chapter]"
+            )
+        else:
+            scope_desc = " (0 matches in book)"
+            tooltip_scope = " [0 matches in book]"
 
         try:
             from abogen.utils import load_config, save_config
@@ -1578,16 +1657,20 @@ class HandlerDialog(QDialog):
                 self.fr_error_label.setStyleSheet("QLabel { font-size: 11px; max-width: 800px; }")
                 self.fr_error_label.setText(
                     f'<span style="color: #28a745; font-weight: bold;">{action_text}</span> '
-                    f'<span style="font-weight: normal;">‘{escaped_find}’ ➔ {target_disp}</span>'
+                    f'<span style="font-weight: normal;">‘{escaped_find}’ ➔ {target_disp}{scope_desc}</span>'
                 )
-                self.fr_error_label.setToolTip(f"{action_text} '{find_text}' ➔ {target_tip}")
+                self.fr_error_label.setToolTip(
+                    f"{action_text} '{find_text}' ➔ {target_tip}{tooltip_scope}"
+                )
             else:
                 self.fr_error_label.setStyleSheet("QLabel { font-size: 11px; max-width: 800px; }")
                 self.fr_error_label.setText(
                     f'<span style="color: #888; font-style: italic; font-weight: bold;">{dup_action}</span> '
-                    f'<span style="font-style: normal; font-weight: normal;">‘{escaped_find}’ ➔ {target_disp}</span>'
+                    f'<span style="font-style: normal; font-weight: normal;">‘{escaped_find}’ ➔ {target_disp}{scope_desc}</span>'
                 )
-                self.fr_error_label.setToolTip(f"{dup_action} '{find_text}' ➔ {target_tip}")
+                self.fr_error_label.setToolTip(
+                    f"{dup_action} '{find_text}' ➔ {target_tip}{tooltip_scope}"
+                )
         except Exception as e:
             self.fr_error_label.setStyleSheet("QLabel { font-size: 11px; max-width: 800px; }")
             escaped_err = html.escape(str(e))
