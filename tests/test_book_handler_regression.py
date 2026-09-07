@@ -136,9 +136,11 @@ class TestBookHandlerRegression(unittest.TestCase):
         ):
             dialog._loader_thread.wait()
 
-        # 1. Verify widget layout properties on fr_error_label
+        # 1. Verify widget layout properties on fr_error_label and chapter_stats_label
         self.assertTrue(dialog.fr_error_label.wordWrap())
         self.assertLessEqual(dialog.fr_error_label.maximumWidth(), 850)
+        self.assertTrue(dialog.chapter_stats_label.wordWrap())
+        self.assertLessEqual(dialog.chapter_stats_label.maximumWidth(), 850)
 
         # 2. Verify static truncation helper
         short_text: str = "simple text"
@@ -173,10 +175,25 @@ class TestBookHandlerRegression(unittest.TestCase):
             label_text: str = dialog.fr_error_label.text()
             self.assertIn("…", label_text)
             self.assertIn("Saved substitution:", label_text)
+            self.assertIn("color: #28a745", label_text)
+            self.assertIn("font-weight: normal", label_text)
             # Full rule should be present in tooltip
             self.assertEqual(
                 dialog.fr_error_label.toolTip(),
                 "Saved substitution: 'Very long find term that exceeds the standard label width constraint' ➔ 'Replacement snippet'",
+            )
+
+            # 4. Test saving a rule with empty replacement (removal)
+            dialog.fr_find_input.setText("Author note to eliminate")
+            dialog.fr_replace_input.setText("")
+            dialog._save_to_word_substitutions()
+
+            removal_label: str = dialog.fr_error_label.text()
+            self.assertIn("Saved text removal:", removal_label)
+            self.assertIn("(remove text)", removal_label)
+            self.assertEqual(
+                dialog.fr_error_label.toolTip(),
+                "Saved text removal: 'Author note to eliminate' ➔ (remove text)",
             )
 
         dialog.close()

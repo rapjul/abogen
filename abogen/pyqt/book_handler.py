@@ -1,6 +1,7 @@
 # pyright: reportOptionalMemberAccess=false, reportAttributeAccessIssue=false
 
 import base64
+import html
 import logging
 import os
 import re
@@ -823,6 +824,11 @@ class HandlerDialog(QDialog):
         self.chapter_stats_label = QLabel(self.chapter_info_frame)
         self.chapter_stats_label.setText("No chapter selected")
         self.chapter_stats_label.setWordWrap(True)
+        self.chapter_stats_label.setMinimumWidth(0)
+        self.chapter_stats_label.setMaximumWidth(800)
+        self.chapter_stats_label.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
+        )
         info_layout.addWidget(self.chapter_stats_label, 1)
 
         btn_box = QVBoxLayout()
@@ -932,9 +938,7 @@ class HandlerDialog(QDialog):
         self.fr_error_label.setSizePolicy(
             QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred
         )
-        self.fr_error_label.setStyleSheet(
-            "QLabel { color: #d9534f; font-weight: bold; font-size: 11px; max-width: 800px; }"
-        )
+        self.fr_error_label.setStyleSheet("QLabel { font-size: 11px; max-width: 800px; }")
         fr_layout.addWidget(self.fr_error_label)
 
         self.find_replace_frame.hide()
@@ -944,6 +948,10 @@ class HandlerDialog(QDialog):
             self,
         )
         self.previewInfoLabel.setWordWrap(True)
+        self.previewInfoLabel.setMinimumWidth(0)
+        self.previewInfoLabel.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred
+        )
         self.previewInfoLabel.setStyleSheet("QLabel { color: #666; font-style: italic; }")
 
         previewLayout = QVBoxLayout()
@@ -999,12 +1007,18 @@ class HandlerDialog(QDialog):
             self,
         )
         self.instructions_label.setWordWrap(True)
+        self.instructions_label.setMinimumWidth(0)
+        self.instructions_label.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred
+        )
         self.instructions_label.setStyleSheet(
             "color: #888888; font-size: 12px; margin-bottom: 6px;"
         )
         leftLayout.addWidget(self.instructions_label)
 
         self.count_label = QLabel("0 of 0 items selected", self)
+        self.count_label.setMinimumWidth(0)
+        self.count_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         self.count_label.setStyleSheet("font-weight: bold; font-size: 14px; margin-bottom: 4px;")
         leftLayout.addWidget(self.count_label)
 
@@ -1326,10 +1340,11 @@ class HandlerDialog(QDialog):
                 for m in pattern.finditer(doc_text):
                     matches.append((m.start(), m.end()))
             except re.error as e:
-                self.fr_error_label.setStyleSheet(
-                    "QLabel { color: #d9534f; font-weight: bold; font-size: 11px; max-width: 800px; }"
+                self.fr_error_label.setStyleSheet("QLabel { font-size: 11px; max-width: 800px; }")
+                escaped_msg = html.escape(e.msg)
+                self.fr_error_label.setText(
+                    f'<span style="color: #d9534f; font-weight: bold;">Invalid regex:</span> <span>{escaped_msg}</span>'
                 )
-                self.fr_error_label.setText(f"Invalid regex: {e.msg}")
                 self.fr_error_label.setToolTip(f"Invalid regex: {e.msg}")
                 self.fr_match_count_label.setText("0 matches")
                 self.previewEdit.setExtraSelections([])
@@ -1344,10 +1359,11 @@ class HandlerDialog(QDialog):
                 for m in pattern.finditer(doc_text):
                     matches.append((m.start(), m.end()))
             except Exception as e:
-                self.fr_error_label.setStyleSheet(
-                    "QLabel { color: #d9534f; font-weight: bold; font-size: 11px; max-width: 800px; }"
+                self.fr_error_label.setStyleSheet("QLabel { font-size: 11px; max-width: 800px; }")
+                escaped_err = html.escape(str(e))
+                self.fr_error_label.setText(
+                    f'<span style="color: #d9534f; font-weight: bold;">Search error:</span> <span>{escaped_err}</span>'
                 )
-                self.fr_error_label.setText(f"Search error: {e}")
                 self.fr_error_label.setToolTip(f"Search error: {e}")
                 self.fr_match_count_label.setText("0 matches")
                 self.previewEdit.setExtraSelections([])
@@ -1479,10 +1495,11 @@ class HandlerDialog(QDialog):
                 pattern = re.compile(pattern_str, flags)
                 new_text = pattern.sub(replace_text, text)
         except Exception as e:
-            self.fr_error_label.setStyleSheet(
-                "QLabel { color: #d9534f; font-weight: bold; font-size: 11px; max-width: 800px; }"
+            self.fr_error_label.setStyleSheet("QLabel { font-size: 11px; max-width: 800px; }")
+            escaped_err = html.escape(str(e))
+            self.fr_error_label.setText(
+                f'<span style="color: #d9534f; font-weight: bold;">Replace failed:</span> <span>{escaped_err}</span>'
             )
-            self.fr_error_label.setText(f"Replace failed: {e}")
             self.fr_error_label.setToolTip(f"Replace failed: {e}")
             return
 
@@ -1521,15 +1538,17 @@ class HandlerDialog(QDialog):
         replace_text = re.sub(r"[\r\n]+", " ", raw_replace).strip()
 
         if not find_text:
-            self.fr_error_label.setStyleSheet(
-                "QLabel { color: #d9534f; font-weight: bold; font-size: 11px; max-width: 800px; }"
+            self.fr_error_label.setStyleSheet("QLabel { font-size: 11px; max-width: 800px; }")
+            self.fr_error_label.setText(
+                '<span style="color: #d9534f; font-weight: bold;">Enter a search term to save substitution.</span>'
             )
-            self.fr_error_label.setText("Enter a search term to save substitution.")
             self.fr_error_label.setToolTip("")
             return
 
         disp_find = self._truncate_substitution_text(find_text, max_length=40)
         disp_replace = self._truncate_substitution_text(replace_text, max_length=40)
+        escaped_find = html.escape(disp_find)
+        escaped_replace = html.escape(disp_replace)
 
         try:
             from abogen.utils import load_config, save_config
@@ -1539,30 +1558,43 @@ class HandlerDialog(QDialog):
             new_rule = f"{find_text}|{replace_text}"
 
             lines = [line.strip() for line in sub_list.split("\n") if line.strip()]
+            if replace_text:
+                action_text = "Saved substitution:"
+                target_disp = f"‘{escaped_replace}’"
+                target_tip = f"'{replace_text}'"
+                dup_action = "Rule already exists:"
+            else:
+                action_text = "Saved text removal:"
+                target_disp = "<em>(remove text)</em>"
+                target_tip = "(remove text)"
+                dup_action = "Rule already exists (removal):"
+
             if new_rule not in lines:
                 lines.append(new_rule)
                 updated_sub_list = "\n".join(lines)
                 cfg["word_substitutions_list"] = updated_sub_list
                 cfg["word_substitutions_enabled"] = True
                 save_config(cfg)
-                self.fr_error_label.setStyleSheet(
-                    "QLabel { color: #28a745; font-weight: bold; font-size: 11px; max-width: 800px; }"
+                self.fr_error_label.setStyleSheet("QLabel { font-size: 11px; max-width: 800px; }")
+                self.fr_error_label.setText(
+                    f'<span style="color: #28a745; font-weight: bold;">{action_text}</span> '
+                    f'<span style="font-weight: normal;">‘{escaped_find}’ ➔ {target_disp}</span>'
                 )
-                self.fr_error_label.setText(f"Saved substitution: '{disp_find}' ➔ '{disp_replace}'")
-                self.fr_error_label.setToolTip(
-                    f"Saved substitution: '{find_text}' ➔ '{replace_text}'"
-                )
+                self.fr_error_label.setToolTip(f"{action_text} '{find_text}' ➔ {target_tip}")
             else:
-                self.fr_error_label.setStyleSheet(
-                    "QLabel { color: #888; font-style: italic; font-size: 11px; max-width: 800px; }"
+                self.fr_error_label.setStyleSheet("QLabel { font-size: 11px; max-width: 800px; }")
+                self.fr_error_label.setText(
+                    f'<span style="color: #888; font-style: italic; font-weight: bold;">{dup_action}</span> '
+                    f'<span style="font-style: normal; font-weight: normal;">‘{escaped_find}’ ➔ {target_disp}</span>'
                 )
-                self.fr_error_label.setText("Substitution rule already exists.")
-                self.fr_error_label.setToolTip(f"Rule: '{find_text}' ➔ '{replace_text}'")
+                self.fr_error_label.setToolTip(f"{dup_action} '{find_text}' ➔ {target_tip}")
         except Exception as e:
-            self.fr_error_label.setStyleSheet(
-                "QLabel { color: #d9534f; font-weight: bold; font-size: 11px; max-width: 800px; }"
+            self.fr_error_label.setStyleSheet("QLabel { font-size: 11px; max-width: 800px; }")
+            escaped_err = html.escape(str(e))
+            self.fr_error_label.setText(
+                f'<span style="color: #d9534f; font-weight: bold;">Failed to save substitution:</span> '
+                f"<span>{escaped_err}</span>"
             )
-            self.fr_error_label.setText(f"Failed to save substitution: {e}")
             self.fr_error_label.setToolTip("")
 
     def uncheck_short_chapters(self) -> None:
