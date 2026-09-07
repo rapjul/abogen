@@ -95,7 +95,7 @@ rocm = [
   "pytorch-triton-rocm; sys_platform == 'linux'"
 ]
 # Apple Silicon acceleration via MLX       # uv tool install abogen[mlx]
-mlx = ["mlx-audio; sys_platform == 'darwin'"]
+mlx = ["mlx-audio>=0.5.2; sys_platform == 'darwin'"]
 
 [dependency-groups]
 dev = [
@@ -133,6 +133,8 @@ filterwarnings = [
 ]
 
 # --- KOKORO CONFIGURATION (for macOS) ---
+[tool.uv.exclude-newer-package]
+mlx-audio = "2026-09-08T00:00:00Z"
 
 [tool.uv.sources]
 kokoro = [

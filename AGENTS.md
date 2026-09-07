@@ -187,7 +187,7 @@ The script is **idempotent** — running it multiple times is safe.
 
 #### Current patches
 
-##### `mlx_audio_kokoro_sine_gen_broadcast.patch` → `mlx-audio` ≥ 0.4.3, ≤ 0.4.5
+##### `mlx_audio_kokoro_sine_gen_broadcast.patch` → `mlx-audio` ≥ 0.4.3, ≤ 0.5.2
 
 **Bug:** `SineGen.__call__` in `mlx_audio/tts/models/kokoro/istftnet.py` crashes with a `[broadcast_shapes]` error for certain text lengths when using the MLX backend on Apple Silicon.
 
@@ -201,7 +201,7 @@ Two separate shape mismatches:
 - Trim `sine_waves[:, :uv_len, :]` to match `uv`'s length before combining.
 - Generate noise with `noise_amp.shape` instead of `sine_waves.shape`; the `(B, T, 1)` tensor already broadcasts across the 9 harmonics.
 
-**Upstream status:** Not yet fixed as of `mlx-audio` 0.4.4 (verified 2026-06-18).
+**Upstream status:** Not yet fixed as of `mlx-audio` 0.5.2 (verified 2026-09-07).
 Track: <https://github.com/Blaizzy/mlx-audio/blob/main/mlx_audio/tts/models/kokoro/istftnet.py>
 
 **How to check if the patch is still needed** (run after any `mlx-audio` upgrade):
@@ -224,14 +224,14 @@ for p in sys.path:
 "
 ```
 
-##### `mlx_audio_kokoro_conv1d_shape_fix.patch` → `mlx-audio` ≥ 0.4.3, ≤ 0.4.5
+##### `mlx_audio_kokoro_conv1d_shape_fix.patch` → `mlx-audio` ≥ 0.4.3, ≤ 0.5.2
 
 **Bug:** `check_array_shape` in `mlx_audio/tts/models/base.py` incorrectly identifies the shape of 1D convolutional weights (like `weight_v`) when loading PyTorch models on MLX. It assumes that `kH == KW` which is only true for 2D or symmetric convolutions, causing Kokoro models to fail to initialize with `Expected shape (512, 3, 512) but received shape (512, 512, 3)`.
 
 **Fix (this patch):**
 - Modifies `check_array_shape` to correctly detect if the weight array is already in MLX format by comparing the middle dimension (`kernel_size`) to the last dimension (`in_channels`).
 
-**Upstream status:** Not yet fixed as of `mlx-audio` 0.4.2.
+**Upstream status:** Not yet fixed as of `mlx-audio` 0.5.2 (verified 2026-09-07).
 
 **How to check if the patch is still needed** (run after any `mlx-audio` upgrade):
 
@@ -253,6 +253,34 @@ for p in sys.path:
 "
 ```
 
+##### `mlx_audio_kokoro_proj_shape_fix.patch` → `mlx-audio` ≥ 0.4.3, ≤ 0.5.2
+
+**Bug:** In `mlx_audio/tts/models/kokoro/kokoro.py`, unquantized projection weights (`F0_proj.weight` and `N_proj.weight`) are unconditionally transposed with `state_dict.transpose(0, 2, 1)` without checking whether the weights are already in MLX layout, causing dimension errors when loading model checkpoints.
+
+**Fix (this patch):**
+- Checks `check_array_shape(state_dict)` conditionally before transposing so weights already in MLX shape are preserved.
+
+**Upstream status:** Not yet fixed as of `mlx-audio` 0.5.2 (verified 2026-09-07).
+
+**How to check if the patch is still needed** (run after any `mlx-audio` upgrade):
+
+```bash
+python -c "
+import sys
+from pathlib import Path
+for p in sys.path:
+    f = Path(p) / 'mlx_audio/tts/models/kokoro/kokoro.py'
+    if f.exists():
+        src = f.read_text()
+        if 'Check F0_proj shape conditionally' in src:
+            print('PATCH ALREADY APPLIED')
+        elif 'else state_dict.transpose(0, 2, 1)' in src:
+            print('PATCH STILL NEEDED (bug present in installed version)')
+        else:
+            print('CODE CHANGED SIGNIFICANTLY — manual review required')
+        break
+"
+```
 
 ---
 
