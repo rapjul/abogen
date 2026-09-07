@@ -192,9 +192,7 @@ def test_epub3_preserves_original_whitespace(tmp_path) -> None:
     assert "Second line" in chunk_section
     assert "Third paragraph." in chunk_section
 
-    match = re.search(
-        r"<pre class=\"chapter-original\"[^>]*>(.*?)</pre>", chapter_doc, re.DOTALL
-    )
+    match = re.search(r"<pre class=\"chapter-original\"[^>]*>(.*?)</pre>", chapter_doc, re.DOTALL)
     assert match is not None
     original_text = html.unescape(match.group(1))
     assert "Second line\n\nThird paragraph." in original_text

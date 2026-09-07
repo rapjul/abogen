@@ -102,9 +102,7 @@ class TestEpubHeuristicNav(unittest.TestCase):
 
         check_book = epub.read_epub(self.epub_path)
         nav_items = list(check_book.get_items_of_type(ebooklib.ITEM_NAVIGATION))
-        self.assertEqual(
-            len(nav_items), 0, "Setup failed: explicit navigation item found!"
-        )
+        self.assertEqual(len(nav_items), 0, "Setup failed: explicit navigation item found!")
 
         # 7. Run Parser
         parser = get_book_parser(self.epub_path)

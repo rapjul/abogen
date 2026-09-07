@@ -34,20 +34,16 @@ class TestHierarchicalChapters(unittest.TestCase):
         self.dialog.parser = MockParser()
 
         # Bind the actual methods under test to the mock dialog
-        self.dialog._get_item_depth = lambda item: HandlerDialog._get_item_depth(
-            self.dialog, item
-        )
+        self.dialog._get_item_depth = lambda item: HandlerDialog._get_item_depth(self.dialog, item)
         self.dialog._get_visual_prefix = lambda item: HandlerDialog._get_visual_prefix(
             self.dialog, item
         )
         self.dialog._find_closest_valid_ancestor = lambda item, limit, ids: (
             HandlerDialog._find_closest_valid_ancestor(self.dialog, item, limit, ids)
         )
-        self.dialog._format_metadata_tags = lambda: HandlerDialog._format_metadata_tags(
-            self.dialog
-        )
-        self.dialog._get_hierarchical_title = lambda item: (
-            HandlerDialog._get_hierarchical_title(self.dialog, item)
+        self.dialog._format_metadata_tags = lambda: HandlerDialog._format_metadata_tags(self.dialog)
+        self.dialog._get_hierarchical_title = lambda item: HandlerDialog._get_hierarchical_title(
+            self.dialog, item
         )
 
         self.dialog.book_metadata = {
@@ -180,12 +176,8 @@ class TestHierarchicalChapters(unittest.TestCase):
         self.assertEqual(checked_ids, {"ch1", "sec11", "subsec111"})
 
         # Verify Visual Indent prefixes
-        self.assertIn(
-            "<<CHAPTER_MARKER:Chapter 1>>\nChapter 1 main content.", collated_text
-        )
-        self.assertIn(
-            "<<CHAPTER_MARKER:└─ Section 1.1>>\nSection 1.1 content.", collated_text
-        )
+        self.assertIn("<<CHAPTER_MARKER:Chapter 1>>\nChapter 1 main content.", collated_text)
+        self.assertIn("<<CHAPTER_MARKER:└─ Section 1.1>>\nSection 1.1 content.", collated_text)
         self.assertIn(
             "<<CHAPTER_MARKER:   └─ Subsection 1.1.1>>\nSubsection 1.1.1 content.",
             collated_text,
@@ -196,9 +188,7 @@ class TestHierarchicalChapters(unittest.TestCase):
 
         collated_text, _ = HandlerDialog._get_epub_selected_text(self.dialog)
 
-        self.assertIn(
-            "<<CHAPTER_MARKER:Chapter 1>>\nChapter 1 main content.", collated_text
-        )
+        self.assertIn("<<CHAPTER_MARKER:Chapter 1>>\nChapter 1 main content.", collated_text)
         # sec11 should have rolled up subsec111 content into it!
         self.assertIn(
             "<<CHAPTER_MARKER:└─ Section 1.1>>\nSection 1.1 content.\n\nSubsection 1.1.1 content.",
@@ -237,9 +227,7 @@ class TestHierarchicalChapters(unittest.TestCase):
         self.dialog.chapter_visual_indentation = False
         self.dialog.chapter_depth_limit = 1
 
-        collated_text, checked_ids = HandlerDialog._get_markdown_selected_text(
-            self.dialog
-        )
+        collated_text, checked_ids = HandlerDialog._get_markdown_selected_text(self.dialog)
         self.assertEqual(checked_ids, {"ch1", "sec11"})
         self.assertIn(
             "<<CHAPTER_MARKER:Chapter 1>>\nChapter 1 main content.\n\nSection 1.1 content.",
@@ -304,7 +292,7 @@ class TestHierarchicalChapters(unittest.TestCase):
         self.dialog.chapter_visual_indentation = True
         self.dialog.chapter_depth_limit = 3
 
-        collated, checked_ids = HandlerDialog._get_epub_selected_text(self.dialog)
+        collated, _ = HandlerDialog._get_epub_selected_text(self.dialog)
         self.assertIn("L4 Content", collated)
         self.assertIn("L3 Content\n\nL4 Content", collated)
         self.assertNotIn("<<CHAPTER_MARKER:   │  └─ Paragraph 1.1.1.1>>", collated)
@@ -382,8 +370,8 @@ class TestHierarchicalChapters(unittest.TestCase):
     def test_title_exclusions(self) -> None:
         """Verify that _should_exclude_by_title correctly identifies front/back matter."""
         # We need to bind the actual _should_exclude_by_title to the dialog
-        self.dialog._should_exclude_by_title = lambda item: (
-            HandlerDialog._should_exclude_by_title(self.dialog, item)
+        self.dialog._should_exclude_by_title = lambda item: HandlerDialog._should_exclude_by_title(
+            self.dialog, item
         )
 
         # Helper to create a dummy item with a specific text
@@ -396,33 +384,21 @@ class TestHierarchicalChapters(unittest.TestCase):
         self.assertTrue(self.dialog._should_exclude_by_title(make_item("Cover")))
         self.assertTrue(self.dialog._should_exclude_by_title(make_item("Title Page")))
         self.assertTrue(self.dialog._should_exclude_by_title(make_item("Copyright")))
-        self.assertTrue(
-            self.dialog._should_exclude_by_title(make_item("Table of Contents"))
-        )
+        self.assertTrue(self.dialog._should_exclude_by_title(make_item("Table of Contents")))
 
         # Test map rules
         self.assertTrue(self.dialog._should_exclude_by_title(make_item("Map")))
         self.assertTrue(self.dialog._should_exclude_by_title(make_item("Maps")))
         self.assertTrue(self.dialog._should_exclude_by_title(make_item("Map 1")))
-        self.assertTrue(
-            self.dialog._should_exclude_by_title(make_item("Map of the Empire"))
-        )
+        self.assertTrue(self.dialog._should_exclude_by_title(make_item("Map of the Empire")))
         self.assertFalse(
-            self.dialog._should_exclude_by_title(
-                make_item("Chapter 1: The Map Crystal")
-            )
+            self.dialog._should_exclude_by_title(make_item("Chapter 1: The Map Crystal"))
         )
-        self.assertFalse(
-            self.dialog._should_exclude_by_title(make_item("The Map Crystal"))
-        )
+        self.assertFalse(self.dialog._should_exclude_by_title(make_item("The Map Crystal")))
 
         # Test prefix/suffix word counts
-        self.assertTrue(
-            self.dialog._should_exclude_by_title(make_item("About the Author"))
-        )
-        self.assertTrue(
-            self.dialog._should_exclude_by_title(make_item("Suggested Reading List"))
-        )
+        self.assertTrue(self.dialog._should_exclude_by_title(make_item("About the Author")))
+        self.assertTrue(self.dialog._should_exclude_by_title(make_item("Suggested Reading List")))
         self.assertFalse(
             self.dialog._should_exclude_by_title(
                 make_item("Suggested Reading of the Entire Galaxy and Universe")
@@ -444,17 +420,13 @@ class TestHierarchicalChapters(unittest.TestCase):
         self.dialog.checked_chapters = set()
 
         # Bind methods
-        self.dialog.select_all_chapters = lambda: HandlerDialog.select_all_chapters(
+        self.dialog.select_all_chapters = lambda: HandlerDialog.select_all_chapters(self.dialog)
+        self.dialog.deselect_all_chapters = lambda: HandlerDialog.deselect_all_chapters(self.dialog)
+        self.dialog.select_parent_chapters = lambda: HandlerDialog.select_parent_chapters(
             self.dialog
         )
-        self.dialog.deselect_all_chapters = lambda: HandlerDialog.deselect_all_chapters(
+        self.dialog.deselect_parent_chapters = lambda: HandlerDialog.deselect_parent_chapters(
             self.dialog
-        )
-        self.dialog.select_parent_chapters = lambda: (
-            HandlerDialog.select_parent_chapters(self.dialog)
-        )
-        self.dialog.deselect_parent_chapters = lambda: (
-            HandlerDialog.deselect_parent_chapters(self.dialog)
         )
         self.dialog._update_checked_set_from_tree = lambda: (
             HandlerDialog._update_checked_set_from_tree(self.dialog)
@@ -493,17 +465,13 @@ class TestHierarchicalChapters(unittest.TestCase):
 
     def test_auto_select_chapters(self) -> None:
         """Verify the automatic checking algorithm for EPUB, Markdown, and PDF."""
-        self.dialog._run_epub_auto_check = lambda: HandlerDialog._run_epub_auto_check(
+        self.dialog._run_epub_auto_check = lambda: HandlerDialog._run_epub_auto_check(self.dialog)
+        self.dialog._run_markdown_auto_check = lambda: HandlerDialog._run_markdown_auto_check(
             self.dialog
         )
-        self.dialog._run_markdown_auto_check = lambda: (
-            HandlerDialog._run_markdown_auto_check(self.dialog)
-        )
-        self.dialog._run_pdf_auto_check = lambda: HandlerDialog._run_pdf_auto_check(
-            self.dialog
-        )
-        self.dialog._should_exclude_by_title = lambda item: (
-            HandlerDialog._should_exclude_by_title(self.dialog, item)
+        self.dialog._run_pdf_auto_check = lambda: HandlerDialog._run_pdf_auto_check(self.dialog)
+        self.dialog._should_exclude_by_title = lambda item: HandlerDialog._should_exclude_by_title(
+            self.dialog, item
         )
 
         tree: QTreeWidget = QTreeWidget()

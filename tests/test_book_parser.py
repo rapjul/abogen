@@ -247,12 +247,8 @@ class TestBookParser(unittest.TestCase):
         )
 
         self.assertEqual(len(ordered_entries), 1)
-        self.assertEqual(
-            ordered_entries[0]["title"], 'Chapter 26 – "Heaven\'s Control"'
-        )
-        self.assertEqual(
-            tree_structure_list[0]["title"], 'Chapter 26 – "Heaven\'s Control"'
-        )
+        self.assertEqual(ordered_entries[0]["title"], 'Chapter 26 – "Heaven\'s Control"')
+        self.assertEqual(tree_structure_list[0]["title"], 'Chapter 26 – "Heaven\'s Control"')
 
         # 2. Test EpubParser HTML nav decoding via _extract_nav_li_title
         html_nav = """
@@ -264,9 +260,7 @@ class TestBookParser(unittest.TestCase):
         li_element = soup_html.find("li")
         link_element = li_element.find("a")
 
-        extracted_title = epub_parser._extract_nav_li_title(
-            li_element, link_element=link_element
-        )
+        extracted_title = epub_parser._extract_nav_li_title(li_element, link_element=link_element)
         self.assertEqual(extracted_title, 'Chapter 25 – "Lisa\'s Past"')
 
         # 3. Test MarkdownParser TOC decoding

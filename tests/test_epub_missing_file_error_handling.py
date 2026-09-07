@@ -1,9 +1,10 @@
-import unittest
+import logging
 import os
 import shutil
-import zipfile
 import sys
-import logging
+import unittest
+import zipfile
+
 from ebooklib import epub
 
 # Ensure import path
@@ -59,14 +60,16 @@ class TestEpubMissingFileErrorHandling(unittest.TestCase):
         epub.write_epub(temp_path, book)
 
         # 3. Physically remove 'ghost.xhtml' from the ZIP
-        with zipfile.ZipFile(temp_path, "r") as zin:
-            with zipfile.ZipFile(self.broken_epub_path, "w") as zout:
-                for item in zin.infolist():
-                    # Copy everything EXCEPT the ghost file
-                    # Note: ebooklib might put files in OEPS/ or EPUB/ folders depending on version,
-                    # so checking "ghost.xhtml" presence in filename is safer.
-                    if "ghost.xhtml" not in item.filename:
-                        zout.writestr(item, zin.read(item.filename))
+        with (
+            zipfile.ZipFile(temp_path, "r") as zin,
+            zipfile.ZipFile(self.broken_epub_path, "w") as zout,
+        ):
+            for item in zin.infolist():
+                # Copy everything EXCEPT the ghost file
+                # Note: ebooklib might put files in OEPS/ or EPUB/ folders depending on version,
+                # so checking "ghost.xhtml" presence in filename is safer.
+                if "ghost.xhtml" not in item.filename:
+                    zout.writestr(item, zin.read(item.filename))
 
     def test_missing_file_recovery(self):
         """

@@ -1,7 +1,7 @@
 import os
 import sys
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 import pytest
 
@@ -11,7 +11,7 @@ sys.path.insert(0, str(ROOT))
 
 @pytest.fixture(autouse=True)
 def clear_utils_cache():
-    import abogen.utils as utils
+    from abogen import utils
 
     getattr(utils.get_user_cache_root, "cache_clear")()
     yield
@@ -24,7 +24,7 @@ def _clear_env(monkeypatch: pytest.MonkeyPatch, keys: Iterable[str]) -> None:
 
 
 def test_abogen_temp_dir_configures_hf_cache(monkeypatch, tmp_path):
-    import abogen.utils as utils
+    from abogen import utils
 
     cache_root = tmp_path / "cache-root"
     home_dir = tmp_path / "home"

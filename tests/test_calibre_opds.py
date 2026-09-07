@@ -167,10 +167,7 @@ def test_calibre_opds_relative_urls_keep_catalog_prefix() -> None:
     client = CalibreOPDSClient("http://example.com/opds/")
 
     assert client._make_url("search") == "http://example.com/opds/search"
-    assert (
-        client._make_url("books/sample.epub")
-        == "http://example.com/opds/books/sample.epub"
-    )
+    assert client._make_url("books/sample.epub") == "http://example.com/opds/books/sample.epub"
     assert client._make_url("/cover/1") == "http://example.com/cover/1"
     assert client._make_url("?page=2") == "http://example.com/opds?page=2"
 
@@ -183,13 +180,8 @@ def test_calibre_opds_base_url_without_trailing_slash() -> None:
     assert client._base_url == "http://example.com/api/v1/opds"
     # Relative paths should resolve as siblings to the base URL
     assert client._make_url("catalog") == "http://example.com/api/v1/opds/catalog"
-    assert (
-        client._make_url("search?q=test")
-        == "http://example.com/api/v1/opds/search?q=test"
-    )
-    assert (
-        client._make_url("/api/v1/opds/books") == "http://example.com/api/v1/opds/books"
-    )
+    assert client._make_url("search?q=test") == "http://example.com/api/v1/opds/search?q=test"
+    assert client._make_url("/api/v1/opds/books") == "http://example.com/api/v1/opds/books"
     assert client._make_url("?page=2") == "http://example.com/api/v1/opds?page=2"
 
 
@@ -307,9 +299,7 @@ def test_calibre_opds_local_search_follows_next(monkeypatch) -> None:
     page_two = OPDSFeed(
         id="catalog",
         title="Catalog",
-        entries=[
-            OPDSEntry(id="2", title="The Journey Continues", authors=["Bob Johnson"])
-        ],
+        entries=[OPDSEntry(id="2", title="The Journey Continues", authors=["Bob Johnson"])],
         links={},
     )
 
@@ -620,11 +610,7 @@ def test_calibre_opds_browse_letter_collects_paginated_navigation(monkeypatch) -
         entries=[
             OPDSEntry(id="author-1", title="Ryan, Alice"),
         ],
-        links={
-            "next": OPDSLink(
-                href="http://example.com/catalog/authors/r?page=2", rel="next"
-            )
-        },
+        links={"next": OPDSLink(href="http://example.com/catalog/authors/r?page=2", rel="next")},
     )
     letter_page_two = OPDSFeed(
         id="authors-r",

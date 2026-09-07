@@ -10,7 +10,6 @@ import posixpath
 import types
 import zipfile
 from pathlib import Path
-from typing import Optional
 
 import pytest
 
@@ -18,7 +17,6 @@ from abogen.book_parser import EpubParser, _guess_image_extension, _is_valid_ima
 from abogen.pyqt.book_handler import HandlerDialog
 from abogen.pyqt.conversion import ConversionThread
 from abogen.text_extractor import EpubExtractor
-
 
 # Minimal 1x1 valid PNG image bytes
 PNG_BYTES: bytes = (
@@ -52,10 +50,10 @@ def _create_synthetic_epub(
     target_path: Path,
     *,
     is_epub3: bool = False,
-    cover_meta_id: Optional[str] = None,
+    cover_meta_id: str | None = None,
     cover_image_href: str = "Images/0000.jpg",
     cover_image_id: str = "cover-image",
-    cover_image_props: Optional[str] = None,
+    cover_image_props: str | None = None,
     image_bytes: bytes = JPEG_BYTES,
     include_cover_xhtml: bool = True,
 ) -> Path:
@@ -95,11 +93,7 @@ def _create_synthetic_epub(
 
         # Build OPF
         props_attr = f' properties="{cover_image_props}"' if cover_image_props else ""
-        meta_tag = (
-            f'    <meta name="cover" content="{cover_meta_id}"/>\n'
-            if cover_meta_id
-            else ""
-        )
+        meta_tag = f'    <meta name="cover" content="{cover_meta_id}"/>\n' if cover_meta_id else ""
         media_type = "image/png" if image_bytes == PNG_BYTES else "image/jpeg"
 
         items = [

@@ -15,10 +15,7 @@ def test_update_voice_mixer_state_disables_button_when_mlx_is_enabled() -> None:
     abogen._update_voice_mixer_state(dummy_ui)
 
     dummy_ui.btn_voice_formula_mixer.setEnabled.assert_called_once_with(False)
-    assert (
-        "not supported"
-        in dummy_ui.btn_voice_formula_mixer.setToolTip.call_args[0][0].lower()
-    )
+    assert "not supported" in dummy_ui.btn_voice_formula_mixer.setToolTip.call_args[0][0].lower()
 
 
 def test_update_voice_mixer_state_enables_button_when_mlx_is_disabled() -> None:
@@ -29,9 +26,7 @@ def test_update_voice_mixer_state_enables_button_when_mlx_is_disabled() -> None:
     abogen._update_voice_mixer_state(dummy_ui)
 
     dummy_ui.btn_voice_formula_mixer.setEnabled.assert_called_once_with(True)
-    dummy_ui.btn_voice_formula_mixer.setToolTip.assert_called_once_with(
-        "Mix and match voices"
-    )
+    dummy_ui.btn_voice_formula_mixer.setToolTip.assert_called_once_with("Mix and match voices")
 
 
 def test_toggle_mlx_backend_updates_voice_mixer_state() -> None:
@@ -54,7 +49,5 @@ def test_conversion_thread_detects_voice_blend_formula() -> None:
     assert is_voice_blend is True
 
     plain_voice = "af_heart"
-    is_plain_blend = isinstance(plain_voice, str) and (
-        "*" in plain_voice or "+" in plain_voice
-    )
+    is_plain_blend = isinstance(plain_voice, str) and ("*" in plain_voice or "+" in plain_voice)
     assert is_plain_blend is False

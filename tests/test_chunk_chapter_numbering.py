@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from PyQt6.QtWidgets import QApplication, QDialog
 
-from abogen.pyqt.book_handler import _extract_chapter_number, HandlerDialog
+from abogen.pyqt.book_handler import HandlerDialog, _extract_chapter_number
 
 _ = QApplication.instance() or QApplication([])
 
@@ -61,13 +61,9 @@ def test_chunking_preserves_actual_chapter_numbers_starting_at_111(
     # 50 chapters: 111 through 160 with an unmarked interlude
     chapter_markers: list[str] = ["<<CHAPTER_MARKER:Prologue>>\nIntroductory text"]
     for num in range(111, 161):
-        chapter_markers.append(
-            f"<<CHAPTER_MARKER:Chapter {num}>>\nContent of chapter {num}"
-        )
+        chapter_markers.append(f"<<CHAPTER_MARKER:Chapter {num}>>\nContent of chapter {num}")
 
-    metadata_block = (
-        "<<METADATA_TITLE:One Piece Story>>\n<<METADATA_ALBUM:One Piece Story>>\n"
-    )
+    metadata_block = "<<METADATA_TITLE:One Piece Story>>\n<<METADATA_ALBUM:One Piece Story>>\n"
     full_text = metadata_block + "\n\n".join(chapter_markers)
 
     monkeypatch.setattr(dialog, "get_split_book", lambda: True)
@@ -76,7 +72,7 @@ def test_chunking_preserves_actual_chapter_numbers_starting_at_111(
     dialog.parser = parser_mock
     monkeypatch.setattr(dialog, "_get_epub_selected_text", lambda: (full_text, {"id1"}))
 
-    chunks, identifiers = dialog.get_selected_text()
+    chunks, _ = dialog.get_selected_text()
 
     # With 50 numbered chapters chunked by 20:
     # Chunk 1: Prologue + Chapters 111-130 -> {Ch 111–130}
@@ -98,9 +94,7 @@ def test_chunking_single_chapter_in_chunk(monkeypatch: pytest.MonkeyPatch) -> No
     dialog = HandlerDialog.__new__(HandlerDialog)
     QDialog.__init__(dialog)
 
-    full_text = (
-        "<<METADATA_TITLE:Book>>\n<<CHAPTER_MARKER:Chapter 111>>\nChapter 111 content"
-    )
+    full_text = "<<METADATA_TITLE:Book>>\n<<CHAPTER_MARKER:Chapter 111>>\nChapter 111 content"
 
     monkeypatch.setattr(dialog, "get_split_book", lambda: True)
     monkeypatch.setattr(dialog, "get_split_chapters_count", lambda: 10)
@@ -133,6 +127,7 @@ def test_conversion_thread_falls_back_to_metadata_title_for_chunk_suffix(
 ) -> None:
     """Test that ConversionThread parses chunk suffix from METADATA_TITLE when not explicitly set."""
     from pathlib import Path
+
     from abogen.pyqt.conversion import ConversionThread
 
     worker = ConversionThread.__new__(ConversionThread)

@@ -24,9 +24,7 @@ class TestDateNormalization:
         # 2023 -> twenty twenty-three
         assert "twenty twenty-three" in normalize("It is currently 2023.", cfg)
         # 1905 -> nineteen hundred oh five
-        assert "nineteen hundred oh five" in normalize(
-            "In 1905, Einstein published.", cfg
-        )
+        assert "nineteen hundred oh five" in normalize("In 1905, Einstein published.", cfg)
 
     def test_future_years(self, cfg):
         # 3400 -> thirty-four hundred

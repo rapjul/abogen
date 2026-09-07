@@ -156,10 +156,7 @@ def test_show_queue_summary_renders_html_table_with_elapsed(monkeypatch) -> None
     assert "1,234" in html_output
     assert "Cancelled (partial)" in html_output
     assert "00:00:12 (partial)" in html_output
-    assert (
-        "Elapsed values for queued items that did not complete are partial."
-        in html_output
-    )
+    assert "Elapsed values for queued items that did not complete are partial." in html_output
 
 
 def test_show_queue_summary_marks_not_started_items(monkeypatch) -> None:

@@ -23,9 +23,9 @@ def test_atomic_write_json_replaces_file_and_keeps_previous_backup(
     utils.atomic_write_json(destination, {"version": 2})
 
     assert json.loads(destination.read_text(encoding="utf-8")) == {"version": 2}
-    assert json.loads(
-        destination.with_name("state.json.bak").read_text(encoding="utf-8")
-    ) == {"version": 1}
+    assert json.loads(destination.with_name("state.json.bak").read_text(encoding="utf-8")) == {
+        "version": 1
+    }
     assert not list(tmp_path.glob(".*.tmp"))
 
 

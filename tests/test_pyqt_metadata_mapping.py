@@ -7,6 +7,7 @@ import tempfile
 import threading
 import types
 import zipfile
+from typing import Any, ClassVar
 
 if "soundfile" not in sys.modules:
     soundfile_stub = types.ModuleType("soundfile")
@@ -27,7 +28,6 @@ class _SignalStub:
     def emit(self, *_args, **_kwargs):
         if _args:
             self.messages.append(str(_args[0]))
-        return None
 
 
 class _StopAfterConfigPipeline:
@@ -147,9 +147,7 @@ def test_pyqt_format_metadata_tags_includes_extended_epub_fields() -> None:
         },
     )
     setattr(handler, "book_path", "/tmp/example.epub")
-    setattr(
-        handler, "checked_chapters", [{"title": "Chapter 1"}, {"title": "Chapter 2"}]
-    )
+    setattr(handler, "checked_chapters", [{"title": "Chapter 1"}, {"title": "Chapter 2"}])
     setattr(handler, "parser", _ParserStub())
 
     text = handler._format_metadata_tags()
@@ -210,30 +208,26 @@ def test_pyqt_format_metadata_tags_creates_cover_cache_dir(monkeypatch) -> None:
 def test_pyqt_extract_metadata_adds_extended_fields_and_narration_phrase() -> None:
     worker = ConversionThread.__new__(ConversionThread)
     worker.is_direct_text = True
-    worker.file_name = "\n".join(
-        [
-            "<<METADATA_TITLE:Example Title>>",
-            "<<METADATA_ARTIST:Example Author>>",
-            "<<METADATA_ALBUM:Example Album>>",
-            "<<METADATA_YEAR:2026>>",
-            "<<METADATA_ALBUM_ARTIST:Example Author>>",
-            "<<METADATA_GENRE:Audiobook>>",
-            "<<METADATA_PUBLISHER:Example Publisher>>",
-            "<<METADATA_COMMENT:Example Description>>",
-            "<<METADATA_LANGUAGE:en>>",
-            "<<METADATA_SERIES:Saga>>",
-            "<<METADATA_SERIES_INDEX:2>>",
-            "<<METADATA_CHAPTER_COUNT:11>>",
-        ]
+    worker.file_name = (
+        "<<METADATA_TITLE:Example Title>>\n"
+        "<<METADATA_ARTIST:Example Author>>\n"
+        "<<METADATA_ALBUM:Example Album>>\n"
+        "<<METADATA_YEAR:2026>>\n"
+        "<<METADATA_ALBUM_ARTIST:Example Author>>\n"
+        "<<METADATA_GENRE:Audiobook>>\n"
+        "<<METADATA_PUBLISHER:Example Publisher>>\n"
+        "<<METADATA_COMMENT:Example Description>>\n"
+        "<<METADATA_LANGUAGE:en>>\n"
+        "<<METADATA_SERIES:Saga>>\n"
+        "<<METADATA_SERIES_INDEX:2>>\n"
+        "<<METADATA_CHAPTER_COUNT:11>>"
     )
     worker.from_queue = False
     worker.display_path = None
     worker.voice = "af_heart"
     setattr(worker, "log_updated", _SignalStub())
 
-    metadata_options, cover, atom_metadata = (
-        worker._extract_and_add_metadata_tags_to_ffmpeg_cmd()
-    )
+    metadata_options, cover, atom_metadata = worker._extract_and_add_metadata_tags_to_ffmpeg_cmd()
 
     assert cover is None
     options_text = " ".join(metadata_options)
@@ -269,9 +263,7 @@ def test_pyqt_extract_metadata_infers_artist_from_filename_when_missing() -> Non
     worker.voice = "af_heart"
     setattr(worker, "log_updated", _SignalStub())
 
-    metadata_options, _cover, atom_metadata = (
-        worker._extract_and_add_metadata_tags_to_ffmpeg_cmd()
-    )
+    metadata_options, _cover, atom_metadata = worker._extract_and_add_metadata_tags_to_ffmpeg_cmd()
 
     options_text = " ".join(metadata_options)
     assert "artist=Example Author" in options_text
@@ -548,7 +540,7 @@ def test_pyqt_write_m4b_mp4_atoms_writes_text_freeform_and_cover(monkeypatch) ->
             return obj
 
     class _FakeMP4:
-        instances = {}
+        instances: ClassVar[dict[str, Any]] = {}
 
         def __init__(self, path):
             self.path = path
@@ -601,30 +593,18 @@ def test_pyqt_write_m4b_mp4_atoms_writes_text_freeform_and_cover(monkeypatch) ->
         assert instance.tags["©alb"] == ["Example Album"]
         assert instance.tags["aART"] == ["Example Author"]
         assert instance.tags["©day"] == ["2026"]
-        assert instance.tags["©wrt"] == [
-            "Narrated by Heart (af_heart) through Kokoro TTS"
-        ]
+        assert instance.tags["©wrt"] == ["Narrated by Heart (af_heart) through Kokoro TTS"]
         assert instance.tags["©cmt"] == ["Example Description"]
         assert "©gen" not in instance.tags
         assert instance.tags[conversion_module._freeform_atom_key("Publisher")] == [
             b"Example Publisher"
         ]
-        assert instance.tags[conversion_module._freeform_atom_key("Language")] == [
-            b"en"
-        ]
-        assert instance.tags[conversion_module._freeform_atom_key("Series")] == [
-            b"Saga"
-        ]
-        assert instance.tags[conversion_module._freeform_atom_key("Series Index")] == [
-            b"2"
-        ]
-        assert instance.tags[conversion_module._freeform_atom_key("Chapter Count")] == [
-            b"11"
-        ]
+        assert instance.tags[conversion_module._freeform_atom_key("Language")] == [b"en"]
+        assert instance.tags[conversion_module._freeform_atom_key("Series")] == [b"Saga"]
+        assert instance.tags[conversion_module._freeform_atom_key("Series Index")] == [b"2"]
+        assert instance.tags[conversion_module._freeform_atom_key("Chapter Count")] == [b"11"]
         assert instance.tags["covr"][0].imageformat == _FakeMP4Cover.FORMAT_JPEG
-        assert (
-            "compatibility post-write completed" in "\n".join(signal.messages).lower()
-        )
+        assert "compatibility post-write completed" in "\n".join(signal.messages).lower()
 
 
 def test_pyqt_write_m4b_mp4_atoms_missing_output_returns_false() -> None:
@@ -808,9 +788,7 @@ def test_is_timestamp_text_input_false_for_non_txt_or_direct_text(monkeypatch) -
     worker.is_direct_text = False
     worker.file_name = "/tmp/subtitle.srt"
 
-    monkeypatch.setattr(
-        conversion_module, "detect_timestamps_in_text", lambda _path: True
-    )
+    monkeypatch.setattr(conversion_module, "detect_timestamps_in_text", lambda _path: True)
     assert worker._is_timestamp_text_input() is False
 
     worker.is_direct_text = True
@@ -874,9 +852,7 @@ def test_run_routes_timestamp_text_to_subtitle_processor(monkeypatch) -> None:
     assert calls == [("/tmp/queue_base.txt", True)]
 
 
-def test_await_timestamp_processing_choice_returns_user_choice_and_clears_event() -> (
-    None
-):
+def test_await_timestamp_processing_choice_returns_user_choice_and_clears_event() -> None:
     worker = ConversionThread.__new__(ConversionThread)
     worker.chapters_detected = _SignalStub()
     worker.cancel_requested = False

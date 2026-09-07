@@ -46,7 +46,7 @@ def _install_dependency_stubs() -> None:
         setattr(
             numpy_stub,
             "concatenate",
-            lambda seq, axis=0: sum((list(item) for item in seq), []),
+            lambda seq, axis=0: [x for item in seq for x in item],
         )
         sys.modules["numpy"] = numpy_stub
 
@@ -103,8 +103,8 @@ def _install_dependency_stubs() -> None:
 
 _install_dependency_stubs()
 
-from abogen.text_extractor import ExtractedChapter  # noqa: E402
-from abogen.webui.conversion_runner import (  # noqa: E402
+from abogen.text_extractor import ExtractedChapter
+from abogen.webui.conversion_runner import (
     _apply_chapter_overrides,
     _merge_metadata,
 )
@@ -124,9 +124,7 @@ def test_apply_chapter_overrides_with_custom_text() -> None:
         {"index": 1, "enabled": False},
     ]
 
-    selected, metadata, diagnostics = _apply_chapter_overrides(
-        _sample_chapters(), overrides
-    )
+    selected, metadata, diagnostics = _apply_chapter_overrides(_sample_chapters(), overrides)
 
     assert len(selected) == 1
     assert selected[0].title == "Intro"
@@ -141,9 +139,7 @@ def test_apply_chapter_overrides_uses_original_content_when_text_missing() -> No
         {"index": 1, "enabled": True},
     ]
 
-    selected, metadata, diagnostics = _apply_chapter_overrides(
-        _sample_chapters(), overrides
-    )
+    selected, metadata, diagnostics = _apply_chapter_overrides(_sample_chapters(), overrides)
 
     assert len(selected) == 1
     assert selected[0].title == "Chapter 2"
@@ -163,9 +159,7 @@ def test_apply_chapter_overrides_collects_metadata_updates() -> None:
         }
     ]
 
-    selected, metadata, diagnostics = _apply_chapter_overrides(
-        _sample_chapters(), overrides
-    )
+    selected, metadata, diagnostics = _apply_chapter_overrides(_sample_chapters(), overrides)
 
     assert len(selected) == 1
     assert metadata == {"artist": "Test Author", "year": "2024"}
@@ -177,9 +171,7 @@ def test_apply_chapter_overrides_reports_diagnostics_for_invalid_payload() -> No
         {"enabled": True, "title": "Missing"},
     ]
 
-    selected, metadata, diagnostics = _apply_chapter_overrides(
-        _sample_chapters(), overrides
-    )
+    selected, metadata, diagnostics = _apply_chapter_overrides(_sample_chapters(), overrides)
 
     assert selected == []
     assert metadata == {}

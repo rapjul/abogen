@@ -59,16 +59,16 @@ class TestSelectionHeuristics(unittest.TestCase):
         for title, expected in cases:
             item = MockItem(title)
             result = handler._should_exclude_by_title(item)
-            self.assertEqual(
-                result, expected, f"Failed PyQt check for title: '{title}'"
-            )
+            self.assertEqual(result, expected, f"Failed PyQt check for title: '{title}'")
 
     def test_webui_heuristics(self):
         # should_preselect_chapter(title, text, index, total_count) -> bool (True = selected)
         # supplement_score(title, text, index) -> float (Higher = more likely de-selected)
 
         # Case 1: Real chapter with "Map" and long text
-        title = "Chapter 110: The Starlit Blueprint Crystal and the Map That Drew Our Shared Tomorrow!"
+        title = (
+            "Chapter 110: The Starlit Blueprint Crystal and the Map That Drew Our Shared Tomorrow!"
+        )
         text = "Lorum ipsum " * 200  # > 1000 chars
         self.assertTrue(
             should_preselect_chapter(title, text, 0, 10),

@@ -78,9 +78,7 @@ class TestMLXDefaults(unittest.TestCase):
 
         config = {}
         use_mlx_backend = config.get("use_mlx_backend", is_mlx_available())
-        mlx_quantization = config.get(
-            "mlx_quantization", recommended_quantization().name
-        )
+        mlx_quantization = config.get("mlx_quantization", recommended_quantization().name)
 
         self.assertTrue(use_mlx_backend)
         self.assertEqual(mlx_quantization, "FOUR_BIT")

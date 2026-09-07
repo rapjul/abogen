@@ -44,12 +44,8 @@ def test_epub_series_metadata_extracted_from_opf_meta(tmp_path):
 
     # Calibre-style series metadata
     # ebooklib stores this in memory correctly, but may not round-trip via disk in read_epub
-    book.add_metadata(
-        "OPF", "meta", None, {"name": "calibre:series", "content": "Example Saga"}
-    )
-    book.add_metadata(
-        "OPF", "meta", None, {"name": "calibre:series_index", "content": "2"}
-    )
+    book.add_metadata("OPF", "meta", None, {"name": "calibre:series", "content": "Example Saga"})
+    book.add_metadata("OPF", "meta", None, {"name": "calibre:series_index", "content": "2"})
 
     chapter = epub.EpubHtml(title="Chapter 1", file_name="chap_01.xhtml", lang="en")
     chapter.content = "<h1>Chapter 1</h1><p>Hello</p>"

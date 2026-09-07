@@ -28,9 +28,7 @@ def test_cached_download_returns_without_remote_request(monkeypatch: Any) -> Non
 
     monkeypatch.setattr(hf_tracker, "hf_hub_download", fake_download)
 
-    result = hf_tracker.tracked_hf_hub_download(
-        repo_id="owner/model", filename="model.bin"
-    )
+    result = hf_tracker.tracked_hf_hub_download(repo_id="owner/model", filename="model.bin")
 
     assert result == "/cache/model.bin"
     assert calls == [
@@ -70,9 +68,7 @@ def test_cache_miss_continues_to_normal_download(monkeypatch: Any) -> None:
 
     monkeypatch.setattr(hf_tracker, "hf_hub_download", fake_download)
 
-    result = hf_tracker.tracked_hf_hub_download(
-        repo_id="owner/model", filename="model.bin"
-    )
+    result = hf_tracker.tracked_hf_hub_download(repo_id="owner/model", filename="model.bin")
 
     assert result == "/downloads/model.bin"
     assert calls == [

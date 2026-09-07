@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import io
 import time
+
 from abogen.webui.service import (
+    _JOB_LOGGER,
     Job,
     JobStatus,
-    build_service,
-    _JOB_LOGGER,
     build_audiobookshelf_metadata,
+    build_service,
 )
 
 

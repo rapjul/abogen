@@ -20,9 +20,7 @@ def test_debug_epub_contains_all_codes():
     assert epub_path.exists()
 
     extraction = extract_from_path(epub_path)
-    combined = extraction.combined_text or "\n\n".join(
-        (c.text or "") for c in extraction.chapters
-    )
+    combined = extraction.combined_text or "\n\n".join((c.text or "") for c in extraction.chapters)
 
     for code in iter_expected_codes():
         marker = f"{MARKER_PREFIX}{code}{MARKER_SUFFIX}"
@@ -38,9 +36,7 @@ def test_debug_samples_normalize_smoke():
     runtime = dict(settings)
 
     normalized = {
-        sample.code: normalize_for_pipeline(
-            sample.text, config=apostrophe, settings=runtime
-        )
+        sample.code: normalize_for_pipeline(sample.text, config=apostrophe, settings=runtime)
         for sample in DEBUG_TTS_SAMPLES
     }
 
@@ -77,9 +73,7 @@ def test_settings_debug_route_writes_manifest(tmp_path, monkeypatch):
             audio[::100] = 0.1
             yield _Seg(audio)
 
-    monkeypatch.setattr(
-        runner, "_load_pipeline", lambda language, use_gpu: DummyPipeline()
-    )
+    monkeypatch.setattr(runner, "_load_pipeline", lambda language, use_gpu: DummyPipeline())
 
     app = create_app(
         {
@@ -97,18 +91,14 @@ def test_settings_debug_route_writes_manifest(tmp_path, monkeypatch):
         assert "/settings/debug/" in location
 
         # Extract run id from /settings/debug/<run_id>
-        run_id = (
-            location.rsplit("/settings/debug/", 1)[1].split("?", 1)[0].split("#", 1)[0]
-        )
+        run_id = location.rsplit("/settings/debug/", 1)[1].split("?", 1)[0].split("#", 1)[0]
         manifest_path = tmp_path / "debug" / run_id / "manifest.json"
         assert manifest_path.exists()
 
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         filenames = {item["filename"] for item in manifest.get("artifacts", [])}
         assert "overall.wav" in filenames
-        assert any(
-            name.startswith("case_") and name.endswith(".wav") for name in filenames
-        )
+        assert any(name.startswith("case_") and name.endswith(".wav") for name in filenames)
 
 
 def test_debug_samples_have_minimum_per_category():
@@ -155,9 +145,7 @@ def test_debug_runner_resolves_profile_voice_before_pipeline(tmp_path, monkeypat
             audio = np.zeros(int(0.05 * runner.SAMPLE_RATE), dtype="float32")
             yield _Seg(audio)
 
-    monkeypatch.setattr(
-        runner, "_load_pipeline", lambda language, use_gpu: DummyPipeline()
-    )
+    monkeypatch.setattr(runner, "_load_pipeline", lambda language, use_gpu: DummyPipeline())
 
     settings = {
         "language": "en",
@@ -170,6 +158,4 @@ def test_debug_runner_resolves_profile_voice_before_pipeline(tmp_path, monkeypat
     assert manifest.get("run_id")
     assert calls
     # Must not pass through the profile:* string.
-    assert all(
-        isinstance(v, str) and not v.lower().startswith("profile:") for v in calls
-    )
+    assert all(isinstance(v, str) and not v.lower().startswith("profile:") for v in calls)

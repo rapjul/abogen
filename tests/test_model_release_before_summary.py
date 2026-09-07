@@ -18,9 +18,7 @@ def test_source_has_purge_before_completed():
         r"purge_tts_model\(\)\s*\n\s*QApplication.processEvents\(\)\s*\n[\s\S]{0,200}?show_queue_summary\(outcome=\"completed\"\)",
         src,
     )
-    assert m, (
-        'Expected purge + processEvents before show_queue_summary(outcome="completed")'
-    )
+    assert m, 'Expected purge + processEvents before show_queue_summary(outcome="completed")'
 
 
 def test_source_has_purge_before_cancelled():
@@ -29,9 +27,7 @@ def test_source_has_purge_before_cancelled():
         r"purge_tts_model\(\)\s*\n\s*QApplication.processEvents\(\)\s*\n[\s\S]{0,200}?show_queue_summary\(outcome=\"cancelled\"\)",
         src,
     )
-    assert m, (
-        'Expected purge + processEvents before show_queue_summary(outcome="cancelled")'
-    )
+    assert m, 'Expected purge + processEvents before show_queue_summary(outcome="cancelled")'
 
 
 def test_source_has_purge_before_failed():
@@ -40,6 +36,4 @@ def test_source_has_purge_before_failed():
         r"purge_tts_model\(\)\s*\n\s*QApplication.processEvents\(\)\s*\n[\s\S]{0,200}?show_queue_summary\(outcome=\"failed\"\)",
         src,
     )
-    assert m, (
-        'Expected purge + processEvents before show_queue_summary(outcome="failed")'
-    )
+    assert m, 'Expected purge + processEvents before show_queue_summary(outcome="failed")'

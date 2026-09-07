@@ -259,9 +259,7 @@ class TestMLXKokoroPipelineCall(unittest.TestCase):
 
         with (
             patch("abogen.tts_mlx.is_mlx_available", return_value=True),
-            patch(
-                "abogen.tts_mlx.MLXKokoroPipeline._model", new=mock_model, create=True
-            ),
+            patch("abogen.tts_mlx.MLXKokoroPipeline._model", new=mock_model, create=True),
         ):
             pipeline = MLXKokoroPipeline.__new__(MLXKokoroPipeline)
             pipeline._model = mock_model
@@ -324,11 +322,7 @@ class TestMLXKokoroPipelineCall(unittest.TestCase):
         used_voice = (
             call_kwargs.kwargs.get("voice")
             if call_kwargs.kwargs and "voice" in call_kwargs.kwargs
-            else (
-                call_kwargs.args[1]
-                if call_kwargs.args and len(call_kwargs.args) > 1
-                else ""
-            )
+            else (call_kwargs.args[1] if call_kwargs.args and len(call_kwargs.args) > 1 else "")
         )
         self.assertEqual(used_voice, "af_heart")
 
@@ -359,7 +353,7 @@ class TestMLXAudioProcessing(unittest.TestCase):
         audio = np.sin(2 * np.pi * 440 * t)
         resampled = resample_audio_mlx(audio, 24000, 22050)
 
-        expected_len = int(round(len(audio) * 22050 / 24000))
+        expected_len = round(len(audio) * 22050 / 24000)
         self.assertAlmostEqual(len(resampled), expected_len, delta=2)
         self.assertEqual(resampled.dtype, np.float32)
 
@@ -371,7 +365,7 @@ class TestMLXAudioProcessing(unittest.TestCase):
         audio = np.sin(2 * np.pi * 440 * t)
         resampled = resample_audio_mlx(audio, 22050, 24000)
 
-        expected_len = int(round(len(audio) * 24000 / 22050))
+        expected_len = round(len(audio) * 24000 / 22050)
         self.assertAlmostEqual(len(resampled), expected_len, delta=2)
         self.assertEqual(resampled.dtype, np.float32)
 
@@ -399,7 +393,7 @@ class TestMLXAudioProcessing(unittest.TestCase):
             t = np.linspace(0, 0.5, 12000, endpoint=False, dtype=np.float32)
             audio = np.sin(2 * np.pi * 440 * t)
             resampled = resample_audio_mlx(audio, 24000, 22050)
-            expected_len = int(round(len(audio) * 22050 / 24000))
+            expected_len = round(len(audio) * 22050 / 24000)
             self.assertAlmostEqual(len(resampled), expected_len, delta=2)
 
     def test_load_audio_file(self) -> None:
@@ -408,9 +402,7 @@ class TestMLXAudioProcessing(unittest.TestCase):
 
         samplerate = 24000
         duration = 0.5
-        t = np.linspace(
-            0, duration, int(samplerate * duration), endpoint=False, dtype=np.float32
-        )
+        t = np.linspace(0, duration, int(samplerate * duration), endpoint=False, dtype=np.float32)
         data = (np.sin(2 * np.pi * 440 * t) * 0.5).astype(np.float32)
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -487,7 +479,7 @@ class TestMLXBackendPatches(unittest.TestCase):
         # Test lengths that historically triggered interpolation rounding drift
         for length in [100, 300, 565, 1000]:
             f0 = mx.ones((1, length, 1)) * 200.0
-            sine_waves, uv, noise = sine_gen(f0)
+            sine_waves, _uv, noise = sine_gen(f0)
             self.assertEqual(sine_waves.shape[0], 1)
             self.assertEqual(sine_waves.shape[1], length)
             self.assertEqual(noise.shape[0], 1)

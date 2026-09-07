@@ -42,9 +42,7 @@ class TestChapterTitleDeduplication(unittest.TestCase):
         title = "Chapter 1"
         text = "Chapter 1\n\nIt was a dark and stormy night."
         expected = "It was a dark and stormy night."
-        self.assertEqual(
-            deduplicate_chapter_title(text, title, force_remove=True), expected
-        )
+        self.assertEqual(deduplicate_chapter_title(text, title, force_remove=True), expected)
 
     def test_punctuation_variation_duplicate(self) -> None:
         """

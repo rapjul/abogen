@@ -59,9 +59,7 @@ def test_expand_common_abbreviations_latin() -> None:
 def test_expand_common_abbreviations_metric_speed() -> None:
     """Test metric and speed abbreviations."""
     text = "He was going 60mph and 100kph for 5km."
-    expected = (
-        "He was going 60 miles per hour and 100 kilometers per hour for 5 kilometers"
-    )
+    expected = "He was going 60 miles per hour and 100 kilometers per hour for 5 kilometers"
     assert expand_common_abbreviations(text) == expected
 
 
@@ -174,10 +172,7 @@ def test_apply_word_replacements() -> None:
     """Test exact word replacements."""
     text = "The cat and the cataract."
     subs = [("cat", "dog")]
-    assert (
-        apply_word_replacements(text, subs, case_sensitive=False)
-        == "The dog and the cataract."
-    )
+    assert apply_word_replacements(text, subs, case_sensitive=False) == "The dog and the cataract."
 
     text2 = "Case matched case but not CASE."
     subs2 = [("Case", "Box")]
@@ -219,7 +214,9 @@ def test_fix_punctuation() -> None:
 def test_convert_roman_numerals_to_numbers() -> None:
     """Test Roman numeral to Arabic numeral conversion for books."""
     text = "In Chapter IV, we saw Act II and Part MIX. We ignored DIM because it's invalid context."
-    expected = "In Chapter 4, we saw Act 2 and Part 1009. We ignored DIM because it's invalid context."
+    expected = (
+        "In Chapter 4, we saw Act 2 and Part 1009. We ignored DIM because it's invalid context."
+    )
     assert convert_roman_numerals_to_numbers(text) == expected
 
 
@@ -256,9 +253,7 @@ def test_expand_common_abbreviations_japan_railways() -> None:
 def test_convert_roman_numerals_invalid_and_lowercase() -> None:
     """Test Roman numeral parsing with invalid roman strings and lowercase characters."""
     text = "We are on Chapter II. There is no such thing as Chapter DIM or Book MMIM."
-    expected = (
-        "We are on Chapter 2. There is no such thing as Chapter DIM or Book MMIM."
-    )
+    expected = "We are on Chapter 2. There is no such thing as Chapter DIM or Book MMIM."
     assert convert_roman_numerals_to_numbers(text) == expected
 
 

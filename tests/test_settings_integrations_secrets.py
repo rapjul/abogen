@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-
 from abogen.utils import load_config, save_config
 from abogen.webui.app import create_app
 

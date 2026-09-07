@@ -52,9 +52,7 @@ def test_add_files_from_paths_mixed_batch_adds_text_subtitle_and_document(
     text_path = tmp_path / "sample.txt"
     text_path.write_text("hello world", encoding="utf-8")
     subtitle_path = tmp_path / "sample.srt"
-    subtitle_path.write_text(
-        "1\n00:00:00,000 --> 00:00:01,000\nhello\n", encoding="utf-8"
-    )
+    subtitle_path.write_text("1\n00:00:00,000 --> 00:00:01,000\nhello\n", encoding="utf-8")
     doc_path = tmp_path / "book.epub"
     doc_path.write_text("placeholder", encoding="utf-8")
 
@@ -70,24 +68,16 @@ def test_add_files_from_paths_mixed_batch_adds_text_subtitle_and_document(
         return [item]
 
     monkeypatch.setattr(manager, "_create_document_queue_item", _fake_document_item)
-    monkeypatch.setattr(
-        queue_manager_module.QMessageBox, "information", lambda *a, **k: None
-    )
-    monkeypatch.setattr(
-        queue_manager_module.QMessageBox, "warning", lambda *a, **k: None
-    )
+    monkeypatch.setattr(queue_manager_module.QMessageBox, "information", lambda *a, **k: None)
+    monkeypatch.setattr(queue_manager_module.QMessageBox, "warning", lambda *a, **k: None)
 
     manager.add_files_from_paths([str(text_path), str(subtitle_path), str(doc_path)])
 
     assert len(manager.queue) == 3
-    subtitle_item = next(
-        item for item in manager.queue if item.file_name == str(subtitle_path)
-    )
+    subtitle_item = next(item for item in manager.queue if item.file_name == str(subtitle_path))
     assert subtitle_item.subtitle_mode == "Disabled"
 
-    doc_item = next(
-        item for item in manager.queue if item.save_base_path == str(doc_path)
-    )
+    doc_item = next(item for item in manager.queue if item.save_base_path == str(doc_path))
     assert doc_item.file_name.endswith("book_prepared.txt")
     assert doc_item.save_chapters_separately is True
     assert doc_item.merge_chapters_at_end is False
@@ -103,9 +93,7 @@ def test_add_files_from_paths_document_cancel_skips_only_that_file(
     doc_path = tmp_path / "cancelled.pdf"
     doc_path.write_text("placeholder", encoding="utf-8")
 
-    monkeypatch.setattr(
-        manager, "_create_document_queue_item", lambda *_args, **_kwargs: None
-    )
+    monkeypatch.setattr(manager, "_create_document_queue_item", lambda *_args, **_kwargs: None)
 
     info_messages: list[str] = []
     monkeypatch.setattr(
@@ -113,9 +101,7 @@ def test_add_files_from_paths_document_cancel_skips_only_that_file(
         "information",
         lambda _self, _title, text: info_messages.append(text),
     )
-    monkeypatch.setattr(
-        queue_manager_module.QMessageBox, "warning", lambda *a, **k: None
-    )
+    monkeypatch.setattr(queue_manager_module.QMessageBox, "warning", lambda *a, **k: None)
 
     manager.add_files_from_paths([str(doc_path), str(text_path)])
 
@@ -137,22 +123,14 @@ def test_add_files_from_paths_duplicate_decisions_respected(
     )
     manager.queue.append(existing)
 
-    monkeypatch.setattr(
-        manager, "_resolve_duplicate_decision", lambda *_args, **_kwargs: "skip"
-    )
-    monkeypatch.setattr(
-        queue_manager_module.QMessageBox, "information", lambda *a, **k: None
-    )
-    monkeypatch.setattr(
-        queue_manager_module.QMessageBox, "warning", lambda *a, **k: None
-    )
+    monkeypatch.setattr(manager, "_resolve_duplicate_decision", lambda *_args, **_kwargs: "skip")
+    monkeypatch.setattr(queue_manager_module.QMessageBox, "information", lambda *a, **k: None)
+    monkeypatch.setattr(queue_manager_module.QMessageBox, "warning", lambda *a, **k: None)
 
     manager.add_files_from_paths([str(text_path)])
     assert len(manager.queue) == 1
 
-    monkeypatch.setattr(
-        manager, "_resolve_duplicate_decision", lambda *_args, **_kwargs: "add"
-    )
+    monkeypatch.setattr(manager, "_resolve_duplicate_decision", lambda *_args, **_kwargs: "add")
     manager.add_files_from_paths([str(text_path)])
     assert len(manager.queue) == 2
 
@@ -165,15 +143,9 @@ def test_add_files_from_paths_duplicate_within_batch_honors_policy(
     text_path = tmp_path / "batch_dup.txt"
     text_path.write_text("same", encoding="utf-8")
 
-    monkeypatch.setattr(
-        manager, "_resolve_duplicate_decision", lambda *_args, **_kwargs: "skip"
-    )
-    monkeypatch.setattr(
-        queue_manager_module.QMessageBox, "information", lambda *a, **k: None
-    )
-    monkeypatch.setattr(
-        queue_manager_module.QMessageBox, "warning", lambda *a, **k: None
-    )
+    monkeypatch.setattr(manager, "_resolve_duplicate_decision", lambda *_args, **_kwargs: "skip")
+    monkeypatch.setattr(queue_manager_module.QMessageBox, "information", lambda *a, **k: None)
+    monkeypatch.setattr(queue_manager_module.QMessageBox, "warning", lambda *a, **k: None)
 
     manager.add_files_from_paths([str(text_path), str(text_path)])
 
@@ -183,9 +155,7 @@ def test_add_files_from_paths_duplicate_within_batch_honors_policy(
 def test_resolve_start_directory_walks_up_from_missing_path(tmp_path: Path) -> None:
     nested_missing = tmp_path / "missing" / "deeper" / "selection.txt"
 
-    assert file_dialog_paths.resolve_start_directory(str(nested_missing)) == str(
-        tmp_path
-    )
+    assert file_dialog_paths.resolve_start_directory(str(nested_missing)) == str(tmp_path)
 
 
 def test_resolve_start_directory_falls_back_to_home_for_empty_value() -> None:
@@ -280,17 +250,13 @@ def test_create_document_queue_item_strips_to_ch_suffix(
 
     monkeypatch.setattr(queue_manager_module, "HandlerDialog", FakeDialog)
     monkeypatch.setattr(manager, "_document_file_type", lambda p: "epub")
-    monkeypatch.setattr(
-        manager, "_resolve_document_output_cache_dir", lambda p, d: str(tmp_path)
-    )
+    monkeypatch.setattr(manager, "_resolve_document_output_cache_dir", lambda p, d: str(tmp_path))
 
     import os
     import tempfile
 
     fake_text_file = tmp_path / "temp_chunk.txt"
-    monkeypatch.setattr(
-        tempfile, "mkstemp", lambda **kwargs: (999, str(fake_text_file))
-    )
+    monkeypatch.setattr(tempfile, "mkstemp", lambda **kwargs: (999, str(fake_text_file)))
     monkeypatch.setattr(os, "close", lambda fd: None)
 
     # Mock open if needed, but since it writes to fake_text_file which is in tmp_path, it's fine to write to disk.
@@ -312,8 +278,10 @@ def test_queue_manager_reordering_preserves_multi_selection(
 ) -> None:
     """Test that moving multiple items in the queue manager preserves the selection on the moved items."""
     import sys
+
     from PyQt6.QtCore import QItemSelectionModel
     from PyQt6.QtWidgets import QApplication
+
     from abogen.pyqt.queue_manager_gui import QueueManager
     from abogen.pyqt.queued_item import QueuedItem
 
@@ -350,13 +318,11 @@ def test_queue_manager_reordering_preserves_multi_selection(
     manager.listwidget.clearSelection()
     selection_model.select(
         model.index(1, 0),
-        QItemSelectionModel.SelectionFlag.Select
-        | QItemSelectionModel.SelectionFlag.Rows,
+        QItemSelectionModel.SelectionFlag.Select | QItemSelectionModel.SelectionFlag.Rows,
     )
     selection_model.select(
         model.index(2, 0),
-        QItemSelectionModel.SelectionFlag.Select
-        | QItemSelectionModel.SelectionFlag.Rows,
+        QItemSelectionModel.SelectionFlag.Select | QItemSelectionModel.SelectionFlag.Rows,
     )
 
     assert manager._get_selected_rows() == [1, 2]

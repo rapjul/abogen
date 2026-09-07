@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import sys
 import types
+from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Iterator, Optional
 
 # Stub dependencies if not present in test environment
 if "soundfile" not in sys.modules:
@@ -68,7 +68,7 @@ def test_fallback_prevents_duplication_on_partial_failure() -> None:
     worker = _make_worker()
 
     def fake_tts(
-        text: str, voice: str, speed: float, split_pattern: Optional[str] = None
+        text: str, voice: str, speed: float, split_pattern: str | None = None
     ) -> Iterator[_ResultStub]:
         # Simple sentence splitter for the mock
         # We simulate that KPipeline/MLXKokoroPipeline yields sentence-by-sentence
@@ -114,7 +114,7 @@ def test_fallback_full_retry_when_no_results_yielded() -> None:
     worker = _make_worker()
 
     def fake_tts(
-        text: str, voice: str, speed: float, split_pattern: Optional[str] = None
+        text: str, voice: str, speed: float, split_pattern: str | None = None
     ) -> Iterator[_ResultStub]:
         if split_pattern is None:
             raise RuntimeError("Immediate failure before any results")

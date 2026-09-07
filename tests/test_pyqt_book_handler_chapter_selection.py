@@ -5,8 +5,9 @@ find & replace engine (including regular expressions and syntax error safety),
 direct text editing persistence, and quick selection filtering presets.
 """
 
+from collections.abc import Generator
 from pathlib import Path
-from typing import Generator
+
 import pytest
 from PyQt6.QtCore import QEvent, QPoint, Qt
 from PyQt6.QtGui import QKeyEvent
@@ -58,14 +59,15 @@ def _wait_dialog_loader(dialog: HandlerDialog) -> None:
     Args:
         dialog: HandlerDialog instance.
     """
-    if hasattr(dialog, "_loader_thread") and dialog._loader_thread is not None:
-        if dialog._loader_thread.isRunning():
-            dialog._loader_thread.wait()
+    if (
+        hasattr(dialog, "_loader_thread")
+        and dialog._loader_thread is not None
+        and dialog._loader_thread.isRunning()
+    ):
+        dialog._loader_thread.wait()
 
 
-def test_multi_selection_keyboard_shortcuts(
-    qapp: QApplication, mock_md_book: Path
-) -> None:
+def test_multi_selection_keyboard_shortcuts(qapp: QApplication, mock_md_book: Path) -> None:
     """Test that pressing Right Arrow or 'Y' checks ALL selected items in treeWidget.
 
     Args:
@@ -95,9 +97,7 @@ def test_multi_selection_keyboard_shortcuts(
     item2.setSelected(True)
 
     # Simulate Right Arrow key press event
-    right_event = QKeyEvent(
-        QEvent.Type.KeyPress, Qt.Key.Key_Right, Qt.KeyboardModifier.NoModifier
-    )
+    right_event = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Right, Qt.KeyboardModifier.NoModifier)
     handled = dialog.eventFilter(dialog.treeWidget, right_event)
 
     assert handled is True
@@ -107,9 +107,7 @@ def test_multi_selection_keyboard_shortcuts(
     # Simulate Left Arrow key press event to uncheck both
     item1.setSelected(True)
     item2.setSelected(True)
-    left_event = QKeyEvent(
-        QEvent.Type.KeyPress, Qt.Key.Key_Left, Qt.KeyboardModifier.NoModifier
-    )
+    left_event = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Left, Qt.KeyboardModifier.NoModifier)
     handled_left = dialog.eventFilter(dialog.treeWidget, left_event)
 
     assert handled_left is True
@@ -117,9 +115,7 @@ def test_multi_selection_keyboard_shortcuts(
     assert item2.checkState(0) == Qt.CheckState.Unchecked
 
 
-def test_chapter_stats_and_duration_format(
-    qapp: QApplication, mock_md_book: Path
-) -> None:
+def test_chapter_stats_and_duration_format(qapp: QApplication, mock_md_book: Path) -> None:
     """Test calculation of character count, word count, and speed-adjusted audio duration.
 
     Args:
@@ -159,9 +155,7 @@ def test_chapter_stats_and_duration_format(
     assert dialog.toggle_edit_btn.maximumWidth() == 120
     assert dialog.toggle_fr_btn.minimumWidth() == 120
     assert dialog.toggle_fr_btn.maximumWidth() == 120
-    assert (
-        dialog.toggle_edit_btn.minimumHeight() == dialog.toggle_edit_btn.maximumHeight()
-    )
+    assert dialog.toggle_edit_btn.minimumHeight() == dialog.toggle_edit_btn.maximumHeight()
     assert dialog.toggle_fr_btn.minimumHeight() == dialog.toggle_fr_btn.maximumHeight()
     expected_height = dialog.toggle_edit_btn.maximumHeight()
 
@@ -214,9 +208,7 @@ def test_find_and_replace_plain_text(qapp: QApplication, mock_md_book: Path) -> 
     assert "cat" in dialog.previewEdit.toPlainText()
 
 
-def test_find_and_replace_regular_expression(
-    qapp: QApplication, mock_md_book: Path
-) -> None:
+def test_find_and_replace_regular_expression(qapp: QApplication, mock_md_book: Path) -> None:
     """Test Regular Expression Find and Replace with capture groups and syntax error handling.
 
     Args:
@@ -281,9 +273,7 @@ def test_direct_edit_mode_persistence(qapp: QApplication, mock_md_book: Path) ->
     assert dialog.content_texts["ch1"] == "Modified direct chapter text."
 
 
-def test_uncheck_short_chapters_and_invert_preset(
-    qapp: QApplication, mock_md_book: Path
-) -> None:
+def test_uncheck_short_chapters_and_invert_preset(qapp: QApplication, mock_md_book: Path) -> None:
     """Test quick selection presets: unchecking short chapters and inverting selection.
 
     Args:
@@ -321,9 +311,7 @@ def test_uncheck_short_chapters_and_invert_preset(
     assert item_short.checkState(0) == Qt.CheckState.Checked
 
 
-def test_deselect_all_above_and_below_flat(
-    qapp: QApplication, mock_md_book: Path
-) -> None:
+def test_deselect_all_above_and_below_flat(qapp: QApplication, mock_md_book: Path) -> None:
     """Test positional deselect all above and deselect all below on flat chapters.
 
     Args:
@@ -380,9 +368,7 @@ def test_deselect_all_above_and_below_flat(
     assert all(item.checkState(0) == Qt.CheckState.Checked for item in items)
 
 
-def test_deselect_all_above_and_below_hierarchical(
-    qapp: QApplication, mock_md_book: Path
-) -> None:
+def test_deselect_all_above_and_below_hierarchical(qapp: QApplication, mock_md_book: Path) -> None:
     """Test positional deselect all above and below on hierarchical section tree.
 
     Args:
@@ -476,9 +462,7 @@ def test_deselect_all_above_and_below_hierarchical(
     assert ch3b.checkState(0) == Qt.CheckState.Unchecked
 
 
-def test_multi_select_group_check_and_uncheck(
-    qapp: QApplication, mock_md_book: Path
-) -> None:
+def test_multi_select_group_check_and_uncheck(qapp: QApplication, mock_md_book: Path) -> None:
     """Test group checking and unchecking with parent-child state synchronization.
 
     Args:

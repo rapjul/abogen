@@ -72,10 +72,7 @@ class TestEpubVolumeDuplicate(unittest.TestCase):
             lang="en",
         )
         v0_c1.content = (
-            "<html><body>"
-            "<h1>Essence of the Mirror</h1>"
-            f"<p>{paragraph_filler}</p>"
-            "</body></html>"
+            f"<html><body><h1>Essence of the Mirror</h1><p>{paragraph_filler}</p></body></html>"
         )
         book.add_item(v0_c1)
 
@@ -224,7 +221,7 @@ class TestEpubVolumeDuplicate(unittest.TestCase):
         self._wait_for_dialog(dialog)
         dialog.auto_select_chapters()
 
-        chunks, checked_ids = dialog.get_selected_text()
+        chunks, _checked_ids = dialog.get_selected_text()
         self.assertTrue(len(chunks) > 0, "Expected non-empty chunks from dialog")
         combined_text = chunks[0][0]
 
@@ -253,7 +250,7 @@ class TestEpubVolumeDuplicate(unittest.TestCase):
         dialog.chapter_visual_indentation = False
         dialog.auto_select_chapters()
 
-        chunks, checked_ids = dialog.get_selected_text()
+        chunks, _checked_ids = dialog.get_selected_text()
         self.assertTrue(len(chunks) > 0, "Expected non-empty chunks from dialog")
         combined_text = chunks[0][0]
 
@@ -262,12 +259,8 @@ class TestEpubVolumeDuplicate(unittest.TestCase):
 
         # Child chapter has a clean title without redundant 'Volume 1 - ' prefix
         self.assertIn("<<CHAPTER_MARKER:Mirror, mirror on the wall>>", combined_text)
-        self.assertNotIn(
-            "<<CHAPTER_MARKER:Volume 1 - Mirror, mirror on the wall>>", combined_text
-        )
-        self.assertNotIn(
-            "<<CHAPTER_MARKER:├─ Mirror, mirror on the wall>>", combined_text
-        )
+        self.assertNotIn("<<CHAPTER_MARKER:Volume 1 - Mirror, mirror on the wall>>", combined_text)
+        self.assertNotIn("<<CHAPTER_MARKER:├─ Mirror, mirror on the wall>>", combined_text)
 
         dialog.close()
 

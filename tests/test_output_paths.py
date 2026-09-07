@@ -39,13 +39,9 @@ def test_prepare_project_layout_uses_timestamped_folder(
         lambda: "20250101-120000",
     )
 
-    project_root, audio_dir, subtitle_dir, metadata_dir = _prepare_project_layout(
-        job, tmp_path
-    )
+    project_root, audio_dir, subtitle_dir, metadata_dir = _prepare_project_layout(job, tmp_path)
 
-    assert project_root.name.startswith("20250101-120000_Sample_Title"), (
-        project_root.name
-    )
+    assert project_root.name.startswith("20250101-120000_Sample_Title"), project_root.name
     assert audio_dir == project_root
     assert subtitle_dir == project_root
     assert metadata_dir is None
@@ -64,9 +60,7 @@ def test_prepare_project_layout_creates_project_subdirs(
         lambda: "20250101-120500",
     )
 
-    project_root, audio_dir, subtitle_dir, metadata_dir = _prepare_project_layout(
-        job, tmp_path
-    )
+    project_root, audio_dir, subtitle_dir, metadata_dir = _prepare_project_layout(job, tmp_path)
 
     assert audio_dir == project_root / "audio"
     assert subtitle_dir == project_root / "subtitles"

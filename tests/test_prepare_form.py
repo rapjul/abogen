@@ -102,9 +102,7 @@ def test_resolve_voice_setting_handles_profile_reference():
         }
     }
 
-    voice, profile_name, language = resolve_voice_setting(
-        "profile:Blend", profiles=profiles
-    )
+    voice, profile_name, language = resolve_voice_setting("profile:Blend", profiles=profiles)
 
     assert voice == "af_nova*0.5+am_liam*0.5"
     assert profile_name == "Blend"

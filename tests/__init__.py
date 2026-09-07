@@ -29,11 +29,12 @@ def _soundfile_write_stub(
             pass
 
 
-if importlib.util.find_spec("soundfile") is None:
-    if "soundfile" not in sys.modules:  # pragma: no cover - import guard
-        stub = ModuleType("soundfile")
-        stub.write = _soundfile_write_stub  # type: ignore[attr-defined]
-        sys.modules["soundfile"] = stub
+if (
+    importlib.util.find_spec("soundfile") is None and "soundfile" not in sys.modules
+):  # pragma: no cover - import guard
+    stub = ModuleType("soundfile")
+    stub.write = _soundfile_write_stub  # type: ignore[attr-defined]
+    sys.modules["soundfile"] = stub
 
 
 def _static_ffmpeg_add_paths_stub(*_args, **_kwargs) -> None:  # pragma: no cover - stub

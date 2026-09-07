@@ -76,7 +76,7 @@ class TestBookHandlerRegression(unittest.TestCase):
         # Validate content similar to what we expect
         # intro.xhtml should be there
         found_intro = False
-        for key, text in dialog.content_texts.items():
+        for text in dialog.content_texts.values():
             if "Welcome to the book" in text:
                 found_intro = True
                 break
