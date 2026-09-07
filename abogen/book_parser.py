@@ -99,13 +99,17 @@ class BaseBookParser(ABC):
         self.close()
 
     @abstractmethod
-    def process_content(self, replace_single_newlines=True):
+    def process_content(
+        self, replace_single_newlines: bool = True
+    ) -> tuple[dict[str, str], dict[str, int]] | None:
         """Process the book content to extract text and structure."""
+        raise NotImplementedError
 
     @property
     @abstractmethod
-    def file_type(self):
+    def file_type(self) -> str:
         """Return the type of the file (pdf, epub, markdown)."""
+        raise NotImplementedError
 
     def get_chapters(self):
         """Return a list of chapter IDs and Names."""
@@ -154,7 +158,7 @@ class PdfParser(BaseBookParser):
         super().__init__(book_path)
 
     @property
-    def file_type(self):
+    def file_type(self) -> str:
         return "pdf"
 
     def load(self):
@@ -174,7 +178,9 @@ class PdfParser(BaseBookParser):
         # For now, base class metadata is empty dict
         pass
 
-    def process_content(self, replace_single_newlines=True):
+    def process_content(
+        self, replace_single_newlines: bool = True
+    ) -> tuple[dict[str, str], dict[str, int]] | None:
         if not self.pdf_doc:
             self.load()
         pdf_doc = self.pdf_doc
@@ -183,7 +189,8 @@ class PdfParser(BaseBookParser):
 
         # 1. Extract text from all pages first
         for page_num in range(len(pdf_doc)):
-            text = pdf_doc[page_num].get_text()
+            text_val = pdf_doc[page_num].get_text()
+            text = str(text_val) if not isinstance(text_val, str) else text_val
 
             # Clean up common PDF artifacts BEFORE clean_text merges lines/adds punctuation
             text = _BRACKETED_NUMBERS_PATTERN.sub("", text)
@@ -330,7 +337,7 @@ class MarkdownParser(BaseBookParser):
         super().__init__(book_path)
 
     @property
-    def file_type(self):
+    def file_type(self) -> str:
         return "markdown"
 
     def load(self):
@@ -342,7 +349,9 @@ class MarkdownParser(BaseBookParser):
             logging.error(f"Error reading markdown file: {e}")
             self.markdown_text = ""
 
-    def process_content(self, replace_single_newlines=True):
+    def process_content(
+        self, replace_single_newlines: bool = True
+    ) -> tuple[dict[str, str], dict[str, int]] | None:
         if self.markdown_text is None:
             self.load()
 
@@ -415,12 +424,14 @@ class MarkdownParser(BaseBookParser):
             section_html = html[content_start:content_end]
             section_soup = BeautifulSoup(section_html, "html.parser")
 
-            header_tag = section_soup.find(attrs={"id": header_id})
+            header_tag = section_soup.find(id=str(header_id))
             if header_tag:
                 header_tag.decompose()
 
-            section_text = clean_text(section_soup.get_text()).strip()
-            section_text = deduplicate_chapter_title(section_text, header_name, force_remove=True)
+            section_text = clean_text(section_soup.get_text())
+            section_text = deduplicate_chapter_title(
+                section_text, str(header_name), force_remove=True
+            )
             chapter_id = header_id
             if section_text:
                 full_content = f"{header_name}\n\n{section_text}"
@@ -444,7 +455,7 @@ class EpubParser(BaseBookParser):
         super().__init__(book_path)
 
     @property
-    def file_type(self):
+    def file_type(self) -> str:
         return "epub"
 
     def load(self):
@@ -472,7 +483,9 @@ class EpubParser(BaseBookParser):
             finally:
                 reader_class.read_file = orig_read_file
 
-    def process_content(self, replace_single_newlines=True):
+    def process_content(
+        self, replace_single_newlines: bool = True
+    ) -> tuple[dict[str, str], dict[str, int]] | None:
         if not self.book:
             self.load()
 
@@ -977,6 +990,11 @@ class EpubParser(BaseBookParser):
 
     def _identify_nav_item(self):
         """Identify the navigation item (HTML Nav or NCX) and its type."""
+        if not self.book:
+            self.load()
+        if self.book is None:
+            return None, None
+
         nav_item = None
         nav_type = None
 
@@ -1062,6 +1080,11 @@ class EpubParser(BaseBookParser):
         except Exception as e:
             raise ValueError(f"Failed to parse navigation content: {e}")
 
+        if not self.book:
+            self.load()
+        if self.book is None:
+            return
+
         self.doc_content = {}
         spine_docs = []
         for spine_item_tuple in self.book.spine:
@@ -1078,7 +1101,7 @@ class EpubParser(BaseBookParser):
         for item in self.book.get_items_of_type(ebooklib.ITEM_DOCUMENT):
             href = item.get_name()
             if href in doc_order or any(
-                href in nav_point.get("src", "")
+                href in str(nav_point.get("src", "") or "")
                 for nav_point in nav_soup.find_all(["content", "a"])
             ):
                 try:
@@ -1140,6 +1163,8 @@ class EpubParser(BaseBookParser):
             slice_html = ""
 
             next_entry = ordered_nav_entries[i + 1] if (i + 1) < num_entries else None
+            next_doc: str | None = None
+            next_pos: int = -1
 
             if next_entry:
                 next_doc = next_entry["doc_href"]
@@ -1177,7 +1202,7 @@ class EpubParser(BaseBookParser):
                     pass
 
             is_zero_length_slice = bool(
-                next_entry and current_doc == next_doc and start_slice_pos == next_pos
+                next_entry is not None and current_doc == next_doc and start_slice_pos == next_pos
             )
             if not slice_html.strip() and current_doc_html and not is_zero_length_slice:
                 slice_html = current_doc_html
@@ -1262,6 +1287,11 @@ class EpubParser(BaseBookParser):
         when navigation processing fails.
         """
         logging.info("Using spine fallback for EPUB processing.")
+        if not self.book:
+            self.load()
+        if self.book is None:
+            return
+
         self.doc_content = {}
         spine_docs = []
         for spine_item_tuple in self.book.spine:

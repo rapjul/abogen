@@ -14,12 +14,14 @@ import traceback
 import xml.etree.ElementTree as ET
 import zipfile
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, NamedTuple, Self
 
 import soundfile as sf
 import static_ffmpeg
 from platformdirs import user_desktop_dir
 from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
+from PyQt6.QtGui import QCloseEvent, QKeyEvent
 from PyQt6.QtWidgets import QCheckBox, QDialog, QDialogButtonBox, QLabel, QVBoxLayout
 
 from abogen import hf_tracker
@@ -454,14 +456,15 @@ class CountdownDialog(QDialog):
             if self._button_box is not None:
                 self._button_box.accepted.emit()
 
-    def closeEvent(self, event):
-        event.ignore()
+    def closeEvent(self, a0: QCloseEvent | None) -> None:
+        if a0 is not None:
+            a0.ignore()
 
-    def keyPressEvent(self, event):
-        if event.key() == Qt.Key.Key_Escape:
-            event.ignore()
-        else:
-            super().keyPressEvent(event)
+    def keyPressEvent(self, a0: QKeyEvent | None) -> None:
+        if a0 is not None and a0.key() == Qt.Key.Key_Escape:
+            a0.ignore()
+        elif a0 is not None:
+            super().keyPressEvent(a0)
 
 
 class ChapterOptionsDialog(CountdownDialog):
@@ -1529,7 +1532,7 @@ class ConversionThread(QThread):
         if self.save_option == "Choose output folder":
             self.log_updated.emit(f"  - Output folder: {self.output_folder or os.getcwd()}")
 
-        if self.replace_single_newlines:
+        if getattr(self, "replace_single_newlines", True):
             self.log_updated.emit("  - Replace single newlines: Yes")
 
         # Display subtitle-specific options if processing subtitle file
@@ -1697,6 +1700,9 @@ class ConversionThread(QThread):
         except Exception:
             print("Using split pattern: (unprintable)")
 
+        ffmpeg_proc: subprocess.Popen[Any] | None = None
+        chapter_ffmpeg_proc: subprocess.Popen[Any] | None = None
+
         try:
             hf_tracker.set_log_callback(lambda msg: self.log_updated.emit(msg))
             input_file, processing_file, base_path = self._resolve_run_paths()
@@ -1762,7 +1768,7 @@ class ConversionThread(QThread):
                         mlx_model = None
                         if (
                             self.shared_model
-                            and self.use_mlx_backend
+                            and use_mlx
                             and self.shared_model_config.get("backend") == "mlx"
                             and self.shared_model_config.get("quantization") == mlx_quant_name
                         ):
@@ -1775,7 +1781,7 @@ class ConversionThread(QThread):
                             # If we have an incompatible shared model, it will be replaced
                             from mlx_audio.tts.utils import load_model  # type: ignore
 
-                            mlx_model = load_model(mlx_quant.model_path)
+                            mlx_model = load_model(Path(mlx_quant.model_path))
                             self.model_created.emit(
                                 mlx_model,
                                 {"backend": "mlx", "quantization": mlx_quant_name},
@@ -1843,7 +1849,7 @@ class ConversionThread(QThread):
                 shared_kmodel = None
                 if (
                     self.shared_model
-                    and not self.use_mlx_backend
+                    and not use_mlx
                     and self.shared_model_config.get("backend") == "pytorch"
                 ):
                     shared_kmodel = self.shared_model
@@ -2058,8 +2064,18 @@ class ConversionThread(QThread):
                 sanitized_base_name,
                 require_chapters_dir_free=True,
             )
+            separate_chapters_format = getattr(self, "separate_chapters_format", "wav")
+            base_filepath_no_ext = ""
+            m4b_atom_metadata: dict[str, Any] = {}
+            m4b_cover_for_atoms: Path | str | None = None
+            merged_subtitle_path: str | None = None
+            merged_subtitle_margin = ""
+            merged_subtitle_alignment_tag = ""
+            merged_srt_index = 1
+            ffmpeg_proc: subprocess.Popen[Any] | None = None
+            chapter_ffmpeg_proc: subprocess.Popen[Any] | None = None
+
             if save_chapters_separately and total_chapters > 1:
-                separate_chapters_format = getattr(self, "separate_chapters_format", "wav")
                 chapters_out_dir = chapters_out_dir_candidate
                 os.makedirs(chapters_out_dir, exist_ok=True)
                 self.log_updated.emit((f"\nChapters output folder: {chapters_out_dir}", "grey"))
@@ -2069,8 +2085,6 @@ class ConversionThread(QThread):
                 out_dir = parent_dir
                 base_filepath_no_ext = os.path.join(out_dir, f"{sanitized_base_name}{suffix}")
                 merged_out_path = f"{base_filepath_no_ext}.{self.output_format}"
-                m4b_atom_metadata = {}
-                m4b_cover_for_atoms = None
                 subtitle_entries = []
                 current_time = 0.0
                 rate = 24000
@@ -2378,6 +2392,10 @@ class ConversionThread(QThread):
                     else:
                         chapter_subtitle_path = None
                         chapter_subtitle_file = None
+                    chapter_subtitle_margin = ""
+                    chapter_subtitle_alignment_tag = ""
+                    chapter_srt_index = 1
+                    loaded_voice: Any = None
 
                     # Process each voice segment within the chapter
                     for segment_idx, (voice_name, segment_text) in enumerate(voice_segments):
@@ -2769,7 +2787,7 @@ class ConversionThread(QThread):
             # Finalize merged output file ONLY if merging
             if merge_chapters_at_end:
                 self.log_updated.emit(("\nFinalizing audio. Please wait...", "grey"))
-                if self.output_format in ["wav", "mp3", "flac"]:
+                if self.output_format in ["wav", "mp3", "flac"] and merged_out_file is not None:
                     merged_out_file.close()
                 elif self.output_format == "m4b":
                     self._finalize_ffmpeg_pipe(ffmpeg_proc, "finalizing merged m4b")
@@ -2779,7 +2797,7 @@ class ConversionThread(QThread):
                         with open(chapters_info_path, "w", encoding="utf-8") as f:
                             f.write(";FFMETADATA1\n")
                             for chapter in chapters_time:
-                                chapter_title = chapter["chapter"].replace("=", "\\=")
+                                chapter_title = str(chapter["chapter"]).replace("=", "\\=")
                                 f.write("[CHAPTER]\n")
                                 f.write("TIMEBASE=1/1000\n")
                                 f.write(f"START={int(chapter['start'] * 1000)}\n")
@@ -2896,6 +2914,8 @@ class ConversionThread(QThread):
 
     def _process_subtitle_file(self, tts, base_path, is_timestamp_text=False):
         """Process subtitle files with precise timing and generate output subtitles."""
+        ffmpeg_proc: subprocess.Popen[Any] | None = None
+        subtitle_file = None
         try:
             # Parse subtitle file
             if is_timestamp_text:
@@ -2935,6 +2955,10 @@ class ConversionThread(QThread):
             rate = 24000
             m4b_atom_metadata = {}
             m4b_cover_for_atoms = None
+            margin = ""
+            alignment = ""
+            subtitle_file = None
+            subtitle_path = None
 
             # Setup audio output
             merged_out_file, ffmpeg_proc = None, None
