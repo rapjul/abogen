@@ -14,7 +14,7 @@ import traceback
 import xml.etree.ElementTree as ET
 import zipfile
 from dataclasses import dataclass
-from typing import Any, List, NamedTuple, Optional, Tuple
+from typing import Any, NamedTuple, Self
 
 import soundfile as sf
 import static_ffmpeg
@@ -22,7 +22,7 @@ from platformdirs import user_desktop_dir
 from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtWidgets import QCheckBox, QDialog, QDialogButtonBox, QLabel, QVBoxLayout
 
-import abogen.hf_tracker as hf_tracker
+from abogen import hf_tracker
 from abogen.constants import (
     CHAPTER_OPTIONS_COUNTDOWN,
     COLORS,
@@ -89,13 +89,13 @@ class _AudioWriteItem:
     """
 
     audio_data: Any  # numpy.ndarray[float32] | None
-    audio_bytes: Optional[bytes]
+    audio_bytes: bytes | None
     merged_out_file: Any  # soundfile.SoundFile | None
     ffmpeg_proc: Any  # subprocess.Popen | None
     chapter_out_file: Any  # soundfile.SoundFile | None
     chapter_ffmpeg_proc: Any  # subprocess.Popen | None
-    merged_subtitle_lines: Optional[List[str]]
-    chapter_subtitle_lines: Optional[List[str]]
+    merged_subtitle_lines: list[str] | None
+    chapter_subtitle_lines: list[str] | None
     merged_subtitle_file: Any  # IO[str] | None
     chapter_subtitle_file: Any  # IO[str] | None
     write_context_merged: str = "writing merged chapter audio"
@@ -146,8 +146,8 @@ class _AsyncAudioWriter:
         """
         self._write_to_ffmpeg = write_to_ffmpeg
         self._queue: queue.Queue = queue.Queue(maxsize=maxsize)
-        self._error: Optional[Exception] = None
-        self._thread: Optional[threading.Thread] = None
+        self._error: Exception | None = None
+        self._thread: threading.Thread | None = None
 
     def flush(self) -> None:
         """Block until the background thread has processed all queued items.
@@ -168,11 +168,9 @@ class _AsyncAudioWriter:
         if self._error is not None:
             raise self._error
 
-    def __enter__(self) -> "_AsyncAudioWriter":
+    def __enter__(self) -> Self:
         """Start the background writer thread."""
-        self._thread = threading.Thread(
-            target=self._run, name="abogen-audio-writer", daemon=True
-        )
+        self._thread = threading.Thread(target=self._run, name="abogen-audio-writer", daemon=True)
         self._thread.start()
         return self
 
@@ -214,7 +212,7 @@ class _AsyncAudioWriter:
                 continue
             try:
                 self._process(item)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 self._error = exc
                 # Drain the queue so the producer never deadlocks.
                 try:
@@ -300,7 +298,7 @@ def _cover_size_text(size_bytes: int) -> str:
 def _jpeg_quality_percent_to_ffmpeg_q(quality_percent: int) -> int:
     clamped = max(1, min(100, int(quality_percent)))
     # FFmpeg mjpeg: lower q is better. Map 1-100 roughly to q 31-2.
-    mapped = int(round(31 - (clamped / 100.0) * 29))
+    mapped = round(31 - (clamped / 100.0) * 29)
     return max(2, min(31, mapped))
 
 
@@ -338,16 +336,7 @@ def _is_valid_image_bytes(data: bytes | None) -> bool:
     if not data or len(data) < 8:
         return False
     head = bytes(data[:64]).strip().lower()
-    if (
-        head.startswith(b"<?xml")
-        or head.startswith(b"<html")
-        or head.startswith(b"<!doctype")
-        or head.startswith(b"<svg")
-        or head.startswith(b"{\\")
-        or head.startswith(b"/*")
-    ):
-        return False
-    return True
+    return not (head.startswith((b"<?xml", b"<html", b"<!doctype", b"<svg", b"{\\", b"/*")))
 
 
 def _guess_image_extension(image_bytes: bytes) -> str:
@@ -356,7 +345,7 @@ def _guess_image_extension(image_bytes: bytes) -> str:
         return ".png"
     if head.startswith(b"\xff\xd8\xff"):
         return ".jpg"
-    if head.startswith(b"GIF87a") or head.startswith(b"GIF89a"):
+    if head.startswith((b"GIF87a", b"GIF89a")):
         return ".gif"
     if head.startswith(b"RIFF") and b"WEBP" in head:
         return ".webp"
@@ -420,9 +409,7 @@ def _install_phonemizer_warning_filter():
 
 
 # Configuration constants
-_USER_RESPONSE_TIMEOUT = (
-    0.1  # Timeout in seconds for checking user response/cancellation
-)
+_USER_RESPONSE_TIMEOUT = 0.1  # Timeout in seconds for checking user response/cancellation
 
 
 class CountdownDialog(QDialog):
@@ -445,9 +432,7 @@ class CountdownDialog(QDialog):
 
     def add_countdown_and_buttons(self):
         """Add countdown label and OK button - call this after adding custom content"""
-        self.countdown_label = QLabel(
-            f"Auto-accepting in {self.countdown_seconds} seconds..."
-        )
+        self.countdown_label = QLabel(f"Auto-accepting in {self.countdown_seconds} seconds...")
         self.countdown_label.setStyleSheet(f"color: {COLORS['GREEN']};")
         self._layout.addWidget(self.countdown_label)
 
@@ -462,9 +447,7 @@ class CountdownDialog(QDialog):
     def _on_timer_tick(self):
         self.countdown_seconds -= 1
         if self.countdown_seconds > 0:
-            self.countdown_label.setText(
-                f"Auto-accepting in {self.countdown_seconds} seconds..."
-            )
+            self.countdown_label.setText(f"Auto-accepting in {self.countdown_seconds} seconds...")
         else:
             if self._timer is not None:
                 self._timer.stop()
@@ -485,9 +468,7 @@ class ChapterOptionsDialog(CountdownDialog):
     def __init__(self, chapter_count, parent=None):
         super().__init__("Chapter Options", CHAPTER_OPTIONS_COUNTDOWN, parent)
 
-        self._layout.addWidget(
-            QLabel(f"Detected {chapter_count} chapters in the text file.")
-        )
+        self._layout.addWidget(QLabel(f"Detected {chapter_count} chapters in the text file."))
         self._layout.addWidget(QLabel("How would you like to process these chapters?"))
 
         self.save_separately_checkbox = QCheckBox("Save each chapter separately")
@@ -496,9 +477,7 @@ class ChapterOptionsDialog(CountdownDialog):
         self.save_separately_checkbox.setChecked(False)
         self.merge_at_end_checkbox.setChecked(True)
 
-        self.save_separately_checkbox.stateChanged.connect(
-            self.update_merge_checkbox_state
-        )
+        self.save_separately_checkbox.stateChanged.connect(self.update_merge_checkbox_state)
 
         self._layout.addWidget(self.save_separately_checkbox)
         self._layout.addWidget(self.merge_at_end_checkbox)
@@ -528,9 +507,7 @@ class TimestampDetectionDialog(QDialog):
         layout = QVBoxLayout(self)
 
         layout.addWidget(QLabel("This file contains timestamps in HH:MM:SS format."))
-        layout.addWidget(
-            QLabel("Do you want to use these timestamps for precise audio timing?")
-        )
+        layout.addWidget(QLabel("Do you want to use these timestamps for precise audio timing?"))
 
         yes_label = QLabel(
             "• Yes: Generate audio that matches each timestamp (subtitle mode will be ignored)"
@@ -543,9 +520,7 @@ class TimestampDetectionDialog(QDialog):
         layout.addWidget(no_label)
 
         # Countdown label
-        self.countdown_label = QLabel(
-            f"Auto-accepting in {self.countdown_seconds} seconds..."
-        )
+        self.countdown_label = QLabel(f"Auto-accepting in {self.countdown_seconds} seconds...")
         self.countdown_label.setStyleSheet(f"color: {COLORS['GREEN']};")
         layout.addWidget(self.countdown_label)
 
@@ -568,9 +543,7 @@ class TimestampDetectionDialog(QDialog):
     def _on_timer_tick(self):
         self.countdown_seconds -= 1
         if self.countdown_seconds > 0:
-            self.countdown_label.setText(
-                f"Auto-accepting in {self.countdown_seconds} seconds..."
-            )
+            self.countdown_label.setText(f"Auto-accepting in {self.countdown_seconds} seconds...")
         else:
             self._timer.stop()
             self._set_result(True)
@@ -587,9 +560,7 @@ class TimestampDetectionDialog(QDialog):
 
 class ConversionThread(QThread):
     progress_updated = pyqtSignal(int, str)  # Add str for ETR
-    chapter_progress_updated = pyqtSignal(
-        int, int, str
-    )  # completed, total, current chapter
+    chapter_progress_updated = pyqtSignal(int, int, str)  # completed, total, current chapter
     conversion_finished = pyqtSignal(object, object)  # Pass output path as second arg
     log_updated = pyqtSignal(object)  # Updated signal for log updates
     chapters_detected = pyqtSignal(int)  # Signal for chapter detection
@@ -633,16 +604,14 @@ class ConversionThread(QThread):
         # For Chinese/Japanese, when subtitle mode is Disabled or Line, prefer
         # punctuation-based splitting instead of plain newline splitting.
         if subtitle_mode in ("Disabled", "Line") and lang_code in ["z", "j"]:
-            return r"(?<=[{}]){}|\n+".format(self.PUNCTUATION_SENTENCE, spacing_pattern)
+            return rf"(?<=[{self.PUNCTUATION_SENTENCE}]){spacing_pattern}|\n+"
 
         if subtitle_mode == "Line":
             return "\n"
         elif subtitle_mode == "Sentence":
-            return r"(?<=[{}]){}|\n+".format(self.PUNCTUATION_SENTENCE, spacing_pattern)
+            return rf"(?<=[{self.PUNCTUATION_SENTENCE}]){spacing_pattern}|\n+"
         elif subtitle_mode == "Sentence + Comma":
-            return r"(?<=[{}]){}|\n+".format(
-                self.PUNCTUATION_SENTENCE_COMMA, spacing_pattern
-            )
+            return rf"(?<=[{self.PUNCTUATION_SENTENCE_COMMA}]){spacing_pattern}|\n+"
         else:
             return r"\n+"  # Default to line breaks
 
@@ -673,21 +642,15 @@ class ConversionThread(QThread):
             return []
 
         min_chars = max(1, int(getattr(self, "tts_batch_min_chars", 1)))
-        target_chars = max(
-            min_chars, int(getattr(self, "tts_batch_target_chars", min_chars))
-        )
-        max_chars = max(
-            target_chars, int(getattr(self, "tts_batch_max_chars", target_chars))
-        )
+        target_chars = max(min_chars, int(getattr(self, "tts_batch_target_chars", min_chars)))
+        max_chars = max(target_chars, int(getattr(self, "tts_batch_max_chars", target_chars)))
 
         sentence_punctuation = re.escape(self.PUNCTUATION_SENTENCE)
         sentence_pattern = re.compile(
-            rf".+?(?:[{sentence_punctuation}]+(?:\s+|$)|\n+|$)", re.S
+            rf".+?(?:[{sentence_punctuation}]+(?:\s+|$)|\n+|$)", re.DOTALL
         )
         sentence_like_parts = [
-            m.group(0).strip()
-            for m in sentence_pattern.finditer(raw_text)
-            if m.group(0).strip()
+            m.group(0).strip() for m in sentence_pattern.finditer(raw_text) if m.group(0).strip()
         ]
         if not sentence_like_parts:
             sentence_like_parts = [raw_text]
@@ -747,13 +710,12 @@ class ConversionThread(QThread):
             if not segment or not segment.strip():
                 continue
             tts_segment = convert_roman_numerals_to_numbers(segment)
-            for result in tts(
+            yield from tts(
                 tts_segment,
                 voice=loaded_voice,
                 speed=speed,
                 split_pattern=split_pattern,
-            ):
-                yield result
+            )
 
     def _is_batch_shrink_eligible_exception(self, exc):
         """Return True only for likely backend/memory pressure errors."""
@@ -777,8 +739,10 @@ class ConversionThread(QThread):
     def _log_batch_sizes(self, prefix):
         self.log_updated.emit(
             (
-                f"{prefix} batch chars min/target/max: "
-                f"{self.tts_batch_min_chars}/{self.tts_batch_target_chars}/{self.tts_batch_max_chars}",
+                (
+                    f"{prefix} batch chars min/target/max: "
+                    f"{self.tts_batch_min_chars}/{self.tts_batch_target_chars}/{self.tts_batch_max_chars}"
+                ),
                 "grey",
             )
         )
@@ -841,8 +805,10 @@ class ConversionThread(QThread):
         self.batch_consecutive_successes = 0
         self.log_updated.emit(
             (
-                f"  - Device-tuned batch defaults for {device}: "
-                f"min/target/max {tuned[0]}/{tuned[1]}/{tuned[2]}",
+                (
+                    f"  - Device-tuned batch defaults for {device}: "
+                    f"min/target/max {tuned[0]}/{tuned[1]}/{tuned[2]}"
+                ),
                 "grey",
             )
         )
@@ -851,9 +817,7 @@ class ConversionThread(QThread):
         """Return approximate total system memory in GiB."""
         try:
             if platform.system() == "Darwin":
-                output = subprocess.check_output(
-                    ["sysctl", "-n", "hw.memsize"], text=True
-                ).strip()
+                output = subprocess.check_output(["sysctl", "-n", "hw.memsize"], text=True).strip()
                 if output.isdigit():
                     return max(1, int(int(output) / (1024**3)))
         except Exception:
@@ -934,10 +898,8 @@ class ConversionThread(QThread):
         new_target = max(target_floor, int(old_target * shrink_factor))
         new_max = max(max_floor, int(old_max * shrink_factor))
 
-        if new_target < new_min:
-            new_target = new_min
-        if new_max < new_target:
-            new_max = new_target
+        new_target = max(new_target, new_min)
+        new_max = max(new_max, new_target)
 
         changed = (new_min, new_target, new_max) != (old_min, old_target, old_max)
 
@@ -960,16 +922,20 @@ class ConversionThread(QThread):
         )
         self.log_updated.emit(
             (
-                "⚠ Auto-shrunk batch sizes after repeated synth failures: "
-                f"min {old_min}->{new_min}, target {old_target}->{new_target}, max {old_max}->{new_max}",
+                (
+                    "⚠ Auto-shrunk batch sizes after repeated synth failures: "
+                    f"min {old_min}->{new_min}, target {old_target}->{new_target}, max {old_max}->{new_max}"
+                ),
                 "orange",
             )
         )
         if self.batch_shrink_cooldown_remaining > 0:
             self.log_updated.emit(
                 (
-                    "- Shrink cooldown enabled: waiting for "
-                    f"{self.batch_shrink_cooldown_remaining} successful batched synth calls before next shrink",
+                    (
+                        "- Shrink cooldown enabled: waiting for "
+                        f"{self.batch_shrink_cooldown_remaining} successful batched synth calls before next shrink"
+                    ),
                     "grey",
                 )
             )
@@ -1021,19 +987,15 @@ class ConversionThread(QThread):
             self.batch_consecutive_successes = 0
             return False
 
-        grow_factor = float(
-            getattr(self, "batch_grow_factor", self.DEFAULT_BATCH_GROW_FACTOR)
-        )
+        grow_factor = float(getattr(self, "batch_grow_factor", self.DEFAULT_BATCH_GROW_FACTOR))
         grow_factor = max(1.01, min(grow_factor, 2.0))
 
         new_min = min(orig_min, int(cur_min * grow_factor))
         new_target = min(orig_target, int(cur_target * grow_factor))
         new_max = min(orig_max, int(cur_max * grow_factor))
 
-        if new_target < new_min:
-            new_target = new_min
-        if new_max < new_target:
-            new_max = new_target
+        new_target = max(new_target, new_min)
+        new_max = max(new_max, new_target)
 
         changed = (new_min, new_target, new_max) != (cur_min, cur_target, cur_max)
         self.batch_consecutive_successes = 0
@@ -1046,8 +1008,10 @@ class ConversionThread(QThread):
         self.tts_batch_max_chars = new_max
         self.log_updated.emit(
             (
-                "✓ Batch sizes recovered after sustained success: "
-                f"min {cur_min}→{new_min}, target {cur_target}→{new_target}, max {cur_max}→{new_max}",
+                (
+                    "✓ Batch sizes recovered after sustained success: "
+                    f"min {cur_min}→{new_min}, target {cur_target}→{new_target}, max {cur_max}→{new_max}"
+                ),
                 "green",
             )
         )
@@ -1073,9 +1037,7 @@ class ConversionThread(QThread):
             )
             return
 
-        batched_segments = self._sentence_aware_char_batches(text_segment) or [
-            text_segment
-        ]
+        batched_segments = self._sentence_aware_char_batches(text_segment) or [text_segment]
         for batched_segment in batched_segments:
             # Pre-apply word substitutions so we can track progress against the text TTS actually sees
             from abogen.word_substitution import convert_roman_numerals_to_numbers
@@ -1099,9 +1061,7 @@ class ConversionThread(QThread):
                         # Find the first occurrence and slice
                         idx = remaining_text.find(result.graphemes)
                         if idx != -1:
-                            remaining_text = remaining_text[
-                                idx + len(result.graphemes) :
-                            ].strip()
+                            remaining_text = remaining_text[idx + len(result.graphemes) :].strip()
 
                 self.batch_failure_count = 0
                 if int(getattr(self, "batch_shrink_cooldown_remaining", 0)) > 0:
@@ -1193,9 +1153,7 @@ class ConversionThread(QThread):
         self.chunk_suffix = chunk_suffix  # Store chunk suffix if splitting into chunks
         self.ffmpeg_proc = None
         self.chapter_ffmpeg_proc = None
-        self.is_direct_text = (
-            False  # Flag to indicate if input is from textbox rather than file
-        )
+        self.is_direct_text = False  # Flag to indicate if input is from textbox rather than file
         self.chapter_options_set = False
         self.waiting_for_user_input = False
         self.use_gpu = use_gpu  # Store the GPU setting
@@ -1209,9 +1167,7 @@ class ConversionThread(QThread):
         self.m4b_aac_mode = self.M4B_AAC_MODE_QUALITY
         self._ffmpeg_audio_encoders_cache = None
         self.batch_failure_count = 0
-        self.batch_shrink_failure_threshold = (
-            self.DEFAULT_BATCH_SHRINK_FAILURE_THRESHOLD
-        )
+        self.batch_shrink_failure_threshold = self.DEFAULT_BATCH_SHRINK_FAILURE_THRESHOLD
         self.batch_shrink_factor = self.DEFAULT_BATCH_SHRINK_FACTOR
         self.batch_shrink_cooldown_success_batches = (
             self.DEFAULT_BATCH_SHRINK_COOLDOWN_SUCCESS_BATCHES
@@ -1223,16 +1179,10 @@ class ConversionThread(QThread):
         # Set split pattern based on language and subtitle mode
         self.split_pattern = self._get_split_pattern(lang_code, subtitle_mode)
         self.voice_cache = {}  # Cache for loaded voices
-        self._split_pattern_printed = (
-            False  # Track if split pattern was logged for this conversion
-        )
+        self._split_pattern_printed = False  # Track if split pattern was logged for this conversion
 
     def _get_m4b_aac_mode(self) -> str:
-        mode = (
-            str(getattr(self, "m4b_aac_mode", self.M4B_AAC_MODE_QUALITY) or "")
-            .strip()
-            .lower()
-        )
+        mode = str(getattr(self, "m4b_aac_mode", self.M4B_AAC_MODE_QUALITY) or "").strip().lower()
         if mode in {"compact", "he", "he-aac", "he_aac", "aac_he"}:
             return self.M4B_AAC_MODE_COMPACT
         return self.M4B_AAC_MODE_QUALITY
@@ -1310,10 +1260,12 @@ class ConversionThread(QThread):
 
         self.log_updated.emit(
             (
-                "M4B audio codec profile: "
-                f"{mode_label} ({bitrate}, mono), "
-                f"encoder: {encoder}, "
-                f"profile applied: {'yes' if profile_applied else 'no'}",
+                (
+                    "M4B audio codec profile: "
+                    f"{mode_label} ({bitrate}, mono), "
+                    f"encoder: {encoder}, "
+                    f"profile applied: {'yes' if profile_applied else 'no'}"
+                ),
                 "grey",
             )
         )
@@ -1343,9 +1295,7 @@ class ConversionThread(QThread):
         self.voice_cache[voice_name] = loaded_voice
         return loaded_voice
 
-    def _stream_audio_in_chunks(
-        self, segments, process_func, progress_prefix="Processing"
-    ):
+    def _stream_audio_in_chunks(self, segments, process_func, progress_prefix="Processing"):
         """
         Process audio segments in memory-efficient chunks
 
@@ -1389,9 +1339,7 @@ class ConversionThread(QThread):
                 # Clear segment bytes from memory
                 del segment_bytes
             except Exception as e:
-                self.log_updated.emit(
-                    (f"Error processing segment {i}: {str(e)}", "red")
-                )
+                self.log_updated.emit((f"Error processing segment {i}: {e!s}", "red"))
                 raise
 
         return samples_processed
@@ -1499,9 +1447,7 @@ class ConversionThread(QThread):
         chunk_suffix = getattr(self, "chunk_suffix", "")
         if not chunk_suffix and processing_file and os.path.exists(processing_file):
             try:
-                with open(
-                    processing_file, "r", encoding="utf-8", errors="replace"
-                ) as f:
+                with open(processing_file, "r", encoding="utf-8", errors="replace") as f:
                     header = f.read(4096)
                 m = re.search(
                     r"<<METADATA_TITLE:[^>]+?(\s*\{Ch [^}]+\}|\s*\{Extras\})>>",
@@ -1534,8 +1480,7 @@ class ConversionThread(QThread):
             # Use generator expression to avoid processing all files upfront.
             file_parts = (os.path.splitext(fname) for fname in os.listdir(parent_dir))
             clash = any(
-                name == f"{sanitized_base_name}{suffix}"
-                and ext[1:].lower() in allowed_exts
+                name == f"{sanitized_base_name}{suffix}" and ext[1:].lower() in allowed_exts
                 for name, ext in file_parts
             )
             chapters_dir_clash = require_chapters_dir_free and os.path.exists(
@@ -1549,9 +1494,7 @@ class ConversionThread(QThread):
         """Emit the startup configuration section for conversion logs."""
         # Normalize paths for consistent display (fixes Windows path separator issues)
         input_file = os.path.normpath(input_file) if input_file else input_file
-        processing_file = (
-            os.path.normpath(processing_file) if processing_file else processing_file
-        )
+        processing_file = os.path.normpath(processing_file) if processing_file else processing_file
 
         self.log_updated.emit("Configuration:")
         self.log_updated.emit(f"  - Input File: {input_file}")
@@ -1584,9 +1527,7 @@ class ConversionThread(QThread):
         self.log_updated.emit(f"  - Output format: {self.output_format}")
         self.log_updated.emit(f"  - Save option: {self.save_option}")
         if self.save_option == "Choose output folder":
-            self.log_updated.emit(
-                f"  - Output folder: {self.output_folder or os.getcwd()}"
-            )
+            self.log_updated.emit(f"  - Output folder: {self.output_folder or os.getcwd()}")
 
         if self.replace_single_newlines:
             self.log_updated.emit("  - Replace single newlines: Yes")
@@ -1596,20 +1537,14 @@ class ConversionThread(QThread):
             if getattr(self, "use_silent_gaps", False):
                 self.log_updated.emit("- Use silent gaps: Yes")
             speed_method = getattr(self, "subtitle_speed_method", "tts")
-            method_label = (
-                "TTS Regeneration" if speed_method == "tts" else "FFmpeg Time-stretch"
-            )
+            method_label = "TTS Regeneration" if speed_method == "tts" else "FFmpeg Time-stretch"
             self.log_updated.emit(f"  - Speed adjustment method: {method_label}")
 
         # Display save_chapters_separately flag if it's set
         if hasattr(self, "save_chapters_separately"):
-            save_chapters_separately, merge_chapters_at_end = (
-                self._resolve_chapter_output_flags()
-            )
+            save_chapters_separately, merge_chapters_at_end = self._resolve_chapter_output_flags()
             self.log_updated.emit(
-                (
-                    f"  - Save chapters separately: {'Yes' if save_chapters_separately else 'No'}"
-                )
+                f"  - Save chapters separately: {'Yes' if save_chapters_separately else 'No'}"
             )
             # Display merge_chapters_at_end flag if save_chapters_separately is True
             if save_chapters_separately:
@@ -1618,16 +1553,12 @@ class ConversionThread(QThread):
                 )
                 # Display the separate chapters format if it's set
                 separate_format = getattr(self, "separate_chapters_format", "wav")
-                self.log_updated.emit(
-                    f"  - Separate chapters format: {separate_format}"
-                )
+                self.log_updated.emit(f"  - Separate chapters format: {separate_format}")
 
         # If merge_at_end is True, display the silence duration
         _, merge_chapters_at_end = self._resolve_chapter_output_flags()
         if merge_chapters_at_end:
-            self.log_updated.emit(
-                f"  - Silence between chapters: {self.silence_duration} seconds"
-            )
+            self.log_updated.emit(f"  - Silence between chapters: {self.silence_duration} seconds")
 
     def _ffmpeg_output_tail(self, proc, max_chars=6000, max_lines=80):
         if proc is None:
@@ -1683,9 +1614,7 @@ class ConversionThread(QThread):
 
     def _extract_ffmpeg_output_path(self, ffmpeg_tail):
         tail = str(ffmpeg_tail or "")
-        match = re.search(
-            r"Unable to re-open\s+(.+?)\s+output file for shifting data", tail
-        )
+        match = re.search(r"Unable to re-open\s+(.+?)\s+output file for shifting data", tail)
         if match:
             return match.group(1).strip()
         return ""
@@ -1754,9 +1683,7 @@ class ConversionThread(QThread):
         if use_spacy:
             if self.subtitle_mode == "Sentence + Comma":
                 spacing_pattern = r"\s*" if self.lang_code in ["z", "j"] else r"\s+"
-                active_split_pattern = r"(?<=[{}]){}|\n+".format(
-                    self.PUNCTUATION_COMMAS, spacing_pattern
-                )
+                active_split_pattern = rf"(?<=[{self.PUNCTUATION_COMMAS}]){spacing_pattern}|\n+"
             else:
                 active_split_pattern = "\n"
         else:
@@ -1801,9 +1728,11 @@ class ConversionThread(QThread):
             if is_voice_blend and use_mlx:
                 self.log_updated.emit(
                     (
-                        f"Voice blending formula detected ('{self.voice}'). The MLX backend "
-                        "does not support voice mixing; falling back to the PyTorch/Kokoro pipeline "
-                        "for accurate multi-voice synthesis.",
+                        (
+                            f"Voice blending formula detected ('{self.voice}'). The MLX backend "
+                            "does not support voice mixing; falling back to the PyTorch/Kokoro pipeline "
+                            "for accurate multi-voice synthesis."
+                        ),
                         "orange",
                     )
                 )
@@ -1835,8 +1764,7 @@ class ConversionThread(QThread):
                             self.shared_model
                             and self.use_mlx_backend
                             and self.shared_model_config.get("backend") == "mlx"
-                            and self.shared_model_config.get("quantization")
-                            == mlx_quant_name
+                            and self.shared_model_config.get("quantization") == mlx_quant_name
                         ):
                             mlx_model = self.shared_model
                             self.log_updated.emit(
@@ -1868,16 +1796,20 @@ class ConversionThread(QThread):
                     else:
                         self.log_updated.emit(
                             (
-                                "MLX backend requested but not available — "
-                                "falling back to PyTorch KPipeline.",
+                                (
+                                    "MLX backend requested but not available — "
+                                    "falling back to PyTorch KPipeline."
+                                ),
                                 "orange",
                             )
                         )
                 except Exception as mlx_exc:
                     self.log_updated.emit(
                         (
-                            f"MLX backend failed to initialise: {mlx_exc} — "
-                            "falling back to PyTorch KPipeline.",
+                            (
+                                f"MLX backend failed to initialise: {mlx_exc} — "
+                                "falling back to PyTorch KPipeline."
+                            ),
                             "orange",
                         )
                     )
@@ -1950,14 +1882,10 @@ class ConversionThread(QThread):
                 file_ext = self._get_input_file_extension()
                 if self._is_subtitle_input_file():
                     is_subtitle_file = True
-                    self.log_updated.emit(
-                        f"\nDetected subtitle file format: {file_ext}"
-                    )
+                    self.log_updated.emit(f"\nDetected subtitle file format: {file_ext}")
                 elif self._is_timestamp_text_input():
                     is_timestamp_text = True
-                    self.log_updated.emit(
-                        ("\nDetected timestamps in text file", "grey")
-                    )
+                    self.log_updated.emit(("\nDetected timestamps in text file", "grey"))
                     timestamp_choice = self._await_timestamp_processing_choice()
                     if timestamp_choice is None:
                         self.conversion_finished.emit("Cancelled", None)
@@ -1974,9 +1902,7 @@ class ConversionThread(QThread):
                 text = self.file_name  # Treat file_name as direct text input
             else:
                 encoding = detect_encoding(self.file_name)
-                with open(
-                    self.file_name, "r", encoding=encoding, errors="replace"
-                ) as file:
+                with open(self.file_name, "r", encoding=encoding, errors="replace") as file:
                     text = file.read()
 
             # Clean up text using utility function
@@ -2097,12 +2023,8 @@ class ConversionThread(QThread):
 
             # Log all detected chapters at the beginning
             if total_chapters > 1:
-                chapter_list = "\n".join(
-                    [f"{i + 1}) {c[0]}" for i, c in enumerate(chapters)]
-                )
-                self.log_updated.emit(
-                    (f"\nDetected chapters ({total_chapters}):\n" + chapter_list)
-                )
+                chapter_list = "\n".join([f"{i + 1}) {c[0]}" for i, c in enumerate(chapters)])
+                self.log_updated.emit(f"\nDetected chapters ({total_chapters}):\n" + chapter_list)
             else:
                 self.log_updated.emit((f"\nProcessing {chapters[0][0]}...", "grey"))
 
@@ -2119,9 +2041,7 @@ class ConversionThread(QThread):
             suffix = ""
 
             _, processing_file, base_path = self._resolve_run_paths()
-            sanitized_base_name = self._resolve_output_base_name(
-                base_path, processing_file
-            )
+            sanitized_base_name = self._resolve_output_base_name(base_path, processing_file)
 
             parent_dir = self._resolve_output_parent_dir(base_path)
             # Ensure the output folder exists, error if it doesn't
@@ -2139,21 +2059,15 @@ class ConversionThread(QThread):
                 require_chapters_dir_free=True,
             )
             if save_chapters_separately and total_chapters > 1:
-                separate_chapters_format = getattr(
-                    self, "separate_chapters_format", "wav"
-                )
+                separate_chapters_format = getattr(self, "separate_chapters_format", "wav")
                 chapters_out_dir = chapters_out_dir_candidate
                 os.makedirs(chapters_out_dir, exist_ok=True)
-                self.log_updated.emit(
-                    (f"\nChapters output folder: {chapters_out_dir}", "grey")
-                )
+                self.log_updated.emit((f"\nChapters output folder: {chapters_out_dir}", "grey"))
 
             # Prepare merged output file for incremental writing ONLY if merge_chapters_at_end is True
             if merge_chapters_at_end:
                 out_dir = parent_dir
-                base_filepath_no_ext = os.path.join(
-                    out_dir, f"{sanitized_base_name}{suffix}"
-                )
+                base_filepath_no_ext = os.path.join(out_dir, f"{sanitized_base_name}{suffix}")
                 merged_out_path = f"{base_filepath_no_ext}.{self.output_format}"
                 m4b_atom_metadata = {}
                 m4b_cover_for_atoms = None
@@ -2165,8 +2079,7 @@ class ConversionThread(QThread):
                 self.processed_char_count = 0
                 current_segment = 0
                 chapters_time = [
-                    {"chapter": chapter[0], "start": 0.0, "end": 0.0}
-                    for chapter in chapters
+                    {"chapter": chapter[0], "start": 0.0, "end": 0.0} for chapter in chapters
                 ]
                 # SRT numbering fix: use a global counter
                 merged_srt_index = 1  # SRT numbering for merged file
@@ -2241,9 +2154,7 @@ class ConversionThread(QThread):
                     self.log_updated.emit(
                         (f"Unsupported output format: {self.output_format}", "red")
                     )
-                    self.conversion_finished.emit(
-                        ("Audio generation failed.", "red"), None
-                    )
+                    self.conversion_finished.emit(("Audio generation failed.", "red"), None)
                     return
                 # Open merged subtitle file for incremental writing if needed
                 merged_subtitle_file = None
@@ -2319,8 +2230,7 @@ class ConversionThread(QThread):
                 self.processed_char_count = 0
                 current_segment = 0
                 chapters_time = [
-                    {"chapter": chapter[0], "start": 0.0, "end": 0.0}
-                    for chapter in chapters
+                    {"chapter": chapter[0], "start": 0.0, "end": 0.0} for chapter in chapters
                 ]
                 srt_index = 1  # SRT numbering fix for chapter-only mode
             # Instead of processing the whole text, process by chapter.
@@ -2328,9 +2238,7 @@ class ConversionThread(QThread):
             # background _AsyncAudioWriter so the GPU/MLX accelerator can
             # immediately start synthesising the next segment.
             with _AsyncAudioWriter(self._write_to_ffmpeg) as _audio_writer:
-                for chapter_idx, (chapter_name, voice_segments) in enumerate(
-                    chapters, 1
-                ):
+                for chapter_idx, (chapter_name, voice_segments) in enumerate(chapters, 1):
                     chapter_out_path = None
                     chapter_out_file = None
                     chapter_ffmpeg_proc = None
@@ -2368,9 +2276,7 @@ class ConversionThread(QThread):
                         MAX_LEN = 80
                         if len(sanitized) > MAX_LEN:
                             pos = sanitized[:MAX_LEN].rfind("_")
-                            sanitized = sanitized[: pos if pos > 0 else MAX_LEN].rstrip(
-                                "_"
-                            )
+                            sanitized = sanitized[: pos if pos > 0 else MAX_LEN].rstrip("_")
                         chapter_filename = f"{chapter_idx:02d}_{sanitized}"
                         chapter_out_path = os.path.join(
                             chapters_out_dir,
@@ -2417,14 +2323,10 @@ class ConversionThread(QThread):
                             continue
                         # Open chapter subtitle file for incremental writing if needed
                         chapter_subtitle_file = None
-                        chapter_srt_index = (
-                            1  # Initialize SRT numbering for this chapter file
-                        )
+                        chapter_srt_index = 1  # Initialize SRT numbering for this chapter file
                         if self.subtitle_mode != "Disabled":
                             subtitle_format = getattr(self, "subtitle_format", "srt")
-                            file_extension = (
-                                "ass" if "ass" in subtitle_format else "srt"
-                            )
+                            file_extension = "ass" if "ass" in subtitle_format else "srt"
                             chapter_subtitle_path = os.path.join(
                                 chapters_out_dir, f"{chapter_filename}.{file_extension}"
                             )
@@ -2444,9 +2346,7 @@ class ConversionThread(QThread):
                             if "ass" in subtitle_format:
                                 # Minimal ASS header
                                 chapter_subtitle_file.write("[Script Info]\n")
-                                chapter_subtitle_file.write(
-                                    "Title: Generated by Abogen\n"
-                                )
+                                chapter_subtitle_file.write("Title: Generated by Abogen\n")
                                 chapter_subtitle_file.write("ScriptType: v4.00+\n\n")
 
                                 # Add style definitions for karaoke highlighting
@@ -2472,9 +2372,7 @@ class ConversionThread(QThread):
                                     "ass_centered_narrow",
                                 )
                                 chapter_subtitle_margin = "90" if is_narrow else ""
-                                chapter_subtitle_alignment_tag = (
-                                    "{{\\an5}}" if is_centered else ""
-                                )
+                                chapter_subtitle_alignment_tag = "{{\\an5}}" if is_centered else ""
                         else:
                             chapter_subtitle_file = None
                     else:
@@ -2482,21 +2380,15 @@ class ConversionThread(QThread):
                         chapter_subtitle_file = None
 
                     # Process each voice segment within the chapter
-                    for segment_idx, (voice_name, segment_text) in enumerate(
-                        voice_segments
-                    ):
+                    for segment_idx, (voice_name, segment_text) in enumerate(voice_segments):
                         # Load voice for this segment (with caching)
                         try:
                             loaded_voice = self.load_voice_cached(voice_name, tts)
                             if segment_idx > 0:
                                 voice_display = (
-                                    voice_name
-                                    if len(voice_name) < 50
-                                    else voice_name[:47] + "..."
+                                    voice_name if len(voice_name) < 50 else voice_name[:47] + "..."
                                 )
-                                self.log_updated.emit(
-                                    (f"  → Voice: {voice_display}", "grey")
-                                )
+                                self.log_updated.emit((f"  → Voice: {voice_display}", "grey"))
                         except Exception:
                             self.log_updated.emit(
                                 (
@@ -2520,9 +2412,7 @@ class ConversionThread(QThread):
                         )
                         spacy_sentences = None
                         active_split_pattern = self.split_pattern
-                        spacing_pattern = (
-                            r"\s*" if self.lang_code in ["z", "j"] else r"\s+"
-                        )
+                        spacing_pattern = r"\s*" if self.lang_code in ["z", "j"] else r"\s+"
 
                         # Pre-load spaCy model for English if it will be needed for subtitle generation
                         if (
@@ -2568,8 +2458,8 @@ class ConversionThread(QThread):
                                 )
                                 # For Sentence + Comma mode, still split on commas within spaCy sentences
                                 if self.subtitle_mode == "Sentence + Comma":
-                                    active_split_pattern = r"(?<=[{}]){}|\n+".format(
-                                        self.PUNCTUATION_COMMAS, spacing_pattern
+                                    active_split_pattern = (
+                                        rf"(?<=[{self.PUNCTUATION_COMMAS}]){spacing_pattern}|\n+"
                                     )
                                 else:
                                     active_split_pattern = (
@@ -2584,9 +2474,7 @@ class ConversionThread(QThread):
                                 )
 
                         # Process text - either as spaCy sentences or as single text
-                        text_segments = (
-                            spacy_sentences if spacy_sentences else [segment_text]
-                        )
+                        text_segments = spacy_sentences if spacy_sentences else [segment_text]
 
                         for text_segment in text_segments:
                             for result in self._iter_tts_results_with_safe_fallback(
@@ -2617,7 +2505,7 @@ class ConversionThread(QThread):
 
                                 # Pre-encode audio to bytes once (used for any
                                 # FFmpeg pipe path; None if not needed).
-                                audio_bytes: Optional[bytes] = None
+                                audio_bytes: bytes | None = None
                                 needs_bytes = (
                                     merge_chapters_at_end and ffmpeg_proc is not None
                                 ) or chapter_ffmpeg_proc is not None
@@ -2631,8 +2519,8 @@ class ConversionThread(QThread):
 
                                 # --- Build subtitle lines on the main thread so
                                 # ordering and index state stay correct. ---
-                                merged_sub_lines: Optional[List[str]] = None
-                                chapter_sub_lines: Optional[List[str]] = None
+                                merged_sub_lines: list[str] | None = None
+                                chapter_sub_lines: list[str] | None = None
 
                                 if self.subtitle_mode != "Disabled":
                                     tokens_list = getattr(result, "tokens", [])
@@ -2663,9 +2551,7 @@ class ConversionThread(QThread):
                                                 self.end_ts = end
                                                 self.whitespace = ""
 
-                                        tokens_list = [
-                                            FakeToken(result.graphemes, 0, chunk_dur)
-                                        ]
+                                        tokens_list = [FakeToken(result.graphemes, 0, chunk_dur)]
 
                                     tokens_with_timestamps = []
                                     chapter_tokens_with_timestamps = []
@@ -2673,8 +2559,7 @@ class ConversionThread(QThread):
                                     for tok in tokens_list:
                                         tokens_with_timestamps.append(
                                             {
-                                                "start": chunk_start
-                                                + (tok.start_ts or 0),
+                                                "start": chunk_start + (tok.start_ts or 0),
                                                 "end": chunk_start + (tok.end_ts or 0),
                                                 "text": tok.text,
                                                 "whitespace": tok.whitespace,
@@ -2685,8 +2570,7 @@ class ConversionThread(QThread):
                                                 {
                                                     "start": chapter_current_time
                                                     + (tok.start_ts or 0),
-                                                    "end": chapter_current_time
-                                                    + (tok.end_ts or 0),
+                                                    "end": chapter_current_time + (tok.end_ts or 0),
                                                     "text": tok.text,
                                                     "whitespace": tok.whitespace,
                                                 }
@@ -2694,17 +2578,15 @@ class ConversionThread(QThread):
 
                                     # --- Merged subtitle lines ---
                                     if merge_chapters_at_end and merged_subtitle_file:
-                                        new_entries: List[Tuple[float, float, str]] = []
+                                        new_entries: list[tuple[float, float, str]] = []
                                         self._process_subtitle_tokens(
                                             tokens_with_timestamps,
                                             new_entries,
                                             self.max_subtitle_words,
                                             fallback_end_time=chunk_start + chunk_dur,
                                         )
-                                        subtitle_format = getattr(
-                                            self, "subtitle_format", "srt"
-                                        )
-                                        sub_lines: List[str] = []
+                                        subtitle_format = getattr(self, "subtitle_format", "srt")
+                                        sub_lines: list[str] = []
                                         if "ass" in subtitle_format:
                                             for start, end, text in new_entries:
                                                 start_time = self._ass_time(start)
@@ -2731,20 +2613,15 @@ class ConversionThread(QThread):
                                     if chapter_subtitle_file and (
                                         chapter_out_file or chapter_ffmpeg_proc
                                     ):
-                                        new_chapter_entries: List[
-                                            Tuple[float, float, str]
-                                        ] = []
+                                        new_chapter_entries: list[tuple[float, float, str]] = []
                                         self._process_subtitle_tokens(
                                             chapter_tokens_with_timestamps,
                                             new_chapter_entries,
                                             self.max_subtitle_words,
-                                            fallback_end_time=chapter_current_time
-                                            + chunk_dur,
+                                            fallback_end_time=chapter_current_time + chunk_dur,
                                         )
-                                        subtitle_format = getattr(
-                                            self, "subtitle_format", "srt"
-                                        )
-                                        ch_lines: List[str] = []
+                                        subtitle_format = getattr(self, "subtitle_format", "srt")
+                                        ch_lines: list[str] = []
                                         if "ass" in subtitle_format:
                                             for start, end, text in new_chapter_entries:
                                                 start_time = self._ass_time(start)
@@ -2786,9 +2663,7 @@ class ConversionThread(QThread):
                                         merged_out_file=merged_out_file
                                         if merge_chapters_at_end
                                         else None,
-                                        ffmpeg_proc=ffmpeg_proc
-                                        if merge_chapters_at_end
-                                        else None,
+                                        ffmpeg_proc=ffmpeg_proc if merge_chapters_at_end else None,
                                         chapter_out_file=chapter_out_file,
                                         chapter_ffmpeg_proc=chapter_ffmpeg_proc,
                                         merged_subtitle_lines=merged_sub_lines,
@@ -2800,11 +2675,7 @@ class ConversionThread(QThread):
 
                                 # --- Update progress UI (main thread only). ---
                                 percent = min(
-                                    int(
-                                        self.processed_char_count
-                                        / self.total_char_count
-                                        * 100
-                                    ),
+                                    int(self.processed_char_count / self.total_char_count * 100),
                                     99,
                                 )
                                 etr_str = "Processing..."
@@ -2812,10 +2683,7 @@ class ConversionThread(QThread):
                                 elapsed = time.time() - self.etr_start_time
                                 if chars_done > 0 and elapsed > 0.5:
                                     avg_time_per_char = elapsed / chars_done
-                                    remaining = (
-                                        self.total_char_count
-                                        - self.processed_char_count
-                                    )
+                                    remaining = self.total_char_count - self.processed_char_count
                                     if remaining > 0:
                                         secs = avg_time_per_char * remaining
                                         h = int(secs // 3600)
@@ -3043,25 +2911,17 @@ class ConversionThread(QThread):
 
             if not subtitles:
                 self.log_updated.emit(("No valid subtitle entries found.", "red"))
-                self.conversion_finished.emit(
-                    ("No subtitle entries to process.", "red"), None
-                )
+                self.conversion_finished.emit(("No subtitle entries to process.", "red"), None)
                 return
 
-            self.log_updated.emit(
-                (f"\nFound {len(subtitles)} subtitle entries", "grey")
-            )
+            self.log_updated.emit((f"\nFound {len(subtitles)} subtitle entries", "grey"))
 
             # Setup output paths
-            sanitized_base_name = self._resolve_output_base_name(
-                base_path, self.file_name
-            )
+            sanitized_base_name = self._resolve_output_base_name(base_path, self.file_name)
             parent_dir = self._resolve_output_parent_dir(base_path)
 
             if not os.path.exists(parent_dir):
-                self.log_updated.emit(
-                    (f"Output folder does not exist: {parent_dir}", "red")
-                )
+                self.log_updated.emit((f"Output folder does not exist: {parent_dir}", "red"))
                 return
 
             # Find unique filename
@@ -3070,9 +2930,7 @@ class ConversionThread(QThread):
                 sanitized_base_name,
             )
 
-            base_filepath_no_ext = os.path.join(
-                parent_dir, f"{sanitized_base_name}{suffix}"
-            )
+            base_filepath_no_ext = os.path.join(parent_dir, f"{sanitized_base_name}{suffix}")
             merged_out_path = f"{base_filepath_no_ext}.{self.output_format}"
             rate = 24000
             m4b_atom_metadata = {}
@@ -3165,18 +3023,12 @@ class ConversionThread(QThread):
 
             # Load voice
             loaded_voice = (
-                get_new_voice(tts, self.voice, self.use_gpu)
-                if "*" in self.voice
-                else self.voice
+                get_new_voice(tts, self.voice, self.use_gpu) if "*" in self.voice else self.voice
             )
 
             # Calculate initial audio buffer size from timed subtitles only
-            max_end_time = max(
-                (end for _, end, _ in subtitles if end is not None), default=0
-            )
-            audio_buffer = self.np.zeros(
-                int(max_end_time * rate) + rate, dtype="float32"
-            )
+            max_end_time = max((end for _, end, _ in subtitles if end is not None), default=0)
+            audio_buffer = self.np.zeros(int(max_end_time * rate) + rate, dtype="float32")
 
             # Process each subtitle and mix into buffer
             self.etr_start_time = time.time()
@@ -3194,9 +3046,7 @@ class ConversionThread(QThread):
                 processed_text = text.replace("\n", " ") if replace_nl else text
                 use_gaps = getattr(self, "use_silent_gaps", False)
                 next_start = (
-                    subtitles[idx][0]
-                    if (use_gaps and idx < len(subtitles))
-                    else float("inf")
+                    subtitles[idx][0] if (use_gaps and idx < len(subtitles)) else float("inf")
                 )
                 subtitle_duration = None if end_time is None else end_time - start_time
 
@@ -3207,9 +3057,7 @@ class ConversionThread(QThread):
                 )
                 ms1 = int((start_time - int(start_time)) * 1000)
                 is_last = (
-                    is_timestamp_text
-                    or (use_gaps and idx == len(subtitles))
-                    or end_time is None
+                    is_timestamp_text or (use_gaps and idx == len(subtitles)) or end_time is None
                 )
                 if is_last:
                     time_str = (
@@ -3231,9 +3079,7 @@ class ConversionThread(QThread):
                         + f"{h2:02d}:{m2:02d}:{s2:02d}"
                         + (f",{ms2:03d}" if ms2 > 0 else "")
                     )
-                self.log_updated.emit(
-                    f"\n[{idx}/{len(subtitles)}] {time_str}: {processed_text}"
-                )
+                self.log_updated.emit(f"\n[{idx}/{len(subtitles)}] {time_str}: {processed_text}")
 
                 # Generate TTS audio
                 tts_results = [
@@ -3260,9 +3106,7 @@ class ConversionThread(QThread):
                         [a.numpy() if hasattr(a, "numpy") else a for a in audio_chunks]
                     )
                     if audio_chunks
-                    else self.np.zeros(
-                        int((subtitle_duration or 0) * rate), dtype="float32"
-                    )
+                    else self.np.zeros(int((subtitle_duration or 0) * rate), dtype="float32")
                 )
                 audio_duration = len(full_audio) / rate
 
@@ -3278,9 +3122,7 @@ class ConversionThread(QThread):
                     end_time = start_time + audio_duration
 
                 # Speed up if needed
-                speedup_threshold = (
-                    next_start - start_time if use_gaps else subtitle_duration
-                )
+                speedup_threshold = next_start - start_time if use_gaps else subtitle_duration
                 if audio_duration > speedup_threshold:
                     speed_factor = audio_duration / speedup_threshold
 
@@ -3293,11 +3135,7 @@ class ConversionThread(QThread):
                         static_ffmpeg.add_paths()
                         num_stages = max(
                             1,
-                            int(
-                                self.np.ceil(
-                                    self.np.log(speed_factor) / self.np.log(2.0)
-                                )
-                            ),
+                            int(self.np.ceil(self.np.log(speed_factor) / self.np.log(2.0))),
                         )
                         tempo = speed_factor ** (1.0 / num_stages)
                         filter_str = ",".join([f"atempo={tempo:.6f}"] * num_stages)
@@ -3354,15 +3192,10 @@ class ConversionThread(QThread):
 
                         full_audio = (
                             self.np.concatenate(
-                                [
-                                    a.numpy() if hasattr(a, "numpy") else a
-                                    for a in audio_chunks
-                                ]
+                                [a.numpy() if hasattr(a, "numpy") else a for a in audio_chunks]
                             )
                             if audio_chunks
-                            else self.np.zeros(
-                                int(subtitle_duration * rate), dtype="float32"
-                            )
+                            else self.np.zeros(int(subtitle_duration * rate), dtype="float32")
                         )
                         audio_duration = len(full_audio) / rate
 
@@ -3380,9 +3213,7 @@ class ConversionThread(QThread):
                     full_audio = self.np.concatenate(
                         [
                             full_audio,
-                            self.np.zeros(
-                                target_samples - len(full_audio), dtype="float32"
-                            ),
+                            self.np.zeros(target_samples - len(full_audio), dtype="float32"),
                         ]
                     )
                 elif len(full_audio) > target_samples:
@@ -3396,9 +3227,7 @@ class ConversionThread(QThread):
                     audio_buffer = self.np.concatenate(
                         [
                             audio_buffer,
-                            self.np.zeros(
-                                end_sample - len(audio_buffer), dtype="float32"
-                            ),
+                            self.np.zeros(end_sample - len(audio_buffer), dtype="float32"),
                         ]
                     )
 
@@ -3409,14 +3238,10 @@ class ConversionThread(QThread):
                 if subtitle_file:
                     if "ass" in subtitle_format:
                         effect = (
-                            "karaoke"
-                            if self.subtitle_mode == "Sentence + Highlighting"
-                            else ""
+                            "karaoke" if self.subtitle_mode == "Sentence + Highlighting" else ""
                         )
                         ass_text = (
-                            processed_text
-                            if replace_nl
-                            else processed_text.replace("\n", "\\N")
+                            processed_text if replace_nl else processed_text.replace("\n", "\\N")
                         )
                         subtitle_file.write(
                             f"Dialogue: 0,{self._ass_time(start_time)},{self._ass_time(end_time)},Default,,{margin},{margin},0,{effect},{alignment}{ass_text}\n"
@@ -3440,9 +3265,7 @@ class ConversionThread(QThread):
             # Normalize audio buffer to prevent clipping from mixed overlaps
             max_amplitude = self.np.abs(audio_buffer).max()
             if max_amplitude > 1.0:
-                self.log_updated.emit(
-                    f"\n  -> Normalizing audio (peak: {max_amplitude:.2f})"
-                )
+                self.log_updated.emit(f"\n  -> Normalizing audio (peak: {max_amplitude:.2f})")
                 audio_buffer = audio_buffer / max_amplitude
 
             # Write the complete audio buffer
@@ -3493,9 +3316,7 @@ class ConversionThread(QThread):
             except Exception:
                 pass
             error_detail, error_verbose = _format_exception_with_location(e)
-            self.log_updated.emit(
-                (f"Error processing subtitle file: {error_verbose}", "red")
-            )
+            self.log_updated.emit((f"Error processing subtitle file: {error_verbose}", "red"))
             self.conversion_finished.emit(
                 (
                     f"Audio generation failed while processing subtitle file: {error_detail}",
@@ -3581,17 +3402,13 @@ class ConversionThread(QThread):
             validated = self._validate_cover_image(initial_cover_path)
             if validated:
                 return validated
-            self.log_updated.emit(
-                "Warning: Metadata cover path was unusable; trying fallbacks."
-            )
+            self.log_updated.emit("Warning: Metadata cover path was unusable; trying fallbacks.")
 
         guessed_cover = self._find_sidecar_cover_image()
         if guessed_cover:
             validated = self._validate_cover_image(guessed_cover)
             if validated:
-                self.log_updated.emit(
-                    f"Using sidecar image for audiobook artwork: {validated}"
-                )
+                self.log_updated.emit(f"Using sidecar image for audiobook artwork: {validated}")
                 return validated
 
         epub_cover = self._extract_cover_from_source_epub()
@@ -3673,9 +3490,7 @@ class ConversionThread(QThread):
         try:
             cache_dir = get_user_cache_path()
             os.makedirs(cache_dir, exist_ok=True)
-            digest_src = (
-                f"{norm_source}|{os.path.getmtime(norm_source)}|{len(cover_bytes)}"
-            )
+            digest_src = f"{norm_source}|{os.path.getmtime(norm_source)}|{len(cover_bytes)}"
             digest = hashlib.sha1(digest_src.encode("utf-8")).hexdigest()[:10]
             ext = _guess_image_extension(cover_bytes)
             out_path = os.path.join(cache_dir, f"epub_cover_{digest}{ext}")
@@ -3719,16 +3534,12 @@ class ConversionThread(QThread):
                 return None
 
             if not os.path.isfile(cover_path):
-                self.log_updated.emit(
-                    f"Warning: Cover path is not a file: {cover_path}"
-                )
+                self.log_updated.emit(f"Warning: Cover path is not a file: {cover_path}")
                 return None
 
             # Check readability
             if not os.access(cover_path, os.R_OK):
-                self.log_updated.emit(
-                    f"Warning: Cover image is not readable: {cover_path}"
-                )
+                self.log_updated.emit(f"Warning: Cover image is not readable: {cover_path}")
                 return None
 
             # Validate magic bytes to ensure file contains actual image data
@@ -3774,8 +3585,7 @@ class ConversionThread(QThread):
             cover_size = os.path.getsize(cover_path)
             if cover_size > _MAX_COVER_BYTES:
                 self.log_updated.emit(
-                    "Warning: Cover image is %s (over 1.00 MB). Attempting to downscale/re-encode for better metadata compatibility."
-                    % _cover_size_text(cover_size)
+                    f"Warning: Cover image is {_cover_size_text(cover_size)} (over 1.00 MB). Attempting to downscale/re-encode for better metadata compatibility."
                 )
                 optimized_cover = self._optimize_cover_image_for_m4b(cover_path)
                 if optimized_cover:
@@ -3786,8 +3596,7 @@ class ConversionThread(QThread):
                         pass
                 if cover_size > _MAX_COVER_BYTES:
                     self.log_updated.emit(
-                        "Warning: Cover image is still %s after optimization; embedding anyway as requested."
-                        % _cover_size_text(cover_size)
+                        f"Warning: Cover image is still {_cover_size_text(cover_size)} after optimization; embedding anyway as requested."
                     )
 
             return cover_path
@@ -3804,18 +3613,14 @@ class ConversionThread(QThread):
             cache_dir = get_user_cache_path()
             os.makedirs(cache_dir, exist_ok=True)
 
-            digest_src = (
-                f"{source}|{os.path.getmtime(source)}|{os.path.getsize(source)}"
-            )
+            digest_src = f"{source}|{os.path.getmtime(source)}|{os.path.getsize(source)}"
             digest = hashlib.sha1(digest_src.encode("utf-8")).hexdigest()[:10]
             best_path = None
             best_size = None
 
             # Iteratively increase quantization to reduce size while keeping readable art.
             for q in (5, 8, 12, 18, 24):
-                candidate = os.path.join(
-                    cache_dir, f"{stem}_m4b_cover_{digest}_q{q}.jpg"
-                )
+                candidate = os.path.join(cache_dir, f"{stem}_m4b_cover_{digest}_q{q}.jpg")
                 cmd = [
                     "ffmpeg",
                     "-y",
@@ -3845,24 +3650,17 @@ class ConversionThread(QThread):
 
                 if size <= _MAX_COVER_BYTES:
                     self.log_updated.emit(
-                        "Cover optimization successful: %s -> %s"
-                        % (
-                            _cover_size_text(os.path.getsize(source)),
-                            _cover_size_text(size),
-                        )
+                        f"Cover optimization successful: {_cover_size_text(os.path.getsize(source))} -> {_cover_size_text(size)}"
                     )
                     return candidate
 
             if best_path:
                 self.log_updated.emit(
-                    "Warning: Cover optimization reduced size to %s but is still above 1.00 MB."
-                    % _cover_size_text(best_size or 0)
+                    f"Warning: Cover optimization reduced size to {_cover_size_text(best_size or 0)} but is still above 1.00 MB."
                 )
                 return best_path
 
-            self.log_updated.emit(
-                "Warning: Cover optimization failed; using original image."
-            )
+            self.log_updated.emit("Warning: Cover optimization failed; using original image.")
             return cover_path
         except Exception as e:
             self.log_updated.emit(
@@ -3901,15 +3699,9 @@ class ConversionThread(QThread):
                         elif tag == "item":
                             item_id = (elem.attrib.get("id") or "").strip()
                             href = (elem.attrib.get("href") or "").strip()
-                            media_type = (
-                                (elem.attrib.get("media-type") or "").strip().lower()
-                            )
-                            properties = (
-                                (elem.attrib.get("properties") or "").strip().lower()
-                            )
-                            manifest_entries.append(
-                                (item_id, href, media_type, properties)
-                            )
+                            media_type = (elem.attrib.get("media-type") or "").strip().lower()
+                            properties = (elem.attrib.get("properties") or "").strip().lower()
+                            manifest_entries.append((item_id, href, media_type, properties))
                             if not href:
                                 continue
 
@@ -3931,15 +3723,11 @@ class ConversionThread(QThread):
                                 cover_href = href
                                 break
 
-                    selected_href = (
-                        cover_href or fallback_cover_href or first_image_href
-                    )
+                    selected_href = cover_href or fallback_cover_href or first_image_href
                     if not selected_href:
                         continue
 
-                    full_path = posixpath.normpath(
-                        posixpath.join(opf_dir, selected_href)
-                    )
+                    full_path = posixpath.normpath(posixpath.join(opf_dir, selected_href))
                     if full_path in names:
                         try:
                             data = zf.read(full_path)
@@ -3959,9 +3747,7 @@ class ConversionThread(QThread):
             stem = os.path.splitext(os.path.basename(source))[0]
             cache_dir = get_user_cache_path()
             os.makedirs(cache_dir, exist_ok=True)
-            digest_src = (
-                f"{source}|{os.path.getmtime(source)}|{os.path.getsize(source)}"
-            )
+            digest_src = f"{source}|{os.path.getmtime(source)}|{os.path.getsize(source)}"
             digest = hashlib.sha1(digest_src.encode("utf-8")).hexdigest()[:10]
             target = os.path.join(cache_dir, f"{stem}_m4b_cover_convert_{digest}.jpg")
             ffmpeg_q = _jpeg_quality_percent_to_ffmpeg_q(quality_percent)
@@ -3986,12 +3772,8 @@ class ConversionThread(QThread):
                 original_size = os.path.getsize(source)
                 new_size = os.path.getsize(target)
                 self.log_updated.emit(
-                    "Converted cover to JPEG (%d%%): %s -> %s"
-                    % (
-                        int(quality_percent),
-                        _cover_size_text(original_size),
-                        _cover_size_text(new_size),
-                    )
+                    f"Converted cover to JPEG ({int(quality_percent)}%): "
+                    f"{_cover_size_text(original_size)} -> {_cover_size_text(new_size)}"
                 )
             except OSError:
                 pass
@@ -4016,9 +3798,7 @@ class ConversionThread(QThread):
         try:
             from mutagen.mp4 import MP4, MP4Cover  # type: ignore[import]
         except Exception as e:
-            self.log_updated.emit(
-                f"Warning: mutagen.mp4 unavailable for MP4 atom post-write: {e}"
-            )
+            self.log_updated.emit(f"Warning: mutagen.mp4 unavailable for MP4 atom post-write: {e}")
             return False
 
         try:
@@ -4074,16 +3854,10 @@ class ConversionThread(QThread):
                     with open(resolved_cover_path, "rb") as handle:
                         cover_bytes = handle.read()
                     suffix = os.path.splitext(resolved_cover_path)[1].lower()
-                    image_format = (
-                        MP4Cover.FORMAT_PNG
-                        if suffix == ".png"
-                        else MP4Cover.FORMAT_JPEG
-                    )
+                    image_format = MP4Cover.FORMAT_PNG if suffix == ".png" else MP4Cover.FORMAT_JPEG
                     tags["covr"] = [MP4Cover(cover_bytes, imageformat=image_format)]
                 except Exception as e:
-                    self.log_updated.emit(
-                        f"Warning: Failed to write cover MP4 atom: {e}"
-                    )
+                    self.log_updated.emit(f"Warning: Failed to write cover MP4 atom: {e}")
 
             mp4.save()
             self.log_updated.emit("MP4/iTunes atom compatibility post-write completed.")
@@ -4103,14 +3877,10 @@ class ConversionThread(QThread):
         else:
             try:
                 encoding = detect_encoding(self.file_name)
-                with open(
-                    self.file_name, "r", encoding=encoding, errors="replace"
-                ) as file:
+                with open(self.file_name, "r", encoding=encoding, errors="replace") as file:
                     text = file.read()
             except Exception as e:
-                self.log_updated.emit(
-                    f"Warning: Could not read file for metadata extraction: {e}"
-                )
+                self.log_updated.emit(f"Warning: Could not read file for metadata extraction: {e}")
                 return [], None, {}
 
         # Extract metadata tags using regex
@@ -4128,9 +3898,7 @@ class ConversionThread(QThread):
         source_path_match = re.search(r"<<METADATA_SOURCE_PATH:([^>]*)>>", text)
         cover_match = re.search(r"<<METADATA_COVER_PATH:([^>]*)>>", text)
         cover_path = cover_match.group(1) if cover_match else None
-        source_epub_path = (
-            source_path_match.group(1).strip() if source_path_match else ""
-        )
+        source_epub_path = source_path_match.group(1).strip() if source_path_match else ""
         if source_epub_path:
             self.metadata_source_epub_path = source_epub_path
 
@@ -4141,9 +3909,7 @@ class ConversionThread(QThread):
             filename = os.path.splitext(os.path.basename(self.file_name))[0]
         else:
             filename = os.path.splitext(
-                os.path.basename(
-                    self.display_path if self.display_path else self.file_name
-                )
+                os.path.basename(self.display_path if self.display_path else self.file_name)
             )[0]
 
         if title_match:
@@ -4222,9 +3988,7 @@ class ConversionThread(QThread):
             series_index_value = ""
         if chapter_count_match:
             chapter_count_value = chapter_count_match.group(1)
-            metadata_options.extend(
-                ["-metadata", f"chapter_count={chapter_count_value}"]
-            )
+            metadata_options.extend(["-metadata", f"chapter_count={chapter_count_value}"])
         else:
             chapter_count_value = ""
 
@@ -4258,9 +4022,7 @@ class ConversionThread(QThread):
         # Resolve cover image before returning
         validated_cover = self._resolve_cover_path_with_fallbacks(cover_path)
         if validated_cover:
-            self.log_updated.emit(
-                f"Using cover image for audiobook artwork: {validated_cover}"
-            )
+            self.log_updated.emit(f"Using cover image for audiobook artwork: {validated_cover}")
 
         # Add these to ffmpeg command
         return metadata_options, validated_cover, atom_metadata
@@ -4306,7 +4068,7 @@ class ConversionThread(QThread):
         if self.subtitle_mode == "Sentence + Highlighting":
             # Sentence-based processing with karaoke highlighting
             # Use punctuation without comma
-            separator = r"[{}]".format(self.PUNCTUATION_SENTENCE)
+            separator = rf"[{self.PUNCTUATION_SENTENCE}]"
             current_sentence = []
             word_count = 0
 
@@ -4327,18 +4089,14 @@ class ConversionThread(QThread):
                         karaoke_text = ""
                         for t in current_sentence:
                             # Calculate duration in centiseconds
-                            duration = (
-                                t["end"] - t["start"]
-                                if t["end"] and t["start"]
-                                else 0.5
-                            )
+                            duration = t["end"] - t["start"] if t["end"] and t["start"] else 0.5
                             duration_cs = int(duration * 100)
                             # Add karaoke effect - relies on style's SecondaryColour for highlighting
-                            karaoke_text += f"{{\\kf{duration_cs}}}{t['text']}{t.get('whitespace', '') or ''}"
+                            karaoke_text += (
+                                f"{{\\kf{duration_cs}}}{t['text']}{t.get('whitespace', '') or ''}"
+                            )
 
-                        subtitle_entries.append(
-                            (start_time, end_time, karaoke_text.strip())
-                        )
+                        subtitle_entries.append((start_time, end_time, karaoke_text.strip()))
                         current_sentence = []
                         word_count = 0
 
@@ -4352,7 +4110,9 @@ class ConversionThread(QThread):
                 for t in current_sentence:
                     duration = t["end"] - t["start"] if t["end"] and t["start"] else 0.5
                     duration_cs = int(duration * 100)
-                    karaoke_text += f"{{\\kf{duration_cs}}}{t['text']}{t.get('whitespace', '') or ''}"
+                    karaoke_text += (
+                        f"{{\\kf{duration_cs}}}{t['text']}{t.get('whitespace', '') or ''}"
+                    )
                 subtitle_entries.append((start_time, end_time, karaoke_text.strip()))
 
             # Fallback for last entry
@@ -4386,12 +4146,8 @@ class ConversionThread(QThread):
 
                     # For "Sentence + Comma" mode, also split on commas
                     if self.subtitle_mode == "Sentence + Comma":
-                        comma_positions = [
-                            i + 1 for i, c in enumerate(full_text) if c == ","
-                        ]
-                        sentence_boundaries = sorted(
-                            set(sentence_boundaries + comma_positions)
-                        )
+                        comma_positions = [i + 1 for i, c in enumerate(full_text) if c == ","]
+                        sentence_boundaries = sorted(set(sentence_boundaries + comma_positions))
 
                     # Group tokens by sentence boundaries
                     current_sentence = []
@@ -4402,9 +4158,7 @@ class ConversionThread(QThread):
                     for idx, token in enumerate(processed_tokens):
                         current_sentence.append(token)
                         word_count += 1
-                        text_len = len(token["text"]) + len(
-                            token.get("whitespace", "") or ""
-                        )
+                        text_len = len(token["text"]) + len(token.get("whitespace", "") or "")
                         current_char_pos += text_len
 
                         # Check if we've hit a sentence boundary or max words
@@ -4433,12 +4187,9 @@ class ConversionThread(QThread):
                         start_time = current_sentence[0]["start"]
                         end_time = current_sentence[-1]["end"]
                         sentence_text = "".join(
-                            t["text"] + (t.get("whitespace", "") or "")
-                            for t in current_sentence
+                            t["text"] + (t.get("whitespace", "") or "") for t in current_sentence
                         )
-                        subtitle_entries.append(
-                            (start_time, end_time, sentence_text.strip())
-                        )
+                        subtitle_entries.append((start_time, end_time, sentence_text.strip()))
 
                     # Fallback for last entry
                     if subtitle_entries and fallback_end_time is not None:
@@ -4454,10 +4205,10 @@ class ConversionThread(QThread):
                 separator = r"\n"
             elif self.subtitle_mode == "Sentence":
                 # Use punctuation without comma
-                separator = r"[{}]".format(self.PUNCTUATION_SENTENCE)
+                separator = rf"[{self.PUNCTUATION_SENTENCE}]"
             else:  # Sentence + Comma
                 # Use punctuation with comma
-                separator = r"[{}]".format(self.PUNCTUATION_SENTENCE_COMMA)
+                separator = rf"[{self.PUNCTUATION_SENTENCE_COMMA}]"
             current_sentence = []
             word_count = 0
 
@@ -4467,23 +4218,21 @@ class ConversionThread(QThread):
 
                 # Split sentences based on separator or word count
                 if (
-                    re.search(separator, token["text"]) and token["whitespace"] == " "
-                ) or word_count >= max_subtitle_words:
-                    if current_sentence:
-                        # Create subtitle entry for this sentence
-                        start_time = current_sentence[0]["start"]
-                        end_time = current_sentence[-1]["end"]
+                    (re.search(separator, token["text"]) and token["whitespace"] == " ")
+                    or word_count >= max_subtitle_words
+                ) and current_sentence:
+                    # Create subtitle entry for this sentence
+                    start_time = current_sentence[0]["start"]
+                    end_time = current_sentence[-1]["end"]
 
-                        # Simplified text joining logic
-                        sentence_text = ""
-                        for t in current_sentence:
-                            sentence_text += t["text"] + (t.get("whitespace", "") or "")
+                    # Simplified text joining logic
+                    sentence_text = ""
+                    for t in current_sentence:
+                        sentence_text += t["text"] + (t.get("whitespace", "") or "")
 
-                        subtitle_entries.append(
-                            (start_time, end_time, sentence_text.strip())
-                        )
-                        current_sentence = []
-                        word_count = 0
+                    subtitle_entries.append((start_time, end_time, sentence_text.strip()))
+                    current_sentence = []
+                    word_count = 0
 
             # Add any remaining tokens as a sentence
             if current_sentence:
@@ -4524,8 +4273,7 @@ class ConversionThread(QThread):
                     # Split after counting N spaces
                     if space_count >= word_count:
                         text = "".join(
-                            t["text"] + (t.get("whitespace", "") or "")
-                            for t in current_group
+                            t["text"] + (t.get("whitespace", "") or "") for t in current_group
                         )
                         subtitle_entries.append(
                             (
@@ -4539,9 +4287,7 @@ class ConversionThread(QThread):
 
             # Add any remaining tokens
             if current_group:
-                text = "".join(
-                    t["text"] + (t.get("whitespace", "") or "") for t in current_group
-                )
+                text = "".join(t["text"] + (t.get("whitespace", "") or "") for t in current_group)
                 subtitle_entries.append(
                     (current_group[0]["start"], current_group[-1]["end"], text.strip())
                 )
@@ -4614,9 +4360,7 @@ class VoicePreviewThread(QThread):
         """Generate a unique filename for the voice with its parameters"""
         # For a voice formula, use a hash of the formula
         if "*" in self.voice:
-            voice_id = (
-                f"voice_formula_{hashlib.md5(self.voice.encode()).hexdigest()[:8]}"
-            )
+            voice_id = f"voice_formula_{hashlib.md5(self.voice.encode()).hexdigest()[:8]}"
         else:
             voice_id = self.voice
 
@@ -4662,7 +4406,7 @@ class VoicePreviewThread(QThread):
                 self.temp_wav = self.cache_path
             self.finished.emit()
         except Exception as e:
-            self.error.emit(f"Voice preview error: {str(e)}")
+            self.error.emit(f"Voice preview error: {e!s}")
 
 
 class PlayAudioThread(QThread):
@@ -4704,7 +4448,7 @@ class PlayAudioThread(QThread):
                     "Audio playback error: The audio system was not properly initialized"
                 )
             else:
-                self.error.emit(f"Audio playback error: {str(e)}")
+                self.error.emit(f"Audio playback error: {e!s}")
 
     def stop(self):
         """Safely stop playback"""

@@ -165,11 +165,7 @@ qInstallMessageHandler(qt_message_handler)
 if platform.system() == "Linux":
     xdg_session = os.environ.get("XDG_SESSION_TYPE", "").lower()
     desktop = os.environ.get("XDG_CURRENT_DESKTOP", "").lower()
-    if (
-        "gnome" in desktop
-        and xdg_session == "wayland"
-        and "QT_QPA_PLATFORM" not in os.environ
-    ):
+    if "gnome" in desktop and xdg_session == "wayland" and "QT_QPA_PLATFORM" not in os.environ:
         os.environ["QT_QPA_PLATFORM"] = "wayland"
 
 

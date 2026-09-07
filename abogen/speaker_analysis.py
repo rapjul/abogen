@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any
 
 _DIALOGUE_VERBS = (
     "said",
@@ -146,7 +147,7 @@ class SpeakerGuess:
     label: str
     count: int = 0
     confidence: str = "low"
-    sample_quotes: List[Dict[str, str]] = field(default_factory=list)
+    sample_quotes: list[dict[str, str]] = field(default_factory=list)
     suppressed: bool = False
     gender: str = "unknown"
     detected_gender: str = "unknown"
@@ -157,22 +158,16 @@ class SpeakerGuess:
         self,
         confidence: str,
         text: str,
-        quote: Optional[str],
+        quote: str | None,
         male_votes: int,
         female_votes: int,
-        sample_excerpt: Optional[str] = None,
+        sample_excerpt: str | None = None,
     ) -> None:
         self.count += 1
-        if _CONFIDENCE_RANK.get(confidence, 0) > _CONFIDENCE_RANK.get(
-            self.confidence, 0
-        ):
+        if _CONFIDENCE_RANK.get(confidence, 0) > _CONFIDENCE_RANK.get(self.confidence, 0):
             self.confidence = confidence
 
-        excerpt = (
-            sample_excerpt
-            if sample_excerpt is not None
-            else _build_excerpt(text, quote)
-        )
+        excerpt = sample_excerpt if sample_excerpt is not None else _build_excerpt(text, quote)
         gender_hint = _format_gender_hint(male_votes, female_votes)
         if excerpt:
             payload = {"excerpt": excerpt, "gender_hint": gender_hint}
@@ -189,11 +184,9 @@ class SpeakerGuess:
             self.male_votes, self.female_votes, self.detected_gender
         )
         if self.gender in {"unknown", "male", "female"}:
-            self.gender = _derive_gender(
-                self.male_votes, self.female_votes, self.gender
-            )
+            self.gender = _derive_gender(self.male_votes, self.female_votes, self.gender)
 
-    def as_dict(self) -> Dict[str, Any]:
+    def as_dict(self) -> dict[str, Any]:
         return {
             "id": self.speaker_id,
             "label": self.label,
@@ -208,21 +201,20 @@ class SpeakerGuess:
 
 @dataclass(slots=True)
 class SpeakerAnalysis:
-    assignments: Dict[str, str]
-    speakers: Dict[str, SpeakerGuess]
-    suppressed: List[str]
+    assignments: dict[str, str]
+    speakers: dict[str, SpeakerGuess]
+    suppressed: list[str]
     narrator: str = "narrator"
     version: str = "1.0"
-    stats: Dict[str, Any] = field(default_factory=dict)
+    stats: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "version": self.version,
             "narrator": self.narrator,
             "assignments": dict(self.assignments),
             "speakers": {
-                speaker_id: guess.as_dict()
-                for speaker_id, guess in self.speakers.items()
+                speaker_id: guess.as_dict() for speaker_id, guess in self.speakers.items()
             },
             "suppressed": list(self.suppressed),
             "stats": dict(self.stats),
@@ -230,21 +222,19 @@ class SpeakerAnalysis:
 
 
 def analyze_speakers(
-    chapters: Sequence[Dict[str, Any]] | Iterable[Dict[str, Any]],
-    chunks: Sequence[Dict[str, Any]] | Iterable[Dict[str, Any]],
+    chapters: Sequence[dict[str, Any]] | Iterable[dict[str, Any]],
+    chunks: Sequence[dict[str, Any]] | Iterable[dict[str, Any]],
     *,
     threshold: int = 3,
     max_speakers: int = 8,
 ) -> SpeakerAnalysis:
     narrator_id = "narrator"
-    speaker_guesses: Dict[str, SpeakerGuess] = {
-        narrator_id: SpeakerGuess(
-            speaker_id=narrator_id, label="Narrator", confidence="low"
-        )
+    speaker_guesses: dict[str, SpeakerGuess] = {
+        narrator_id: SpeakerGuess(speaker_id=narrator_id, label="Narrator", confidence="low")
     }
-    label_index: Dict[str, str] = {"Narrator": narrator_id}
-    assignments: Dict[str, str] = {}
-    suppressed: List[str] = []
+    label_index: dict[str, str] = {"Narrator": narrator_id}
+    assignments: dict[str, str] = {}
+    suppressed: list[str] = []
 
     ordered_chunks = sorted(
         (dict(chunk) for chunk in chunks),
@@ -253,7 +243,7 @@ def analyze_speakers(
             _safe_int(entry.get("chunk_index")),
         ),
     )
-    last_explicit: Optional[str] = None
+    last_explicit: str | None = None
     explicit_assignments = 0
     unique_speakers: set[str] = set()
 
@@ -279,18 +269,12 @@ def analyze_speakers(
             if record_id is None:
                 record_id = _dedupe_slug(_slugify(label), speaker_guesses)
                 label_index[label] = record_id
-                speaker_guesses[record_id] = SpeakerGuess(
-                    speaker_id=record_id, label=label
-                )
+                speaker_guesses[record_id] = SpeakerGuess(speaker_id=record_id, label=label)
             guess = speaker_guesses[record_id]
         assignments[chunk_id] = record_id
         unique_speakers.add(record_id)
 
-        if (
-            record_id != narrator_id
-            and record_id != speaker_id
-            and speaker_id == last_explicit
-        ):
+        if record_id != narrator_id and record_id != speaker_id and speaker_id == last_explicit:
             last_explicit = record_id
 
         sample_excerpt = None
@@ -301,9 +285,7 @@ def analyze_speakers(
 
         male_votes, female_votes = _count_gender_votes(text, guess.label)
 
-        guess.register_occurrence(
-            confidence, text, quote, male_votes, female_votes, sample_excerpt
-        )
+        guess.register_occurrence(confidence, text, quote, male_votes, female_votes, sample_excerpt)
 
     active_speakers = [sid for sid in speaker_guesses if sid != narrator_id]
     # Apply minimum occurrence threshold.
@@ -326,9 +308,7 @@ def analyze_speakers(
         active_speakers = active_speakers[:max_speakers]
 
     narrator_guess = speaker_guesses[narrator_id]
-    narrator_guess.count = sum(
-        1 for value in assignments.values() if value == narrator_id
-    )
+    narrator_guess.count = sum(1 for value in assignments.values() if value == narrator_id)
     narrator_guess.confidence = "low"
 
     stats = {
@@ -349,8 +329,8 @@ def analyze_speakers(
 
 
 def _infer_chunk_speaker(
-    text: str, last_explicit: Optional[str]
-) -> Tuple[Optional[str], str, Optional[str]]:
+    text: str, last_explicit: str | None
+) -> tuple[str | None, str, str | None]:
     normalized = text.strip()
     if not normalized:
         return None, "low", None
@@ -385,7 +365,7 @@ def _infer_chunk_speaker(
     return None, "low", quote
 
 
-def _split_around_quote(text: str, quote: str) -> Tuple[str, str]:
+def _split_around_quote(text: str, quote: str) -> tuple[str, str]:
     quote_index = text.find(quote)
     if quote_index == -1:
         return text, ""
@@ -394,7 +374,7 @@ def _split_around_quote(text: str, quote: str) -> Tuple[str, str]:
     return before, after
 
 
-def _match_name_near_quote(before: str, after: str) -> Optional[str]:
+def _match_name_near_quote(before: str, after: str) -> str | None:
     trailing = before[-120:]
     leading = after[:120]
 
@@ -404,9 +384,7 @@ def _match_name_near_quote(before: str, after: str) -> Optional[str]:
         if _looks_like_name(name):
             return name
 
-    match = re.search(
-        rf"({_NAME_PATTERN})\s*,?\s*{_VERB_PATTERN}", leading, flags=re.IGNORECASE
-    )
+    match = re.search(rf"({_NAME_PATTERN})\s*,?\s*{_VERB_PATTERN}", leading, flags=re.IGNORECASE)
     if match:
         name = match.group(1)
         if _looks_like_name(name):
@@ -431,7 +409,7 @@ def _looks_like_name(value: str) -> bool:
     return all(part and part[0].isupper() for part in parts)
 
 
-def _extract_quote(text: str) -> Optional[str]:
+def _extract_quote(text: str) -> str | None:
     match = _QUOTE_PATTERN.search(text)
     if not match:
         return None
@@ -443,7 +421,7 @@ def _slugify(label: str) -> str:
     return slug or "speaker"
 
 
-def _dedupe_slug(slug: str, existing: Dict[str, SpeakerGuess]) -> str:
+def _dedupe_slug(slug: str, existing: dict[str, SpeakerGuess]) -> str:
     candidate = slug
     index = 2
     while candidate in existing:
@@ -464,7 +442,7 @@ def _safe_int(value: Any, default: int = 0) -> int:
         return default
 
 
-def _reassign(assignments: Dict[str, str], old: str, new: str) -> None:
+def _reassign(assignments: dict[str, str], old: str, new: str) -> None:
     for key, value in list(assignments.items()):
         if value == old:
             assignments[key] = new
@@ -475,12 +453,12 @@ def _strip_diacritics(value: str) -> str:
     return "".join(char for char in normalized if not unicodedata.combining(char))
 
 
-def _count_gender_votes(text: str, label: Optional[str]) -> Tuple[int, int]:
+def _count_gender_votes(text: str, label: str | None) -> tuple[int, int]:
     if not text:
         return 0, 0
 
     search_text = text
-    windows: List[Tuple[int, int]] = []
+    windows: list[tuple[int, int]] = []
     degrade_factor = 1.0
 
     if label:
@@ -494,7 +472,7 @@ def _count_gender_votes(text: str, label: Optional[str]) -> Tuple[int, int]:
                 windows = [match.span() for match in pattern_alt.finditer(ascii_text)]
                 # Map spans back roughly using proportional index
                 if windows:
-                    mapped: List[Tuple[int, int]] = []
+                    mapped: list[tuple[int, int]] = []
                     for start, end in windows:
                         start_idx = min(
                             len(search_text) - 1,
@@ -514,16 +492,14 @@ def _count_gender_votes(text: str, label: Optional[str]) -> Tuple[int, int]:
         degrade_factor = 0.25
 
     radius = 60
-    quote_spans: List[Tuple[int, int, str]] = []
+    quote_spans: list[tuple[int, int, str]] = []
     for match in _QUOTE_PATTERN.finditer(search_text):
         try:
             content_start, content_end = match.span(1)
         except IndexError:
             content_start, content_end = match.span()
         if content_start < content_end:
-            quote_spans.append(
-                (content_start, content_end, search_text[content_start:content_end])
-            )
+            quote_spans.append((content_start, content_end, search_text[content_start:content_end]))
 
     normalized_label = _normalize_candidate_name(label) if label else None
     normalized_label_lower = normalized_label.lower() if normalized_label else None
@@ -598,8 +574,8 @@ def _count_gender_votes(text: str, label: Optional[str]) -> Tuple[int, int]:
         if any(title in span_text for title in _MALE_TITLE_HINTS):
             male_score += 2.5
 
-    male_votes = int(round(male_score * degrade_factor))
-    female_votes = int(round(female_score * degrade_factor))
+    male_votes = round(male_score * degrade_factor)
+    female_votes = round(female_score * degrade_factor)
     return male_votes, female_votes
 
 
@@ -620,7 +596,7 @@ def _derive_gender(male_votes: int, female_votes: int, current: str) -> str:
     return "unknown"
 
 
-def _get_chunk_text(chunk: Dict[str, Any]) -> str:
+def _get_chunk_text(chunk: dict[str, Any]) -> str:
     if not isinstance(chunk, dict):
         return ""
     value = chunk.get("normalized_text") or chunk.get("text") or ""
@@ -645,16 +621,12 @@ def _compose_context_excerpt(before: str, current: str, after: str) -> str:
     return "\n\n".join(segments)
 
 
-def _contains_dialogue_attribution(label: str, text: str, quote: Optional[str]) -> bool:
+def _contains_dialogue_attribution(label: str, text: str, quote: str | None) -> bool:
     if not label or not text:
         return False
     escaped_label = re.escape(label)
-    direct_pattern = re.compile(
-        rf"\b{escaped_label}\b\s+(?:{_VERB_PATTERN})\b", re.IGNORECASE
-    )
-    reverse_pattern = re.compile(
-        rf"(?:{_VERB_PATTERN})\s+\b{escaped_label}\b", re.IGNORECASE
-    )
+    direct_pattern = re.compile(rf"\b{escaped_label}\b\s+(?:{_VERB_PATTERN})\b", re.IGNORECASE)
+    reverse_pattern = re.compile(rf"(?:{_VERB_PATTERN})\s+\b{escaped_label}\b", re.IGNORECASE)
     colon_pattern = re.compile(rf"^\s*{escaped_label}\s*:\s*", re.IGNORECASE)
 
     if colon_pattern.search(text):
@@ -669,12 +641,12 @@ def _contains_dialogue_attribution(label: str, text: str, quote: Optional[str]) 
 
 
 def _select_sample_excerpt(
-    chunks: Sequence[Dict[str, Any]],
+    chunks: Sequence[dict[str, Any]],
     index: int,
     label: str,
-    quote: Optional[str],
+    quote: str | None,
     confidence: str,
-) -> Optional[str]:
+) -> str | None:
     if confidence != "high" or not label:
         return None
     if index < 0 or index >= len(chunks):
@@ -688,7 +660,7 @@ def _select_sample_excerpt(
     return excerpt or None
 
 
-def _build_excerpt(text: str, quote: Optional[str]) -> str:
+def _build_excerpt(text: str, quote: str | None) -> str:
     normalized = (text or "").strip()
     if not normalized:
         return ""
@@ -722,7 +694,7 @@ def _format_gender_hint(male_votes: int, female_votes: int) -> str:
     return "No clear pronoun signal detected."
 
 
-def _normalize_candidate_name(raw: str) -> Optional[str]:
+def _normalize_candidate_name(raw: str) -> str | None:
     if not raw:
         return None
     cleaned = raw.strip().strip("\"“”'’.,:;!")
@@ -730,7 +702,7 @@ def _normalize_candidate_name(raw: str) -> Optional[str]:
     if not cleaned:
         return None
     parts = cleaned.split()
-    filtered: List[str] = []
+    filtered: list[str] = []
     for part in parts:
         if not part:
             continue
@@ -743,7 +715,7 @@ def _normalize_candidate_name(raw: str) -> Optional[str]:
         return None
     if all(part.lower() in _STOP_LABELS for part in filtered):
         return None
-    contiguous: List[str] = []
+    contiguous: list[str] = []
     for part in filtered:
         if part and part[0].isupper():
             contiguous.append(part)

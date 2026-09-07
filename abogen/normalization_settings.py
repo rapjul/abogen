@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from dataclasses import replace
 from functools import lru_cache
-from typing import Any, Dict, Mapping, Optional
+from typing import Any
 
 from abogen.kokoro_text_normalization import (
     CONTRACTION_CATEGORY_DEFAULTS,
@@ -26,7 +27,7 @@ _LEGACY_REWRITE_ONLY_PROMPT = (
     "Context: {{ paragraph }}"
 )
 
-_SETTINGS_DEFAULTS: Dict[str, Any] = {
+_SETTINGS_DEFAULTS: dict[str, Any] = {
     "llm_base_url": "",
     "llm_api_key": "",
     "llm_model": "",
@@ -56,7 +57,7 @@ _SETTINGS_DEFAULTS: Dict[str, Any] = {
     "normalization_contraction_let_us": True,
 }
 
-_CONTRACTION_SETTING_MAP: Dict[str, str] = {
+_CONTRACTION_SETTING_MAP: dict[str, str] = {
     "normalization_contraction_aux_be": "contraction_aux_be",
     "normalization_contraction_aux_have": "contraction_aux_have",
     "normalization_contraction_modal_will": "contraction_modal_will",
@@ -65,7 +66,7 @@ _CONTRACTION_SETTING_MAP: Dict[str, str] = {
     "normalization_contraction_let_us": "contraction_let_us",
 }
 
-_ENVIRONMENT_KEYS: Dict[str, str] = {
+_ENVIRONMENT_KEYS: dict[str, str] = {
     "llm_base_url": "ABOGEN_LLM_BASE_URL",
     "llm_api_key": "ABOGEN_LLM_API_KEY",
     "llm_model": "ABOGEN_LLM_MODEL",
@@ -74,7 +75,7 @@ _ENVIRONMENT_KEYS: Dict[str, str] = {
     "llm_context_mode": "ABOGEN_LLM_CONTEXT_MODE",
 }
 
-NORMALIZATION_SAMPLE_TEXTS: Dict[str, str] = {
+NORMALIZATION_SAMPLE_TEXTS: dict[str, str] = {
     "apostrophes": "I've heard the captain'll arrive by dusk, but they'd said the same yesterday.",
     "numbers": "The ledger listed 1,204 outstanding debts totaling $57,890.",
     "titles": "Dr. Smith met Mr. O'Leary outside St. John's Church on Jan. 4th.",
@@ -83,8 +84,8 @@ NORMALIZATION_SAMPLE_TEXTS: Dict[str, str] = {
 
 
 @lru_cache(maxsize=1)
-def _environment_defaults() -> Dict[str, Any]:
-    overrides: Dict[str, Any] = {}
+def _environment_defaults() -> dict[str, Any]:
+    overrides: dict[str, Any] = {}
     for key, env_var in _ENVIRONMENT_KEYS.items():
         default = _SETTINGS_DEFAULTS.get(key)
         if default is None:
@@ -101,7 +102,7 @@ def _environment_defaults() -> Dict[str, Any]:
     return overrides
 
 
-def environment_llm_defaults() -> Dict[str, Any]:
+def environment_llm_defaults() -> dict[str, Any]:
     defaults = dict(_environment_defaults())
     if defaults:
         _apply_llm_migrations(defaults)
@@ -127,7 +128,7 @@ def _coerce_float(value: Any, default: float) -> float:
         return default
 
 
-def _apply_llm_migrations(settings: Dict[str, Any]) -> None:
+def _apply_llm_migrations(settings: dict[str, Any]) -> None:
     prompt_value = str(settings.get("llm_prompt") or "")
     if prompt_value.strip() == _LEGACY_REWRITE_ONLY_PROMPT.strip():
         settings["llm_prompt"] = DEFAULT_LLM_PROMPT
@@ -137,9 +138,9 @@ def _apply_llm_migrations(settings: Dict[str, Any]) -> None:
         settings["llm_context_mode"] = "sentence"
 
 
-def _extract_settings(source: Mapping[str, Any]) -> Dict[str, Any]:
+def _extract_settings(source: Mapping[str, Any]) -> dict[str, Any]:
     env_defaults = _environment_defaults()
-    extracted: Dict[str, Any] = {}
+    extracted: dict[str, Any] = {}
     for key, default in _SETTINGS_DEFAULTS.items():
         if key in source:
             raw_value = source.get(key)
@@ -152,20 +153,18 @@ def _extract_settings(source: Mapping[str, Any]) -> Dict[str, Any]:
         elif isinstance(default, float):
             extracted[key] = _coerce_float(raw_value, default)
         else:
-            extracted[key] = (
-                str(raw_value or "") if isinstance(default, str) else raw_value
-            )
+            extracted[key] = str(raw_value or "") if isinstance(default, str) else raw_value
     _apply_llm_migrations(extracted)
     return extracted
 
 
 @lru_cache(maxsize=1)
-def _cached_settings() -> Dict[str, Any]:
+def _cached_settings() -> dict[str, Any]:
     config = load_config() or {}
     return _extract_settings(config)
 
 
-def get_runtime_settings() -> Dict[str, Any]:
+def get_runtime_settings() -> dict[str, Any]:
     return dict(_cached_settings())
 
 
@@ -176,40 +175,30 @@ def clear_cached_settings() -> None:
 def build_apostrophe_config(
     *,
     settings: Mapping[str, Any],
-    base: Optional[ApostropheConfig] = None,
+    base: ApostropheConfig | None = None,
 ) -> ApostropheConfig:
     config = replace(base or ApostropheConfig())
     config.convert_numbers = bool(settings.get("normalization_numbers", True))
     config.convert_currency = bool(settings.get("normalization_currency", True))
     config.remove_footnotes = bool(settings.get("normalization_footnotes", True))
     config.year_pronunciation_mode = (
-        str(settings.get("normalization_numbers_year_style", "american") or "")
-        .strip()
-        .lower()
+        str(settings.get("normalization_numbers_year_style", "american") or "").strip().lower()
     )
     config.add_phoneme_hints = bool(settings.get("normalization_phoneme_hints", True))
     config.contraction_mode = (
-        "expand"
-        if settings.get("normalization_apostrophes_contractions", True)
-        else "keep"
+        "expand" if settings.get("normalization_apostrophes_contractions", True) else "keep"
     )
     config.plural_possessive_mode = (
-        "collapse"
-        if settings.get("normalization_apostrophes_plural_possessives", True)
-        else "keep"
+        "collapse" if settings.get("normalization_apostrophes_plural_possessives", True) else "keep"
     )
     config.sibilant_possessive_mode = (
-        "mark"
-        if settings.get("normalization_apostrophes_sibilant_possessives", True)
-        else "keep"
+        "mark" if settings.get("normalization_apostrophes_sibilant_possessives", True) else "keep"
     )
     config.decades_mode = (
         "expand" if settings.get("normalization_apostrophes_decades", True) else "keep"
     )
     config.leading_elision_mode = (
-        "expand"
-        if settings.get("normalization_apostrophes_leading_elisions", True)
-        else "keep"
+        "expand" if settings.get("normalization_apostrophes_leading_elisions", True) else "keep"
     )
     config.ambiguous_past_modal_mode = (
         "contextual" if config.contraction_mode == "expand" else "keep"
@@ -234,10 +223,8 @@ def build_llm_configuration(settings: Mapping[str, Any]) -> LLMConfiguration:
     )
 
 
-def apply_overrides(
-    base: Mapping[str, Any], overrides: Mapping[str, Any]
-) -> Dict[str, Any]:
-    merged: Dict[str, Any] = dict(base)
+def apply_overrides(base: Mapping[str, Any], overrides: Mapping[str, Any]) -> dict[str, Any]:
+    merged: dict[str, Any] = dict(base)
     for key, value in overrides.items():
         if key not in _SETTINGS_DEFAULTS:
             continue

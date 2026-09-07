@@ -1,39 +1,12 @@
-from typing import Any, Dict, Mapping
 import base64
 import uuid
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
-from flask import Blueprint, request, jsonify, send_file, url_for, current_app
+from flask import Blueprint, current_app, jsonify, request, send_file, url_for
 from flask.typing import ResponseReturnValue
 
-from abogen.webui.routes.utils.settings import (
-    load_settings,
-    load_integration_settings,
-    coerce_float,
-    coerce_bool,
-    audiobookshelf_settings_from_payload,
-    calibre_settings_from_payload,
-)
-from abogen.voice_profiles import (
-    load_profiles,
-    save_profiles,
-    delete_profile,
-    duplicate_profile,
-    serialize_profiles,
-    import_profiles_data,
-    export_profiles_payload,
-    normalize_profile_entry,
-)
-from abogen.webui.routes.utils.common import split_profile_spec
-from abogen.webui.routes.utils.preview import synthesize_preview, generate_preview_audio
-from abogen.webui.routes.utils.voice import formula_from_profile
-from abogen.normalization_settings import (
-    build_llm_configuration,
-    build_apostrophe_config,
-    apply_overrides,
-)
-from abogen.llm_client import list_models, LLMClientError
-from abogen.kokoro_text_normalization import normalize_for_pipeline
 from abogen.integrations.audiobookshelf import (
     AudiobookshelfClient,
     AudiobookshelfConfig,
@@ -42,9 +15,37 @@ from abogen.integrations.calibre_opds import (
     CalibreOPDSClient,
     CalibreOPDSError,
 )
-from abogen.webui.routes.utils.service import get_service
-from abogen.webui.routes.utils.form import build_pending_job_from_extraction
+from abogen.kokoro_text_normalization import normalize_for_pipeline
+from abogen.llm_client import LLMClientError, list_models
+from abogen.normalization_settings import (
+    apply_overrides,
+    build_apostrophe_config,
+    build_llm_configuration,
+)
 from abogen.text_extractor import extract_from_path
+from abogen.voice_profiles import (
+    delete_profile,
+    duplicate_profile,
+    export_profiles_payload,
+    import_profiles_data,
+    load_profiles,
+    normalize_profile_entry,
+    save_profiles,
+    serialize_profiles,
+)
+from abogen.webui.routes.utils.common import split_profile_spec
+from abogen.webui.routes.utils.form import build_pending_job_from_extraction
+from abogen.webui.routes.utils.preview import generate_preview_audio, synthesize_preview
+from abogen.webui.routes.utils.service import get_service
+from abogen.webui.routes.utils.settings import (
+    audiobookshelf_settings_from_payload,
+    calibre_settings_from_payload,
+    coerce_bool,
+    coerce_float,
+    load_integration_settings,
+    load_settings,
+)
+from abogen.webui.routes.utils.voice import formula_from_profile
 
 api_bp = Blueprint("api", __name__)
 
@@ -74,8 +75,7 @@ def api_save_voice_profile() -> ResponseReturnValue:
                 "provider": "supertonic",
                 "language": str(payload.get("language") or "a").strip().lower() or "a",
                 "voice": payload.get("voice"),
-                "total_steps": payload.get("total_steps")
-                or payload.get("supertonic_total_steps"),
+                "total_steps": payload.get("total_steps") or payload.get("supertonic_total_steps"),
                 "speed": payload.get("speed") or payload.get("supertonic_speed"),
             }
         else:
@@ -116,9 +116,7 @@ def api_duplicate_voice_profile(name: str) -> ResponseReturnValue:
     if not new_name:
         return jsonify({"error": "Name is required"}), 400
     duplicate_profile(name, new_name)
-    return jsonify(
-        {"success": True, "profile": new_name, "profiles": serialize_profiles()}
-    )
+    return jsonify({"success": True, "profile": new_name, "profiles": serialize_profiles()})
 
 
 @api_bp.post("/voice-profiles/import")
@@ -132,9 +130,7 @@ def api_import_voice_profiles() -> ResponseReturnValue:
         imported = import_profiles_data(data, replace_existing=replace_existing)
     except Exception as exc:
         return jsonify({"error": str(exc)}), 400
-    return jsonify(
-        {"success": True, "imported": imported, "profiles": serialize_profiles()}
-    )
+    return jsonify({"success": True, "imported": imported, "profiles": serialize_profiles()})
 
 
 @api_bp.get("/voice-profiles/export")
@@ -172,10 +168,7 @@ def api_voice_profiles_preview() -> ResponseReturnValue:
     formula = str(payload.get("formula") or "").strip()
     profile_name = str(payload.get("profile") or "").strip()
     provider = (
-        str(payload.get("tts_provider") or payload.get("provider") or "")
-        .strip()
-        .lower()
-        or None
+        str(payload.get("tts_provider") or payload.get("provider") or "").strip().lower() or None
     )
     supertonic_total_steps = int(
         payload.get("supertonic_total_steps")
@@ -190,8 +183,7 @@ def api_voice_profiles_preview() -> ResponseReturnValue:
     profiles = load_profiles()
     if resolved_provider == "supertonic" and not profile_name:
         voice_spec = (
-            str(payload.get("voice") or payload.get("supertonic_voice") or "M1").strip()
-            or "M1"
+            str(payload.get("voice") or payload.get("supertonic_voice") or "M1").strip() or "M1"
         )
         # Allow per-speaker overrides via payload.
         supertonic_total_steps = int(
@@ -199,9 +191,7 @@ def api_voice_profiles_preview() -> ResponseReturnValue:
             or payload.get("total_steps")
             or supertonic_total_steps
         )
-        speed = coerce_float(
-            payload.get("supertonic_speed") or payload.get("speed"), speed
-        )
+        speed = coerce_float(payload.get("supertonic_speed") or payload.get("speed"), speed)
     elif profile_name:
         entry = profiles.get(profile_name)
         normalized_entry = normalize_profile_entry(entry)
@@ -270,9 +260,7 @@ def api_speaker_preview() -> ResponseReturnValue:
             resolved_provider = str(entry.get("provider") or resolved_provider or "")
             if resolved_provider == "supertonic":
                 voice = str(entry.get("voice") or "M1")
-                supertonic_total_steps = int(
-                    entry.get("total_steps") or supertonic_total_steps
-                )
+                supertonic_total_steps = int(entry.get("total_steps") or supertonic_total_steps)
                 if speed_value is None:
                     speed = coerce_float(entry.get("speed"), speed)
             elif resolved_provider == "kokoro":
@@ -320,8 +308,8 @@ def api_speaker_preview() -> ResponseReturnValue:
 # --- Integration Routes ---
 
 
-def _opds_metadata_overrides(metadata_payload: Mapping[str, Any]) -> Dict[str, Any]:
-    metadata_overrides: Dict[str, Any] = {}
+def _opds_metadata_overrides(metadata_payload: Mapping[str, Any]) -> dict[str, Any]:
+    metadata_overrides: dict[str, Any] = {}
 
     def _stringify_metadata_value(value: Any) -> str:
         if value is None:
@@ -360,9 +348,7 @@ def _opds_metadata_overrides(metadata_payload: Mapping[str, Any]) -> Dict[str, A
             metadata_overrides.setdefault("keywords", tags_text)
             metadata_overrides.setdefault("genre", tags_text)
 
-    description_value = metadata_payload.get("description") or metadata_payload.get(
-        "summary"
-    )
+    description_value = metadata_payload.get("description") or metadata_payload.get("summary")
     if description_value:
         description_text = _stringify_metadata_value(description_value)
         if description_text:
@@ -440,7 +426,7 @@ def api_calibre_opds_feed() -> ResponseReturnValue:
     except CalibreOPDSError as exc:
         return jsonify({"error": str(exc)}), 502
     except Exception as exc:
-        return jsonify({"error": f"Unexpected error: {str(exc)}"}), 500
+        return jsonify({"error": f"Unexpected error: {exc!s}"}), 500
 
     return jsonify(
         {
@@ -467,9 +453,7 @@ def api_abs_folders() -> ResponseReturnValue:
         return jsonify({"error": "Library ID is required to list folders"}), 400
 
     try:
-        config = AudiobookshelfConfig(
-            base_url=host, api_token=token, library_id=library_id
-        )
+        config = AudiobookshelfConfig(base_url=host, api_token=token, library_id=library_id)
         client = AudiobookshelfClient(config)
         folders = client.list_folders()
         return jsonify({"folders": folders})
@@ -537,7 +521,7 @@ def api_calibre_opds_import() -> ResponseReturnValue:
         return jsonify({"error": "Download URL (href) is required."}), 400
 
     metadata_payload = data.get("metadata") if isinstance(data, Mapping) else None
-    metadata_overrides: Dict[str, Any] = {}
+    metadata_overrides: dict[str, Any] = {}
     if isinstance(metadata_payload, Mapping):
         metadata_overrides = _opds_metadata_overrides(metadata_payload)
 
@@ -621,9 +605,7 @@ def api_llm_models() -> ResponseReturnValue:
         or current_settings.get("llm_api_key")
         or ""
     )
-    timeout = coerce_float(
-        payload.get("timeout"), current_settings.get("llm_timeout", 30.0)
-    )
+    timeout = coerce_float(payload.get("timeout"), current_settings.get("llm_timeout", 30.0))
 
     overrides = {
         "llm_base_url": base_url,
@@ -648,7 +630,7 @@ def api_llm_preview() -> ResponseReturnValue:
         return jsonify({"error": "Text is required."}), 400
 
     base_settings = load_settings()
-    overrides: Dict[str, Any] = {
+    overrides: dict[str, Any] = {
         "llm_base_url": str(
             payload.get("base_url")
             or payload.get("llm_base_url")
@@ -662,19 +644,13 @@ def api_llm_preview() -> ResponseReturnValue:
             or ""
         ),
         "llm_model": str(
-            payload.get("model")
-            or payload.get("llm_model")
-            or base_settings.get("llm_model")
-            or ""
+            payload.get("model") or payload.get("llm_model") or base_settings.get("llm_model") or ""
         ),
         "llm_prompt": payload.get("prompt")
         or payload.get("llm_prompt")
         or base_settings.get("llm_prompt"),
-        "llm_context_mode": payload.get("context_mode")
-        or base_settings.get("llm_context_mode"),
-        "llm_timeout": coerce_float(
-            payload.get("timeout"), base_settings.get("llm_timeout", 30.0)
-        ),
+        "llm_context_mode": payload.get("context_mode") or base_settings.get("llm_context_mode"),
+        "llm_timeout": coerce_float(payload.get("timeout"), base_settings.get("llm_timeout", 30.0)),
         "normalization_apostrophe_mode": "llm",
     }
 

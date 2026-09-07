@@ -4,6 +4,7 @@ import base64
 import logging
 import os
 import re
+from typing import Any, ClassVar
 
 import ebooklib
 import fitz
@@ -53,17 +54,13 @@ from abogen.utils import (
 )
 
 # Setup logging
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 _HTML_TAG_PATTERN = re.compile(r"<[^>]+>")
 _LEADING_DASH_PATTERN = re.compile(r"^\s*[-–—]\s*")
 _LEADING_SIMPLE_DASH_PATTERN = re.compile(r"^\s*-\s*")
 _GAP_PAGE_TITLE_PATTERN = re.compile(r"^Page \d+(?:\s*-.*)?$")
-_CHAPTER_EXPLICIT_PATTERN = re.compile(
-    r"(?i)\b(?:chapter|chap|ch|episode|ep)\.?\s*#?\s*(\d+)\b"
-)
+_CHAPTER_EXPLICIT_PATTERN = re.compile(r"(?i)\b(?:chapter|chap|ch|episode|ep)\.?\s*#?\s*(\d+)\b")
 _CHAPTER_LEADING_NUM_PATTERN = re.compile(r"^(\d+)\b")
 _CHAPTER_STANDALONE_NUM_PATTERN = re.compile(r"\b(\d+)\b")
 _TREE_PREFIX_PATTERN = re.compile(r"^[\s├─└│|─\-]+")
@@ -81,16 +78,7 @@ def _is_valid_image_bytes(data: bytes | None) -> bool:
     if not data or len(data) < 8:
         return False
     head = bytes(data[:64]).strip().lower()
-    if (
-        head.startswith(b"<?xml")
-        or head.startswith(b"<html")
-        or head.startswith(b"<!doctype")
-        or head.startswith(b"<svg")
-        or head.startswith(b"{\\")
-        or head.startswith(b"/*")
-    ):
-        return False
-    return True
+    return not (head.startswith((b"<?xml", b"<html", b"<!doctype", b"<svg", b"{\\", b"/*")))
 
 
 def _guess_image_extension(image_bytes: bytes | None) -> str:
@@ -107,7 +95,7 @@ def _guess_image_extension(image_bytes: bytes | None) -> str:
         return ".png"
     if head.startswith(b"\xff\xd8\xff"):
         return ".jpg"
-    if head.startswith(b"GIF87a") or head.startswith(b"GIF89a"):
+    if head.startswith((b"GIF87a", b"GIF89a")):
         return ".gif"
     if head.startswith(b"RIFF") and b"WEBP" in head:
         return ".webp"
@@ -168,7 +156,7 @@ class HandlerDialog(QDialog):
     # Cache for processed book content to avoid reprocessing
     # Key: (book_path, modification_time, file_type)
     # Value: dict with content_texts, content_lengths, doc_content (for epub), markdown_toc (for markdown)
-    _content_cache = {}
+    _content_cache: ClassVar[dict[tuple[str, float, str], dict[str, Any]]] = {}
 
     class _LoaderThread(QThread):
         """Minimal QThread that runs a callable and emits an error string on exception."""
@@ -192,9 +180,7 @@ class HandlerDialog(QDialog):
             cls._content_cache.clear()
             logging.info("Cleared all content cache")
         else:
-            keys_to_remove = [
-                key for key in cls._content_cache.keys() if key[0] == book_path
-            ]
+            keys_to_remove = [key for key in cls._content_cache if key[0] == book_path]
             for key in keys_to_remove:
                 del cls._content_cache[key]
             if keys_to_remove:
@@ -220,9 +206,7 @@ class HandlerDialog(QDialog):
         book_name = os.path.splitext(os.path.basename(book_path))[0]
 
         # Set window title based on file type and book name
-        item_type = (
-            "Chapters" if self.parser.file_type in ["epub", "markdown"] else "Pages"
-        )
+        item_type = "Chapters" if self.parser.file_type in ["epub", "markdown"] else "Pages"
         self.setWindowTitle(f"Select {item_type} - {book_name}")
         self.resize(1200, 900)
         self._block_signals = False  # Flag to prevent recursive signals
@@ -427,9 +411,7 @@ class HandlerDialog(QDialog):
                             return True
                     return False
 
-                self.has_multiple_toc_levels = check_nested(
-                    self.processed_nav_structure
-                )
+                self.has_multiple_toc_levels = check_nested(self.processed_nav_structure)
 
             if (
                 self.has_multiple_toc_levels
@@ -447,9 +429,7 @@ class HandlerDialog(QDialog):
             # Connect signals (after tree exists)
             self.treeWidget.currentItemChanged.connect(self.update_preview)
             self.treeWidget.itemChanged.connect(self.handle_item_check)
-            self.treeWidget.itemChanged.connect(
-                lambda _: self._update_checkbox_states()
-            )
+            self.treeWidget.itemChanged.connect(lambda _: self._update_checkbox_states())
             self.treeWidget.itemDoubleClicked.connect(self.handle_item_double_click)
 
             # Expand and select first item
@@ -494,10 +474,10 @@ class HandlerDialog(QDialog):
         is present, and whether multiple hierarchical levels exist.
         """
         has_toc: bool = False
-        if self.parser.file_type in ["epub", "markdown"]:
-            has_toc = True
-        elif self.parser.file_type == "pdf" and getattr(
-            self, "has_pdf_bookmarks", False
+        if (
+            self.parser.file_type in ["epub", "markdown"]
+            or self.parser.file_type == "pdf"
+            and getattr(self, "has_pdf_bookmarks", False)
         ):
             has_toc = True
 
@@ -594,8 +574,8 @@ class HandlerDialog(QDialog):
             self.content_lengths = self.parser.content_lengths
             self.processed_nav_structure = self.parser.processed_nav_structure
             self.book_metadata = self.parser.get_metadata()
-        except Exception as e:
-            logging.error(f"Error processing content: {e}", exc_info=True)
+        except Exception:
+            logging.exception("Error processing content")
             # Handle empty/failure case
             self.content_texts = {}
             self.content_lengths = {}
@@ -630,7 +610,7 @@ class HandlerDialog(QDialog):
             self._sync_parent_checkbox_states()
         else:
             # If no structure found but content exists (rare fallback), list flat
-            for ch_id, ch_len in self.content_lengths.items():
+            for ch_id in self.content_lengths:
                 # Simple flat list
                 item = QTreeWidgetItem(self.treeWidget, [ch_id])
                 item.setData(0, Qt.ItemDataRole.UserRole, ch_id)
@@ -672,10 +652,7 @@ class HandlerDialog(QDialog):
                 checkable_children += 1
                 if child.checkState(0) == Qt.CheckState.Checked:
                     checked_children += 1
-        if (
-            not (item.flags() & Qt.ItemFlag.ItemIsUserCheckable)
-            or checkable_children == 0
-        ):
+        if not (item.flags() & Qt.ItemFlag.ItemIsUserCheckable) or checkable_children == 0:
             return
         if checked_children == checkable_children:
             item.setCheckState(0, Qt.CheckState.Checked)
@@ -726,9 +703,7 @@ class HandlerDialog(QDialog):
                 first_child_src = self._get_first_leaf_src(node)
                 if src == first_child_src:
                     is_container_borrowing_child = True
-                elif (
-                    src in self.content_texts and first_child_src in self.content_texts
-                ):
+                elif src in self.content_texts and first_child_src in self.content_texts:
                     parent_text = self.content_texts[src].strip()
                     child_text = self.content_texts[first_child_src].strip()
                     if parent_text and parent_text == child_text:
@@ -749,9 +724,7 @@ class HandlerDialog(QDialog):
 
                 if clean_title:
                     announcement_text = (
-                        clean_title
-                        if re.search(r"[.!?:—]$", clean_title)
-                        else f"{clean_title}."
+                        clean_title if re.search(r"[.!?:—]$", clean_title) else f"{clean_title}."
                     )
                     effective_src = f"section_announcement:{src or title}_{id(node)}"
                     self.content_texts[effective_src] = announcement_text
@@ -798,9 +771,7 @@ class HandlerDialog(QDialog):
                     )
                     item.setCheckState(
                         0,
-                        Qt.CheckState.Checked
-                        if is_checked
-                        else Qt.CheckState.Unchecked,
+                        Qt.CheckState.Checked if is_checked else Qt.CheckState.Unchecked,
                     )
             elif has_children:
                 item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
@@ -857,9 +828,7 @@ class HandlerDialog(QDialog):
         btn_box.setSpacing(4)
 
         self.toggle_edit_btn = QPushButton("Edit Text", self.chapter_info_frame)
-        self.toggle_edit_btn.setToolTip(
-            "Toggle direct manual text editing in the preview pane"
-        )
+        self.toggle_edit_btn.setToolTip("Toggle direct manual text editing in the preview pane")
         self.toggle_edit_btn.clicked.connect(self.toggle_edit_mode)
         btn_box.addWidget(self.toggle_edit_btn)
 
@@ -925,9 +894,7 @@ class HandlerDialog(QDialog):
         self.fr_replace_all_btn = QPushButton("Replace All", self.find_replace_frame)
         self.fr_replace_all_btn.clicked.connect(self._perform_replace_all)
 
-        self.fr_save_sub_btn = QPushButton(
-            "Save to Word Substitutions", self.find_replace_frame
-        )
+        self.fr_save_sub_btn = QPushButton("Save to Word Substitutions", self.find_replace_frame)
         self.fr_save_sub_btn.setToolTip(
             "Save this Find/Replace rule into global Word Substitutions"
         )
@@ -942,19 +909,13 @@ class HandlerDialog(QDialog):
         # Row 3: Options (Match Case, Whole Word, Regular Expression)
         row3 = QHBoxLayout()
         self.fr_match_case_cb = QCheckBox("Match Case", self.find_replace_frame)
-        self.fr_match_case_cb.stateChanged.connect(
-            lambda _: self._on_find_text_changed()
-        )
+        self.fr_match_case_cb.stateChanged.connect(lambda _: self._on_find_text_changed())
 
         self.fr_whole_word_cb = QCheckBox("Whole Word", self.find_replace_frame)
-        self.fr_whole_word_cb.stateChanged.connect(
-            lambda _: self._on_find_text_changed()
-        )
+        self.fr_whole_word_cb.stateChanged.connect(lambda _: self._on_find_text_changed())
 
         self.fr_use_regex_cb = QCheckBox("Regular Expression", self.find_replace_frame)
-        self.fr_use_regex_cb.stateChanged.connect(
-            lambda _: self._on_find_text_changed()
-        )
+        self.fr_use_regex_cb.stateChanged.connect(lambda _: self._on_find_text_changed())
 
         row3.addWidget(self.fr_match_case_cb)
         row3.addWidget(self.fr_whole_word_cb)
@@ -964,9 +925,7 @@ class HandlerDialog(QDialog):
 
         # Row 4: Error/Warning Label
         self.fr_error_label = QLabel("", self.find_replace_frame)
-        self.fr_error_label.setStyleSheet(
-            "color: #d9534f; font-weight: bold; font-size: 11px;"
-        )
+        self.fr_error_label.setStyleSheet("color: #d9534f; font-weight: bold; font-size: 11px;")
         fr_layout.addWidget(self.fr_error_label)
 
         self.find_replace_frame.hide()
@@ -976,9 +935,7 @@ class HandlerDialog(QDialog):
             self,
         )
         self.previewInfoLabel.setWordWrap(True)
-        self.previewInfoLabel.setStyleSheet(
-            "QLabel { color: #666; font-style: italic; }"
-        )
+        self.previewInfoLabel.setStyleSheet("QLabel { color: #666; font-style: italic; }")
 
         previewLayout = QVBoxLayout()
         previewLayout.setContentsMargins(0, 0, 0, 0)
@@ -997,9 +954,7 @@ class HandlerDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
 
-        item_type = (
-            "chapters" if self.parser.file_type in ["epub", "markdown"] else "pages"
-        )
+        item_type = "chapters" if self.parser.file_type in ["epub", "markdown"] else "pages"
 
         self.auto_select_btn = QPushButton(f"Auto-select {item_type}", self)
         self.auto_select_btn.clicked.connect(self.auto_select_chapters)
@@ -1041,9 +996,7 @@ class HandlerDialog(QDialog):
         leftLayout.addWidget(self.instructions_label)
 
         self.count_label = QLabel("0 of 0 items selected", self)
-        self.count_label.setStyleSheet(
-            "font-weight: bold; font-size: 14px; margin-bottom: 4px;"
-        )
+        self.count_label.setStyleSheet("font-weight: bold; font-size: 14px; margin-bottom: 4px;")
         leftLayout.addWidget(self.count_label)
 
         # Filter & Preset Actions Bar
@@ -1054,9 +1007,7 @@ class HandlerDialog(QDialog):
         self.filter_combo.currentIndexChanged.connect(self.apply_tree_filter)
 
         self.uncheck_short_btn = QPushButton("<500 Chars", self)
-        self.uncheck_short_btn.setToolTip(
-            "Uncheck short chapters with less than 500 characters"
-        )
+        self.uncheck_short_btn.setToolTip("Uncheck short chapters with less than 500 characters")
         self.uncheck_short_btn.clicked.connect(self.uncheck_short_chapters)
 
         self.invert_sel_btn = QPushButton("Invert", self)
@@ -1092,16 +1043,12 @@ class HandlerDialog(QDialog):
         )
         self.save_chapters_checkbox.stateChanged.connect(self.on_save_chapters_changed)
         leftLayout.addWidget(self.save_chapters_checkbox)
-        self.merge_chapters_checkbox = QCheckBox(
-            "Create a merged version at the end", self
-        )
+        self.merge_chapters_checkbox = QCheckBox("Create a merged version at the end", self)
         self.merge_chapters_checkbox.setChecked(self.merge_chapters_at_end)
         self.merge_chapters_checkbox.setToolTip(
             "Create one additional merged output containing all selected chapters/pages."
         )
-        self.merge_chapters_checkbox.stateChanged.connect(
-            self.on_merge_chapters_changed
-        )
+        self.merge_chapters_checkbox.stateChanged.connect(self.on_merge_chapters_changed)
         leftLayout.addWidget(self.merge_chapters_checkbox)
 
         self.split_book_checkbox = QCheckBox("Split book into multiple chunks", self)
@@ -1144,9 +1091,7 @@ class HandlerDialog(QDialog):
         )
         leftLayout.addWidget(self.save_chunks_in_folder_checkbox)
 
-        self.save_as_project_checkbox = QCheckBox(
-            "Save in a project folder with metadata", self
-        )
+        self.save_as_project_checkbox = QCheckBox("Save in a project folder with metadata", self)
         self.save_as_project_checkbox.setToolTip(
             "Save the converted item in a project folder with metadata files. "
             "Project folder location follows the Save location setting in the main window. "
@@ -1154,9 +1099,7 @@ class HandlerDialog(QDialog):
             "(Useful if you want to work with converted items in the future.)"
         )
         self.save_as_project_checkbox.setChecked(self.save_as_project)
-        self.save_as_project_checkbox.stateChanged.connect(
-            self.on_save_as_project_changed
-        )
+        self.save_as_project_checkbox.stateChanged.connect(self.on_save_as_project_changed)
         leftLayout.addWidget(self.save_as_project_checkbox)
 
         # Hierarchy configuration container
@@ -1433,9 +1376,7 @@ class HandlerDialog(QDialog):
         """Move cursor to the next match."""
         if not self._active_search_matches:
             return
-        self._active_match_idx = (self._active_match_idx + 1) % len(
-            self._active_search_matches
-        )
+        self._active_match_idx = (self._active_match_idx + 1) % len(self._active_search_matches)
         self.fr_match_count_label.setText(
             f"{self._active_match_idx + 1} of {len(self._active_search_matches)} matches"
         )
@@ -1445,9 +1386,7 @@ class HandlerDialog(QDialog):
         """Move cursor to the previous match."""
         if not self._active_search_matches:
             return
-        self._active_match_idx = (self._active_match_idx - 1) % len(
-            self._active_search_matches
-        )
+        self._active_match_idx = (self._active_match_idx - 1) % len(self._active_search_matches)
         self.fr_match_count_label.setText(
             f"{self._active_match_idx + 1} of {len(self._active_search_matches)} matches"
         )
@@ -1551,21 +1490,13 @@ class HandlerDialog(QDialog):
                 cfg["word_substitutions_list"] = updated_sub_list
                 cfg["word_substitutions_enabled"] = True
                 save_config(cfg)
-                self.fr_error_label.setStyleSheet(
-                    "QLabel { color: #28a745; font-weight: bold; }"
-                )
-                self.fr_error_label.setText(
-                    f"Saved substitution: '{find_text}' ➔ '{replace_text}'"
-                )
+                self.fr_error_label.setStyleSheet("QLabel { color: #28a745; font-weight: bold; }")
+                self.fr_error_label.setText(f"Saved substitution: '{find_text}' ➔ '{replace_text}'")
             else:
-                self.fr_error_label.setStyleSheet(
-                    "QLabel { color: #888; font-style: italic; }"
-                )
+                self.fr_error_label.setStyleSheet("QLabel { color: #888; font-style: italic; }")
                 self.fr_error_label.setText("Substitution rule already exists.")
         except Exception as e:
-            self.fr_error_label.setStyleSheet(
-                "QLabel { color: #d9534f; font-weight: bold; }"
-            )
+            self.fr_error_label.setStyleSheet("QLabel { color: #d9534f; font-weight: bold; }")
             self.fr_error_label.setText(f"Failed to save substitution: {e}")
 
     def uncheck_short_chapters(self) -> None:
@@ -1703,11 +1634,7 @@ class HandlerDialog(QDialog):
                     selected_items = [current_item]
 
                 if selected_items:
-                    state = (
-                        Qt.CheckState.Checked
-                        if is_check_key
-                        else Qt.CheckState.Unchecked
-                    )
+                    state = Qt.CheckState.Checked if is_check_key else Qt.CheckState.Unchecked
                     self._block_signals = True
                     for item in selected_items:
                         if item and (item.flags() & Qt.ItemFlag.ItemIsUserCheckable):
@@ -1730,8 +1657,7 @@ class HandlerDialog(QDialog):
                     first_state = selected_items[0].checkState(0)
                     new_state = (
                         Qt.CheckState.Checked
-                        if first_state
-                        in (Qt.CheckState.Unchecked, Qt.CheckState.PartiallyChecked)
+                        if first_state in (Qt.CheckState.Unchecked, Qt.CheckState.PartiallyChecked)
                         else Qt.CheckState.Unchecked
                     )
                     self._block_signals = True
@@ -1747,10 +1673,7 @@ class HandlerDialog(QDialog):
 
     def _update_checkbox_states(self):
         self._update_count_label()
-        if (
-            not hasattr(self, "save_chapters_checkbox")
-            or not self.save_chapters_checkbox
-        ):
+        if not hasattr(self, "save_chapters_checkbox") or not self.save_chapters_checkbox:
             return
 
         if (
@@ -1808,8 +1731,7 @@ class HandlerDialog(QDialog):
 
         if self.merge_chapters_checkbox is not None:
             self.merge_chapters_checkbox.setEnabled(
-                self.save_chapters_checkbox.isEnabled()
-                and self.save_chapters_checkbox.isChecked()
+                self.save_chapters_checkbox.isEnabled() and self.save_chapters_checkbox.isChecked()
             )
 
     def select_all_chapters(self):
@@ -1912,9 +1834,7 @@ class HandlerDialog(QDialog):
             # Check if preceded only by articles
             preceding_words = words[:map_idx]
             preceding_articles = {"the", "a", "an"}
-            is_preceded_only_by_articles = all(
-                w in preceding_articles for w in preceding_words
-            )
+            is_preceded_only_by_articles = all(w in preceding_articles for w in preceding_words)
 
             # Check if followed only by short alphanumeric identifiers (like numbers or letters)
             following_words = words[map_idx + 1 :]
@@ -1923,11 +1843,12 @@ class HandlerDialog(QDialog):
             )
 
             # Scenario A: Starts with Map/Maps (optionally preceded by articles) and followed by nothing or short identifier
-            if is_preceded_only_by_articles and (
-                not following_words or is_followed_only_by_identifiers
+            if (
+                is_preceded_only_by_articles
+                and (not following_words or is_followed_only_by_identifiers)
+                and len(words) <= 3
             ):
-                if len(words) <= 3:
-                    return True
+                return True
 
             # Scenario B: Specific common short standalone maps like "world map", "realm map"
             if (
@@ -2032,9 +1953,8 @@ class HandlerDialog(QDialog):
             "source notes",
         ]
         for phrase in phrases:
-            if phrase in title:
-                if len(words) <= len(phrase.split()) + 3:
-                    return True
+            if phrase in title and len(words) <= len(phrase.split()) + 3:
+                return True
 
         return False
 
@@ -2061,12 +1981,8 @@ class HandlerDialog(QDialog):
                     for i in range(item.childCount()):
                         child = item.child(i)
                         if child.flags() & Qt.ItemFlag.ItemIsUserCheckable:
-                            child_is_duplicate = bool(
-                                child.data(0, Qt.ItemDataRole.UserRole + 1)
-                            )
-                            if child_is_duplicate or self._should_exclude_by_title(
-                                child
-                            ):
+                            child_is_duplicate = bool(child.data(0, Qt.ItemDataRole.UserRole + 1))
+                            if child_is_duplicate or self._should_exclude_by_title(child):
                                 child.setCheckState(0, Qt.CheckState.Unchecked)
                                 continue
                             child_src = child.data(0, Qt.ItemDataRole.UserRole)
@@ -2094,9 +2010,7 @@ class HandlerDialog(QDialog):
             is_duplicate = bool(item.data(0, Qt.ItemDataRole.UserRole + 1))
 
             # Select chapters with content > 500 characters or parent items
-            has_significant_content = (
-                identifier and self.content_lengths.get(identifier, 0) > 500
-            )
+            has_significant_content = identifier and self.content_lengths.get(identifier, 0) > 500
             is_parent = item.childCount() > 0
 
             if is_duplicate or self._should_exclude_by_title(item):
@@ -2108,12 +2022,8 @@ class HandlerDialog(QDialog):
                     for i in range(item.childCount()):
                         child = item.child(i)
                         if child.flags() & Qt.ItemFlag.ItemIsUserCheckable:
-                            child_is_duplicate = bool(
-                                child.data(0, Qt.ItemDataRole.UserRole + 1)
-                            )
-                            if child_is_duplicate or self._should_exclude_by_title(
-                                child
-                            ):
+                            child_is_duplicate = bool(child.data(0, Qt.ItemDataRole.UserRole + 1))
+                            if child_is_duplicate or self._should_exclude_by_title(child):
                                 child.setCheckState(0, Qt.CheckState.Unchecked)
                                 continue
                             child_identifier = child.data(0, Qt.ItemDataRole.UserRole)
@@ -2189,9 +2099,7 @@ class HandlerDialog(QDialog):
             """
             for i in range(parent_item.childCount()):
                 child = parent_item.child(i)
-                if child is not None and (
-                    child.flags() & Qt.ItemFlag.ItemIsUserCheckable
-                ):
+                if child is not None and (child.flags() & Qt.ItemFlag.ItemIsUserCheckable):
                     child.setCheckState(0, state)
                     cascade_down(child, state)
 
@@ -2211,9 +2119,7 @@ class HandlerDialog(QDialog):
 
             for i in range(parent.childCount()):
                 sibling = parent.child(i)
-                if sibling is not None and (
-                    sibling.flags() & Qt.ItemFlag.ItemIsUserCheckable
-                ):
+                if sibling is not None and (sibling.flags() & Qt.ItemFlag.ItemIsUserCheckable):
                     checkable_children += 1
                     state = sibling.checkState(0)
                     if state == Qt.CheckState.Checked:
@@ -2221,9 +2127,7 @@ class HandlerDialog(QDialog):
                     elif state == Qt.CheckState.PartiallyChecked:
                         partially_checked_children += 1
 
-            if (
-                parent.flags() & Qt.ItemFlag.ItemIsUserCheckable
-            ) and checkable_children > 0:
+            if (parent.flags() & Qt.ItemFlag.ItemIsUserCheckable) and checkable_children > 0:
                 if checked_children == checkable_children:
                     parent.setCheckState(0, Qt.CheckState.Checked)
                 elif checked_children == 0 and partially_checked_children == 0:
@@ -2285,10 +2189,7 @@ class HandlerDialog(QDialog):
             self.previewEdit.setPlainText(cleaned_text)
 
         self._update_chapter_info_header(current, text or "")
-        if (
-            hasattr(self, "find_replace_frame")
-            and not self.find_replace_frame.isHidden()
-        ):
+        if hasattr(self, "find_replace_frame") and not self.find_replace_frame.isHidden():
             self._search_matches()
 
     def _display_book_info(self):
@@ -2307,12 +2208,10 @@ class HandlerDialog(QDialog):
                     image_type = "gif"
 
                 html_content += "<div style='text-align: center; margin-bottom: 20px;'>"
-                html_content += (
-                    f"<img src='data:image/{image_type};base64,{image_data}' "
-                )
+                html_content += f"<img src='data:image/{image_type};base64,{image_data}' "
                 html_content += "width='300' style='object-fit: contain;' /></div>"
             except Exception as e:
-                html_content += f"<p>Error displaying cover image: {str(e)}</p>"
+                html_content += f"<p>Error displaying cover image: {e!s}</p>"
 
         title = self.book_metadata.get("title")
         if title:
@@ -2321,7 +2220,9 @@ class HandlerDialog(QDialog):
         authors = self.book_metadata.get("authors")
         if authors:
             authors_text = ", ".join(authors)
-            html_content += f"<p style='text-align: center; font-style: italic;'>By {authors_text}</p>"
+            html_content += (
+                f"<p style='text-align: center; font-style: italic;'>By {authors_text}</p>"
+            )
 
         publisher = self.book_metadata.get("publisher")
         pub_year = self.book_metadata.get("publication_year")
@@ -2377,9 +2278,7 @@ class HandlerDialog(QDialog):
             try:
                 author_items = self.book.get_metadata("DC", "creator")
                 if author_items:
-                    metadata["authors"] = [
-                        author[0] for author in author_items if len(author) > 0
-                    ]
+                    metadata["authors"] = [author[0] for author in author_items if len(author) > 0]
             except Exception as e:
                 logging.warning(f"Error extracting author metadata: {e}")
 
@@ -2483,9 +2382,7 @@ class HandlerDialog(QDialog):
                             re.MULTILINE | re.IGNORECASE,
                         )
                         if title_match:
-                            metadata["title"] = (
-                                title_match.group(1).strip().strip("\"'")
-                            )
+                            metadata["title"] = title_match.group(1).strip().strip("\"'")
 
                         author_match = re.search(
                             r"^author:\s*(.+)$",
@@ -2493,9 +2390,7 @@ class HandlerDialog(QDialog):
                             re.MULTILINE | re.IGNORECASE,
                         )
                         if author_match:
-                            metadata["authors"] = [
-                                author_match.group(1).strip().strip("\"'")
-                            ]
+                            metadata["authors"] = [author_match.group(1).strip().strip("\"'")]
 
                         desc_match = re.search(
                             r"^description:\s*(.+)$",
@@ -2503,9 +2398,7 @@ class HandlerDialog(QDialog):
                             re.MULTILINE | re.IGNORECASE,
                         )
                         if desc_match:
-                            metadata["description"] = (
-                                desc_match.group(1).strip().strip("\"'")
-                            )
+                            metadata["description"] = desc_match.group(1).strip().strip("\"'")
 
                         date_match = re.search(
                             r"^date:\s*(.+)$", frontmatter, re.MULTILINE | re.IGNORECASE
@@ -2521,9 +2414,7 @@ class HandlerDialog(QDialog):
                 # Fallback: use first H1 header as title if no frontmatter title
                 if not metadata["title"] and self.markdown_toc:
                     # Find the first level 1 header
-                    first_h1 = next(
-                        (h for h in self.markdown_toc if h["level"] == 1), None
-                    )
+                    first_h1 = next((h for h in self.markdown_toc if h["level"] == 1), None)
                     if first_h1:
                         metadata["title"] = first_h1["name"]
         else:
@@ -2572,10 +2463,7 @@ class HandlerDialog(QDialog):
         # preserve compatibility with callers that expect content to be ready
         # when they create a HandlerDialog and immediately request selected text.
         try:
-            if (
-                hasattr(self, "_loader_thread")
-                and getattr(self, "_loader_thread") is not None
-            ):
+            if hasattr(self, "_loader_thread") and self._loader_thread is not None:
                 # Wait for thread to finish (blocks until done)
                 if self._loader_thread.isRunning():
                     self._loader_thread.wait()
@@ -2706,9 +2594,7 @@ class HandlerDialog(QDialog):
 
         # Ensure cover image and authors are populated from parser metadata if available
         if self.parser.file_type == "epub":
-            if not metadata.get("cover_image") and hasattr(
-                self.parser, "_extract_book_metadata"
-            ):
+            if not metadata.get("cover_image") and hasattr(self.parser, "_extract_book_metadata"):
                 try:
                     parser_meta = self.parser._extract_book_metadata()
                     if parser_meta.get("cover_image"):
@@ -2717,9 +2603,7 @@ class HandlerDialog(QDialog):
                         metadata["authors"] = parser_meta["authors"]
                     if not metadata.get("series") and parser_meta.get("series"):
                         metadata["series"] = parser_meta["series"]
-                    if not metadata.get("series_index") and parser_meta.get(
-                        "series_index"
-                    ):
+                    if not metadata.get("series_index") and parser_meta.get("series_index"):
                         metadata["series_index"] = parser_meta["series_index"]
                 except Exception as exc:
                     logging.debug(f"Failed to re-extract parser metadata: {exc}")
@@ -2755,7 +2639,9 @@ class HandlerDialog(QDialog):
 
         # Count chapters/pages
         total_chapters = len(self.checked_chapters)
-        chapter_text = f"{total_chapters} {'Chapters' if self.parser.file_type == 'epub' else 'Pages'}"
+        chapter_text = (
+            f"{total_chapters} {'Chapters' if self.parser.file_type == 'epub' else 'Pages'}"
+        )
 
         # Handle cover image
         cover_tag = ""
@@ -2800,9 +2686,7 @@ class HandlerDialog(QDialog):
         if metadata.get("series"):
             metadata_tags.append(f"<<METADATA_SERIES:{metadata.get('series')}>>")
         if metadata.get("series_index"):
-            metadata_tags.append(
-                f"<<METADATA_SERIES_INDEX:{metadata.get('series_index')}>>"
-            )
+            metadata_tags.append(f"<<METADATA_SERIES_INDEX:{metadata.get('series_index')}>>")
 
         if cover_tag:
             metadata_tags.append(cover_tag)
@@ -2837,9 +2721,7 @@ class HandlerDialog(QDialog):
         return " - ".join(parts)
 
     @staticmethod
-    def _is_descendant_item(
-        child_item: QTreeWidgetItem, parent_item: QTreeWidgetItem
-    ) -> bool:
+    def _is_descendant_item(child_item: QTreeWidgetItem, parent_item: QTreeWidgetItem) -> bool:
         """Determine whether child_item is a descendant of parent_item in the tree.
 
         Args:
@@ -3187,15 +3069,11 @@ class HandlerDialog(QDialog):
                         depth = self._get_item_depth(item)
 
                         # Treat pages beyond depth limit as gap pages so they merge into active chapter
-                        should_start_new = not is_gap_page and (
-                            depth <= self.chapter_depth_limit
-                        )
+                        should_start_new = not is_gap_page and (depth <= self.chapter_depth_limit)
 
                         if not should_start_new and current_chapter_idx >= 0:
                             # Append to current active chapter
-                            chapter_title, chapter_text = section_titles[
-                                current_chapter_idx
-                            ]
+                            chapter_title, chapter_text = section_titles[current_chapter_idx]
                             section_titles[current_chapter_idx] = (
                                 chapter_title,
                                 chapter_text + "\n\n" + text,
@@ -3230,11 +3108,7 @@ class HandlerDialog(QDialog):
         HandlerDialog._save_as_project = self.save_as_project
 
     def get_save_chapters_separately(self):
-        return (
-            self.save_chapters_separately
-            if self.save_chapters_checkbox.isEnabled()
-            else False
-        )
+        return self.save_chapters_separately if self.save_chapters_checkbox.isEnabled() else False
 
     def get_merge_chapters_at_end(self):
         return self.merge_chapters_at_end
@@ -3295,9 +3169,7 @@ class HandlerDialog(QDialog):
             """
             for i in range(parent_item.childCount()):
                 child = parent_item.child(i)
-                if child is not None and (
-                    child.flags() & Qt.ItemFlag.ItemIsUserCheckable
-                ):
+                if child is not None and (child.flags() & Qt.ItemFlag.ItemIsUserCheckable):
                     child.setCheckState(0, st)
                     cascade_down(child, st)
 
@@ -3378,9 +3250,7 @@ class HandlerDialog(QDialog):
                 iterator += 1
                 continue
             if found_target and id(item) not in target_subtree_ids:
-                if item is not None and (
-                    item.flags() & Qt.ItemFlag.ItemIsUserCheckable
-                ):
+                if item is not None and (item.flags() & Qt.ItemFlag.ItemIsUserCheckable):
                     item.setCheckState(0, Qt.CheckState.Unchecked)
             iterator += 1
 
@@ -3447,14 +3317,10 @@ class HandlerDialog(QDialog):
                 st = Qt.CheckState.Checked if new_state else Qt.CheckState.Unchecked
                 item.setCheckState(0, st)
 
-                def cascade_down(
-                    parent_item: QTreeWidgetItem, target_st: Qt.CheckState
-                ) -> None:
+                def cascade_down(parent_item: QTreeWidgetItem, target_st: Qt.CheckState) -> None:
                     for i in range(parent_item.childCount()):
                         child = parent_item.child(i)
-                        if child is not None and (
-                            child.flags() & Qt.ItemFlag.ItemIsUserCheckable
-                        ):
+                        if child is not None and (child.flags() & Qt.ItemFlag.ItemIsUserCheckable):
                             child.setCheckState(0, target_st)
                             cascade_down(child, target_st)
 

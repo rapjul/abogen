@@ -1,50 +1,51 @@
 import threading
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple, cast
+from collections.abc import Iterable, Mapping
+from typing import Any, cast
+
 import numpy as np
 
-from abogen.speaker_configs import slugify_label
-from abogen.speaker_analysis import analyze_speakers
-from abogen.webui.routes.utils.settings import (
-    load_settings,
-    settings_defaults,
-    _DEFAULT_ANALYSIS_THRESHOLD,
-    _CHUNK_LEVEL_OPTIONS,
-    _APOSTROPHE_MODE_OPTIONS,
-    _NORMALIZATION_GROUPS,
+from abogen.constants import (
+    LANGUAGE_DESCRIPTIONS,
+    SAMPLE_VOICE_TEXTS,
+    SUBTITLE_FORMATS,
+    SUPPORTED_LANGUAGES_FOR_SUBTITLE_GENERATION,
+    SUPPORTED_SOUND_FORMATS,
+    VOICES_INTERNAL,
 )
-from abogen.webui.routes.utils.common import split_profile_spec
+from abogen.speaker_analysis import analyze_speakers
+from abogen.speaker_configs import list_configs, slugify_label
+from abogen.utils import load_numpy_kpipeline
+from abogen.voice_formulas import get_new_voice, parse_formula_terms
 from abogen.voice_profiles import (
     load_profiles,
     serialize_profiles,
 )
-from abogen.voice_formulas import get_new_voice, parse_formula_terms
-from abogen.constants import (
-    LANGUAGE_DESCRIPTIONS,
-    SUBTITLE_FORMATS,
-    SUPPORTED_SOUND_FORMATS,
-    SUPPORTED_LANGUAGES_FOR_SUBTITLE_GENERATION,
-    SAMPLE_VOICE_TEXTS,
-    VOICES_INTERNAL,
-)
-from abogen.speaker_configs import list_configs
-from abogen.utils import load_numpy_kpipeline
 from abogen.webui.conversion_runner import (
-    _select_device,
-    _to_float32,
     SAMPLE_RATE,
     SPLIT_PATTERN,
+    _select_device,
+    _to_float32,
+)
+from abogen.webui.routes.utils.common import split_profile_spec
+from abogen.webui.routes.utils.settings import (
+    _APOSTROPHE_MODE_OPTIONS,
+    _CHUNK_LEVEL_OPTIONS,
+    _DEFAULT_ANALYSIS_THRESHOLD,
+    _NORMALIZATION_GROUPS,
+    load_settings,
+    settings_defaults,
 )
 
 _preview_pipeline_lock = threading.RLock()
-_preview_pipelines: Dict[Tuple[str, str], Any] = {}
+_preview_pipelines: dict[tuple[str, str], Any] = {}
 
 
 def build_narrator_roster(
     voice: str,
-    voice_profile: Optional[str],
-    existing: Optional[Mapping[str, Any]] = None,
-) -> Dict[str, Any]:
-    roster: Dict[str, Any] = {
+    voice_profile: str | None,
+    existing: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    roster: dict[str, Any] = {
         "narrator": {
             "id": "narrator",
             "label": "Narrator",
@@ -53,11 +54,9 @@ def build_narrator_roster(
     }
     if voice_profile:
         roster["narrator"]["voice_profile"] = voice_profile
-    existing_entry: Optional[Mapping[str, Any]] = None
+    existing_entry: Mapping[str, Any] | None = None
     if existing is not None:
-        existing_entry = (
-            existing.get("narrator") if isinstance(existing, Mapping) else None
-        )
+        existing_entry = existing.get("narrator") if isinstance(existing, Mapping) else None
     if isinstance(existing_entry, Mapping):
         roster_entry = roster["narrator"]
         for key in (
@@ -74,16 +73,14 @@ def build_narrator_roster(
 
 
 def build_speaker_roster(
-    analysis: Dict[str, Any],
+    analysis: dict[str, Any],
     base_voice: str,
-    voice_profile: Optional[str],
-    existing: Optional[Mapping[str, Any]] = None,
-    order: Optional[Iterable[str]] = None,
-) -> Dict[str, Any]:
+    voice_profile: str | None,
+    existing: Mapping[str, Any] | None = None,
+    order: Iterable[str] | None = None,
+) -> dict[str, Any]:
     roster = build_narrator_roster(base_voice, voice_profile, existing)
-    existing_map: Dict[str, Any] = (
-        dict(existing) if isinstance(existing, Mapping) else {}
-    )
+    existing_map: dict[str, Any] = dict(existing) if isinstance(existing, Mapping) else {}
     speakers = analysis.get("speakers", {}) if isinstance(analysis, dict) else {}
     ordered_ids: Iterable[str]
     if order is not None:
@@ -137,7 +134,7 @@ def match_configured_speaker(
     config_speakers: Mapping[str, Any],
     roster_id: str,
     roster_label: str,
-) -> Optional[Mapping[str, Any]]:
+) -> Mapping[str, Any] | None:
     if not config_speakers:
         return None
     entry = config_speakers.get(roster_id)
@@ -157,74 +154,57 @@ def match_configured_speaker(
 
 def apply_speaker_config_to_roster(
     roster: Mapping[str, Any],
-    config: Optional[Mapping[str, Any]],
+    config: Mapping[str, Any] | None,
     *,
     persist_changes: bool = False,
-    fallback_languages: Optional[Iterable[str]] = None,
-) -> Tuple[Dict[str, Any], List[str], Optional[Dict[str, Any]]]:
+    fallback_languages: Iterable[str] | None = None,
+) -> tuple[dict[str, Any], list[str], dict[str, Any] | None]:
     if not isinstance(roster, Mapping):
         effective_languages = [
-            code
-            for code in (fallback_languages or [])
-            if isinstance(code, str) and code
+            code for code in (fallback_languages or []) if isinstance(code, str) and code
         ]
         return {}, effective_languages, None
-    updated_roster: Dict[str, Any] = {
+    updated_roster: dict[str, Any] = {
         key: dict(value) for key, value in roster.items() if isinstance(value, Mapping)
     }
     if not config:
         effective_languages = [
-            code
-            for code in (fallback_languages or [])
-            if isinstance(code, str) and code
+            code for code in (fallback_languages or []) if isinstance(code, str) and code
         ]
         return updated_roster, effective_languages, None
 
     speakers_map = config.get("speakers")
     if not isinstance(speakers_map, Mapping):
         effective_languages = [
-            code
-            for code in (fallback_languages or [])
-            if isinstance(code, str) and code
+            code for code in (fallback_languages or []) if isinstance(code, str) and code
         ]
         return updated_roster, effective_languages, None
 
     config_languages = config.get("languages")
     if isinstance(config_languages, list):
-        allowed_languages = [
-            code for code in config_languages if isinstance(code, str) and code
-        ]
+        allowed_languages = [code for code in config_languages if isinstance(code, str) and code]
     else:
         allowed_languages = []
     if not allowed_languages and fallback_languages:
-        allowed_languages = [
-            code for code in fallback_languages if isinstance(code, str) and code
-        ]
+        allowed_languages = [code for code in fallback_languages if isinstance(code, str) and code]
 
     default_voice = (
-        config.get("default_voice")
-        if isinstance(config.get("default_voice"), str)
-        else ""
+        config.get("default_voice") if isinstance(config.get("default_voice"), str) else ""
     )
     used_voices = {
-        entry.get("resolved_voice") or entry.get("voice")
-        for entry in updated_roster.values()
+        entry.get("resolved_voice") or entry.get("voice") for entry in updated_roster.values()
     } - {None}
     narrator_voice = ""
-    narrator_entry = (
-        updated_roster.get("narrator") if isinstance(updated_roster, Mapping) else None
-    )
+    narrator_entry = updated_roster.get("narrator") if isinstance(updated_roster, Mapping) else None
     if isinstance(narrator_entry, Mapping):
         narrator_voice = str(
-            narrator_entry.get("resolved_voice")
-            or narrator_entry.get("default_voice")
-            or ""
+            narrator_entry.get("resolved_voice") or narrator_entry.get("default_voice") or ""
         ).strip()
         if narrator_voice:
             used_voices.add(narrator_voice)
 
     config_changed = False
-    new_config_payload: Dict[str, Any] = {
+    new_config_payload: dict[str, Any] = {
         "language": config.get("language", "a"),
         "languages": allowed_languages,
         "default_voice": default_voice,
@@ -247,13 +227,9 @@ def apply_speaker_config_to_roster(
         voice_formula = str(config_entry.get("voice_formula") or "").strip()
         resolved_voice = str(config_entry.get("resolved_voice") or "").strip()
         languages = (
-            config_entry.get("languages")
-            if isinstance(config_entry.get("languages"), list)
-            else []
+            config_entry.get("languages") if isinstance(config_entry.get("languages"), list) else []
         )
-        chosen_voice = (
-            resolved_voice or voice_formula or voice_id or roster_entry.get("voice")
-        )
+        chosen_voice = resolved_voice or voice_formula or voice_id or roster_entry.get("voice")
         usable_languages = languages or allowed_languages
 
         if chosen_voice:
@@ -285,9 +261,7 @@ def apply_speaker_config_to_roster(
                 "voice": voice_id,
                 "voice_profile": voice_profile,
                 "voice_formula": voice_formula,
-                "resolved_voice": roster_entry.get(
-                    "resolved_voice", resolved_voice or voice_id
-                ),
+                "resolved_voice": roster_entry.get("resolved_voice", resolved_voice or voice_id),
                 "languages": usable_languages,
             }
 
@@ -299,12 +273,10 @@ def filter_voice_catalog(
     catalog: Iterable[Mapping[str, Any]],
     *,
     gender: str,
-    allowed_languages: Optional[Iterable[str]] = None,
-) -> List[str]:
+    allowed_languages: Iterable[str] | None = None,
+) -> list[str]:
     allowed_set = {
-        code.lower()
-        for code in (allowed_languages or [])
-        if isinstance(code, str) and code
+        code.lower() for code in (allowed_languages or []) if isinstance(code, str) and code
     }
     gender_normalized = (gender or "unknown").lower()
     gender_code = ""
@@ -313,7 +285,7 @@ def filter_voice_catalog(
     elif gender_normalized == "female":
         gender_code = "f"
 
-    matches: List[str] = []
+    matches: list[str] = []
     seen: set[str] = set()
 
     def _consider(entry: Mapping[str, Any]) -> None:
@@ -325,8 +297,8 @@ def filter_voice_catalog(
         seen.add(voice_id)
         matches.append(voice_id)
 
-    primary: List[Mapping[str, Any]] = []
-    fallback: List[Mapping[str, Any]] = []
+    primary: list[Mapping[str, Any]] = []
+    fallback: list[Mapping[str, Any]] = []
     for entry in catalog:
         if not isinstance(entry, Mapping):
             continue
@@ -354,8 +326,8 @@ def filter_voice_catalog(
     return matches
 
 
-def build_voice_catalog() -> List[Dict[str, str]]:
-    catalog: List[Dict[str, str]] = []
+def build_voice_catalog() -> list[dict[str, str]]:
+    catalog: list[dict[str, str]] = []
     gender_map = {"f": "Female", "m": "Male"}
     for voice_id in VOICES_INTERNAL:
         prefix, _, rest = voice_id.partition("_")
@@ -365,9 +337,7 @@ def build_voice_catalog() -> List[Dict[str, str]]:
             {
                 "id": voice_id,
                 "language": language_code,
-                "language_label": LANGUAGE_DESCRIPTIONS.get(
-                    language_code, language_code.upper()
-                ),
+                "language_label": LANGUAGE_DESCRIPTIONS.get(language_code, language_code.upper()),
                 "gender": gender_map.get(gender_code, "Unknown"),
                 "gender_code": gender_code,
                 "display_name": rest.replace("_", " ").title() if rest else voice_id,
@@ -379,13 +349,11 @@ def build_voice_catalog() -> List[Dict[str, str]]:
 def inject_recommended_voices(
     roster: Mapping[str, Any],
     *,
-    fallback_languages: Optional[Iterable[str]] = None,
+    fallback_languages: Iterable[str] | None = None,
 ) -> None:
     voice_catalog = build_voice_catalog()
-    fallback_list = [
-        code for code in (fallback_languages or []) if isinstance(code, str) and code
-    ]
-    for speaker_id, payload in roster.items():
+    fallback_list = [code for code in (fallback_languages or []) if isinstance(code, str) and code]
+    for payload in roster.values():
         if not isinstance(payload, dict):
             continue
         languages = payload.get("config_languages")
@@ -403,10 +371,10 @@ def inject_recommended_voices(
 
 def extract_speaker_config_form(
     form: Mapping[str, Any],
-) -> Tuple[str, Dict[str, Any], List[str]]:
+) -> tuple[str, dict[str, Any], list[str]]:
     getter = getattr(form, "getlist", None)
 
-    def _get_list(name: str) -> List[str]:
+    def _get_list(name: str) -> list[str]:
         if callable(getter):
             values = cast(Iterable[Any], getter(name))
             return [str(value).strip() for value in values if value]
@@ -428,16 +396,14 @@ def extract_speaker_config_form(
         version = 1
 
     speaker_rows = _get_list("speaker_rows")
-    speakers: Dict[str, Dict[str, Any]] = {}
+    speakers: dict[str, dict[str, Any]] = {}
     for row_key in speaker_rows:
         prefix = f"speaker-{row_key}-"
         label = (form.get(prefix + "label") or "").strip()
         if not label:
             continue
         raw_gender = (form.get(prefix + "gender") or "unknown").strip().lower()
-        gender = (
-            raw_gender if raw_gender in {"male", "female", "unknown"} else "unknown"
-        )
+        gender = raw_gender if raw_gender in {"male", "female", "unknown"} else "unknown"
         voice = (form.get(prefix + "voice") or "").strip()
         voice_profile = (form.get(prefix + "profile") or "").strip()
         voice_formula = (form.get(prefix + "formula") or "").strip()
@@ -462,7 +428,7 @@ def extract_speaker_config_form(
         "version": version,
     }
 
-    errors: List[str] = []
+    errors: list[str] = []
     if not name:
         errors.append("Configuration name is required.")
     if not speakers:
@@ -473,23 +439,23 @@ def extract_speaker_config_form(
 
 def prepare_speaker_metadata(
     *,
-    chapters: List[Dict[str, Any]],
-    chunks: List[Dict[str, Any]],
-    analysis_chunks: Optional[List[Dict[str, Any]]] = None,
+    chapters: list[dict[str, Any]],
+    chunks: list[dict[str, Any]],
+    analysis_chunks: list[dict[str, Any]] | None = None,
     voice: str,
-    voice_profile: Optional[str],
+    voice_profile: str | None,
     threshold: int,
-    existing_roster: Optional[Mapping[str, Any]] = None,
+    existing_roster: Mapping[str, Any] | None = None,
     run_analysis: bool = True,
-    speaker_config: Optional[Mapping[str, Any]] = None,
+    speaker_config: Mapping[str, Any] | None = None,
     apply_config: bool = False,
     persist_config: bool = False,
 ) -> tuple[
-    List[Dict[str, Any]],
-    Dict[str, Any],
-    Dict[str, Any],
-    List[str],
-    Optional[Dict[str, Any]],
+    list[dict[str, Any]],
+    dict[str, Any],
+    dict[str, Any],
+    list[str],
+    dict[str, Any] | None,
 ]:
     chunk_list = [dict(chunk) for chunk in chunks]
     analysis_source = [dict(chunk) for chunk in (analysis_chunks or chunks)]
@@ -549,9 +515,7 @@ def prepare_speaker_metadata(
             (
                 (sid, meta)
                 for sid, meta in speakers_payload.items()
-                if sid != "narrator"
-                and isinstance(meta, Mapping)
-                and not meta.get("suppressed")
+                if sid != "narrator" and isinstance(meta, Mapping) and not meta.get("suppressed")
             ),
             key=lambda item: item[1].get("count", 0),
             reverse=True,
@@ -560,14 +524,12 @@ def prepare_speaker_metadata(
     analysis_payload["ordered_speakers"] = ordered_ids
     assignments = analysis_payload.get("assignments", {})
     suppressed_ids = analysis_payload.get("suppressed", [])
-    suppressed_details: List[Dict[str, Any]] = []
+    suppressed_details: list[dict[str, Any]] = []
     speakers_payload = analysis_payload.get("speakers", {})
     if isinstance(suppressed_ids, Iterable):
         for suppressed_id in suppressed_ids:
             speaker_meta = (
-                speakers_payload.get(suppressed_id)
-                if isinstance(speakers_payload, dict)
-                else None
+                speakers_payload.get(suppressed_id) if isinstance(speakers_payload, dict) else None
             )
             if isinstance(speaker_meta, dict):
                 suppressed_details.append(
@@ -594,8 +556,8 @@ def prepare_speaker_metadata(
         existing=existing_roster,
         order=analysis_payload.get("ordered_speakers"),
     )
-    applied_languages: List[str] = []
-    updated_config: Optional[Dict[str, Any]] = None
+    applied_languages: list[str] = []
+    updated_config: dict[str, Any] | None = None
     if apply_config and speaker_config:
         roster, applied_languages, updated_config = apply_speaker_config_to_roster(
             roster,
@@ -617,7 +579,7 @@ def prepare_speaker_metadata(
                         value = roster_payload.get(key)
                         if value:
                             speaker_meta[key] = value
-    effective_languages: List[str] = []
+    effective_languages: list[str] = []
     if applied_languages:
         effective_languages = applied_languages
     elif isinstance(analysis_payload.get("config_languages"), list):
@@ -654,7 +616,7 @@ def prepare_speaker_metadata(
     return chunk_list, roster, analysis_payload, applied_languages, updated_config
 
 
-def formula_from_profile(entry: Dict[str, Any]) -> Optional[str]:
+def formula_from_profile(entry: dict[str, Any]) -> str | None:
     voices = entry.get("voices") or []
     if not voices:
         return None
@@ -666,13 +628,11 @@ def formula_from_profile(entry: Dict[str, Any]) -> Optional[str]:
         normalized = value / total if total else 0.0
         return (f"{normalized:.4f}").rstrip("0").rstrip(".") or "0"
 
-    parts = [
-        f"{name}*{_format_weight(weight)}" for name, weight in voices if weight > 0
-    ]
+    parts = [f"{name}*{_format_weight(weight)}" for name, weight in voices if weight > 0]
     return "+".join(parts) if parts else None
 
 
-def template_options() -> Dict[str, Any]:
+def template_options() -> dict[str, Any]:
     current_settings = load_settings()
     profiles = serialize_profiles()
     ordered_profiles = sorted(profiles.items())
@@ -719,10 +679,10 @@ def template_options() -> Dict[str, Any]:
 
 
 def resolve_profile_voice(
-    profile_name: Optional[str],
+    profile_name: str | None,
     *,
-    profiles: Optional[Mapping[str, Any]] = None,
-) -> tuple[str, Optional[str]]:
+    profiles: Mapping[str, Any] | None = None,
+) -> tuple[str, str | None]:
     if not profile_name:
         return "", None
     source = profiles if isinstance(profiles, Mapping) else None
@@ -741,8 +701,8 @@ def resolve_profile_voice(
 def resolve_voice_setting(
     value: Any,
     *,
-    profiles: Optional[Mapping[str, Any]] = None,
-) -> tuple[str, Optional[str], Optional[str]]:
+    profiles: Mapping[str, Any] | None = None,
+) -> tuple[str, str | None, str | None]:
     base_spec, profile_name = split_profile_spec(value)
     if profile_name:
         formula, language = resolve_profile_voice(profile_name, profiles=profiles)
@@ -755,8 +715,8 @@ def resolve_voice_choice(
     base_voice: str,
     profile_name: str,
     custom_formula: str,
-    profiles: Dict[str, Any],
-) -> tuple[str, str, Optional[str]]:
+    profiles: dict[str, Any],
+) -> tuple[str, str, str | None]:
     resolved_voice = base_voice
     resolved_language = language
     selected_profile = None
@@ -795,7 +755,7 @@ def resolve_voice_choice(
     return resolved_voice, resolved_language, selected_profile
 
 
-def parse_voice_formula(formula: str) -> List[tuple[str, float]]:
+def parse_voice_formula(formula: str) -> list[tuple[str, float]]:
     voices = parse_formula_terms(formula)
     total = sum(weight for _, weight in voices)
     if total <= 0:
@@ -803,8 +763,8 @@ def parse_voice_formula(formula: str) -> List[tuple[str, float]]:
     return voices
 
 
-def sanitize_voice_entries(entries: Iterable[Any]) -> List[Dict[str, Any]]:
-    sanitized: List[Dict[str, Any]] = []
+def sanitize_voice_entries(entries: Iterable[Any]) -> list[dict[str, Any]]:
+    sanitized: list[dict[str, Any]] = []
     for entry in entries or []:
         if isinstance(entry, dict):
             voice_id = entry.get("id") or entry.get("voice")
@@ -819,7 +779,7 @@ def sanitize_voice_entries(entries: Iterable[Any]) -> List[Dict[str, Any]]:
     return sanitized
 
 
-def pairs_to_formula(pairs: Iterable[Tuple[str, float]]) -> Optional[str]:
+def pairs_to_formula(pairs: Iterable[tuple[str, float]]) -> str | None:
     voices = [(voice, float(weight)) for voice, weight in pairs if float(weight) > 0]
     if not voices:
         return None
@@ -835,7 +795,7 @@ def pairs_to_formula(pairs: Iterable[Tuple[str, float]]) -> Optional[str]:
     return "+".join(parts)
 
 
-def profiles_payload() -> Dict[str, Any]:
+def profiles_payload() -> dict[str, Any]:
     return {"profiles": serialize_profiles()}
 
 
@@ -846,9 +806,7 @@ def get_preview_pipeline(language: str, device: str):
         if pipeline is not None:
             return pipeline
         _, KPipeline = load_numpy_kpipeline()
-        pipeline = KPipeline(
-            lang_code=language, repo_id="hexgrad/Kokoro-82M", device=device
-        )
+        pipeline = KPipeline(lang_code=language, repo_id="hexgrad/Kokoro-82M", device=device)
         _preview_pipelines[key] = pipeline
         return pipeline
 
@@ -888,7 +846,7 @@ def synthesize_audio_from_normalized(
         split_pattern=SPLIT_PATTERN,
     )
 
-    audio_chunks: List[np.ndarray] = []
+    audio_chunks: list[np.ndarray] = []
     accumulated = 0
     max_samples = int(max(1.0, max_seconds) * SAMPLE_RATE)
 

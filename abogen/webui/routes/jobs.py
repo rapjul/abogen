@@ -9,33 +9,33 @@ from flask import (
     redirect,
     render_template,
     request,
-    url_for,
     send_file,
+    url_for,
 )
 from flask.typing import ResponseReturnValue
 
-from abogen.webui.service import (
-    JobStatus,
-    load_audiobookshelf_chapters,
-    build_audiobookshelf_metadata,
-)
-from abogen.webui.routes.utils.service import get_service
-from abogen.webui.routes.utils.form import render_jobs_panel
-from abogen.webui.routes.utils.voice import template_options
-from abogen.webui.routes.utils.epub import (
-    job_download_flags,
-    locate_job_epub,
-    locate_job_audio,
-)
-from abogen.webui.routes.utils.settings import (
-    stored_integration_config,
-    build_audiobookshelf_config,
-    coerce_bool,
-)
-from abogen.webui.routes.utils.common import existing_paths
 from abogen.integrations.audiobookshelf import (
     AudiobookshelfClient,
     AudiobookshelfUploadError,
+)
+from abogen.webui.routes.utils.common import existing_paths
+from abogen.webui.routes.utils.epub import (
+    job_download_flags,
+    locate_job_audio,
+    locate_job_epub,
+)
+from abogen.webui.routes.utils.form import render_jobs_panel
+from abogen.webui.routes.utils.service import get_service
+from abogen.webui.routes.utils.settings import (
+    build_audiobookshelf_config,
+    coerce_bool,
+    stored_integration_config,
+)
+from abogen.webui.routes.utils.voice import template_options
+from abogen.webui.service import (
+    JobStatus,
+    build_audiobookshelf_metadata,
+    load_audiobookshelf_chapters,
 )
 
 logger = logging.getLogger(__name__)
@@ -117,9 +117,7 @@ def send_job_to_audiobookshelf(job_id: str) -> ResponseReturnValue:
 
     settings = stored_integration_config("audiobookshelf")
     if not settings or not coerce_bool(settings.get("enabled"), False):
-        job.add_log(
-            "Audiobookshelf upload skipped: integration is disabled.", level="warning"
-        )
+        job.add_log("Audiobookshelf upload skipped: integration is disabled.", level="warning")
         service._persist_state()
         return _panel_response()
 
@@ -141,9 +139,7 @@ def send_job_to_audiobookshelf(job_id: str) -> ResponseReturnValue:
 
     audio_path = locate_job_audio(job)
     if not audio_path or not audio_path.exists():
-        job.add_log(
-            "Audiobookshelf upload skipped: audio output not found.", level="warning"
-        )
+        job.add_log("Audiobookshelf upload skipped: audio output not found.", level="warning")
         service._persist_state()
         return _panel_response()
 
@@ -155,15 +151,12 @@ def send_job_to_audiobookshelf(job_id: str) -> ResponseReturnValue:
         if cover_candidate.exists():
             cover_path = cover_candidate
 
-    subtitles = (
-        existing_paths(job.result.subtitle_paths) if config.send_subtitles else None
-    )
+    subtitles = existing_paths(job.result.subtitle_paths) if config.send_subtitles else None
     chapters = load_audiobookshelf_chapters(job) if config.send_chapters else None
     metadata = build_audiobookshelf_metadata(job)
     display_title = metadata.get("title") or audio_path.stem
     overwrite_requested = (
-        request.form.get("overwrite") == "true"
-        or request.args.get("overwrite") == "true"
+        request.form.get("overwrite") == "true" or request.args.get("overwrite") == "true"
     )
 
     try:
@@ -174,9 +167,7 @@ def send_job_to_audiobookshelf(job_id: str) -> ResponseReturnValue:
         return _panel_response()
 
     try:
-        existing_items = client.find_existing_items(
-            display_title, folder_id=config.folder_id
-        )
+        existing_items = client.find_existing_items(display_title, folder_id=config.folder_id)
     except AudiobookshelfUploadError as exc:
         job.add_log(f"Audiobookshelf lookup failed: {exc}", level="error")
         service._persist_state()
@@ -196,9 +187,7 @@ def send_job_to_audiobookshelf(job_id: str) -> ResponseReturnValue:
                 "target": request.headers.get("HX-Target") or "#jobs-panel",
                 "message": f'Audiobookshelf already contains "{display_title}". Overwrite?',
             }
-            headers = {
-                "HX-Trigger": json.dumps({"audiobookshelf-overwrite-prompt": detail})
-            }
+            headers = {"HX-Trigger": json.dumps({"audiobookshelf-overwrite-prompt": detail})}
             return Response("", status=204, headers=headers)
         return _panel_response()
 

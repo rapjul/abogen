@@ -1,38 +1,37 @@
-from pathlib import Path
-
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 from flask import (
     Blueprint,
+    abort,
     current_app,
+    flash,
+    redirect,
     render_template,
     request,
-    redirect,
-    url_for,
-    flash,
     send_file,
-    abort,
+    url_for,
 )
 from flask.typing import ResponseReturnValue
 
-from abogen.webui.routes.utils.settings import (
-    load_settings,
-    load_integration_settings,
-    save_settings,
-    stored_integration_config,
-    coerce_bool,
-    coerce_int,
-    SAVE_MODE_LABELS,
-    llm_ready,
-    _NORMALIZATION_BOOLEAN_KEYS,
-    _NORMALIZATION_STRING_KEYS,
-    _DEFAULT_ANALYSIS_THRESHOLD,
-)
-from abogen.webui.routes.utils.voice import template_options
-from abogen.webui.debug_tts_runner import run_debug_tts_wavs
 from abogen.debug_tts_samples import DEBUG_TTS_SAMPLES
 from abogen.utils import get_user_output_path, load_config
+from abogen.webui.debug_tts_runner import run_debug_tts_wavs
+from abogen.webui.routes.utils.settings import (
+    _DEFAULT_ANALYSIS_THRESHOLD,
+    _NORMALIZATION_BOOLEAN_KEYS,
+    _NORMALIZATION_STRING_KEYS,
+    SAVE_MODE_LABELS,
+    coerce_bool,
+    coerce_int,
+    llm_ready,
+    load_integration_settings,
+    load_settings,
+    save_settings,
+    stored_integration_config,
+)
+from abogen.webui.routes.utils.voice import template_options
 
 settings_bp = Blueprint("settings", __name__)
 
@@ -74,9 +73,7 @@ def update_settings() -> ResponseReturnValue:
             0.7,
             min(
                 2.0,
-                float(
-                    form.get("supertonic_speed", current.get("supertonic_speed", 1.0))
-                ),
+                float(form.get("supertonic_speed", current.get("supertonic_speed", 1.0))),
             ),
         )
     except (TypeError, ValueError):
@@ -86,20 +83,12 @@ def update_settings() -> ResponseReturnValue:
     current["subtitle_format"] = (form.get("subtitle_format") or "srt").strip()
     current["save_mode"] = (form.get("save_mode") or "save_next_to_input").strip()
 
-    current["replace_single_newlines"] = coerce_bool(
-        form.get("replace_single_newlines"), False
-    )
+    current["replace_single_newlines"] = coerce_bool(form.get("replace_single_newlines"), False)
     current["use_gpu"] = coerce_bool(form.get("use_gpu"), False)
-    current["save_chapters_separately"] = coerce_bool(
-        form.get("save_chapters_separately"), False
-    )
-    current["merge_chapters_at_end"] = coerce_bool(
-        form.get("merge_chapters_at_end"), True
-    )
+    current["save_chapters_separately"] = coerce_bool(form.get("save_chapters_separately"), False)
+    current["merge_chapters_at_end"] = coerce_bool(form.get("merge_chapters_at_end"), True)
     current["save_as_project"] = coerce_bool(form.get("save_as_project"), False)
-    current["separate_chapters_format"] = (
-        form.get("separate_chapters_format") or "wav"
-    ).strip()
+    current["separate_chapters_format"] = (form.get("separate_chapters_format") or "wav").strip()
 
     try:
         current["silence_between_chapters"] = max(
@@ -109,9 +98,7 @@ def update_settings() -> ResponseReturnValue:
         pass
 
     try:
-        current["chapter_intro_delay"] = max(
-            0.0, float(form.get("chapter_intro_delay", 0.5))
-        )
+        current["chapter_intro_delay"] = max(0.0, float(form.get("chapter_intro_delay", 0.5)))
     except ValueError:
         pass
 
@@ -190,9 +177,7 @@ def update_settings() -> ResponseReturnValue:
         abs_timeout = 30.0
 
     # Preserve existing token if not provided and not cleared
-    if not abs_token and not coerce_bool(
-        form.get("audiobookshelf_api_token_clear"), False
-    ):
+    if not abs_token and not coerce_bool(form.get("audiobookshelf_api_token_clear"), False):
         existing_abs = current["integrations"].get("audiobookshelf", {})
         abs_token = existing_abs.get("api_token", "")
 
@@ -218,9 +203,7 @@ def update_settings() -> ResponseReturnValue:
     calibre_verify = coerce_bool(form.get("calibre_opds_verify_ssl"), True)
 
     # Preserve existing password if not provided and not cleared
-    if not calibre_pass and not coerce_bool(
-        form.get("calibre_opds_password_clear"), False
-    ):
+    if not calibre_pass and not coerce_bool(form.get("calibre_opds_password_clear"), False):
         existing_calibre = current["integrations"].get("calibre_opds", {})
         calibre_pass = existing_calibre.get("password", "")
 
@@ -259,9 +242,7 @@ def settings_page() -> str | ResponseReturnValue:
             except Exception:
                 debug_manifest = None
 
-    save_locations = [
-        {"value": key, "label": label} for key, label in SAVE_MODE_LABELS.items()
-    ]
+    save_locations = [{"value": key, "label": label} for key, label in SAVE_MODE_LABELS.items()]
     default_output_dir = str(Path(get_user_output_path()).resolve())
 
     return render_template(
@@ -281,9 +262,7 @@ def settings_page() -> str | ResponseReturnValue:
 @settings_bp.post("/debug/run")
 def run_debug_wavs() -> ResponseReturnValue:
     settings = load_settings()
-    output_root = Path(
-        current_app.config.get("OUTPUT_FOLDER") or get_user_output_path("web")
-    )
+    output_root = Path(current_app.config.get("OUTPUT_FOLDER") or get_user_output_path("web"))
     try:
         manifest = run_debug_tts_wavs(output_root=output_root, settings=settings)
     except Exception as exc:
@@ -291,9 +270,7 @@ def run_debug_wavs() -> ResponseReturnValue:
         return redirect(url_for("settings.settings_page", _anchor="debug"))
 
     flash("Debug WAV generation completed.", "success")
-    return redirect(
-        url_for("settings.debug_wavs_page", run_id=str(manifest.get("run_id") or ""))
-    )
+    return redirect(url_for("settings.debug_wavs_page", run_id=str(manifest.get("run_id") or "")))
 
 
 @settings_bp.get("/debug/<run_id>")
@@ -319,9 +296,7 @@ def debug_wavs_page(run_id: str) -> ResponseReturnValue:
     # Precompute download URLs for each artifact.
     for item in artifacts:
         filename = str(item.get("filename") or "")
-        item["url"] = url_for(
-            "settings.download_debug_wav", run_id=safe_run, filename=filename
-        )
+        item["url"] = url_for("settings.download_debug_wav", run_id=safe_run, filename=filename)
 
     return render_template(
         "debug_wavs.html",

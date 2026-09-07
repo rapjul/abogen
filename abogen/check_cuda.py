@@ -17,7 +17,7 @@ def check_cuda_with_fix():
                 dll_path = os.path.join(os.path.dirname(spec.origin), "lib", "c10.dll")
                 if os.path.exists(dll_path):
                     ctypes.CDLL(os.path.normpath(dll_path))
-    except Exception:
+    except (OSError, AttributeError):
         pass
 
     try:

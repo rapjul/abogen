@@ -1,18 +1,18 @@
-from typing import Any, Dict
+from typing import Any
 
 from flask import Blueprint, render_template
 from flask.typing import ResponseReturnValue
 
 from abogen.webui.routes.utils.settings import (
-    load_settings,
     load_integration_settings,
+    load_settings,
 )
 from abogen.webui.routes.utils.voice import template_options
 
 books_bp = Blueprint("books", __name__)
 
 
-def _calibre_integration_enabled(integrations: Dict[str, Any]) -> bool:
+def _calibre_integration_enabled(integrations: dict[str, Any]) -> bool:
     calibre = integrations.get("calibre_opds", {})
     return bool(calibre.get("enabled") and calibre.get("base_url"))
 

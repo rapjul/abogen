@@ -3,8 +3,9 @@ from __future__ import annotations
 import ast
 import logging
 import re
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
-from typing import Any, Iterable, Iterator, Optional
+from typing import Any
 
 import numpy as np
 
@@ -37,7 +38,7 @@ def _resample_linear(audio: np.ndarray, src_rate: int, dst_rate: int) -> np.ndar
     if audio.size == 0:
         return audio
     ratio = dst_rate / float(src_rate)
-    new_len = int(round(audio.size * ratio))
+    new_len = round(audio.size * ratio)
     if new_len <= 1:
         return np.zeros(0, dtype="float32")
     x_old = np.linspace(0.0, 1.0, num=audio.size, endpoint=False)
@@ -45,9 +46,7 @@ def _resample_linear(audio: np.ndarray, src_rate: int, dst_rate: int) -> np.ndar
     return np.interp(x_new, x_old, audio).astype("float32", copy=False)
 
 
-def _split_text(
-    text: str, *, split_pattern: Optional[str], max_chunk_length: int
-) -> list[str]:
+def _split_text(text: str, *, split_pattern: str | None, max_chunk_length: int) -> list[str]:
     stripped = (text or "").strip()
     if not stripped:
         return []
@@ -81,17 +80,15 @@ def _split_text(
     return result
 
 
-_UNSUPPORTED_CHARS_RE = re.compile(
-    r"unsupported character\(s\):\s*(\[[^\]]*\])", re.IGNORECASE
-)
+_UNSUPPORTED_CHARS_RE = re.compile(r"unsupported character\(s\):\s*(\[[^\]]*\])", re.IGNORECASE)
 
 
 def _parse_unsupported_characters(error: BaseException) -> list[str]:
     """Best-effort extraction of unsupported characters from SuperTonic errors."""
 
-    message = " ".join(
-        str(part) for part in getattr(error, "args", ()) if part is not None
-    ) or str(error)
+    message = " ".join(str(part) for part in getattr(error, "args", ()) if part is not None) or str(
+        error
+    )
     match = _UNSUPPORTED_CHARS_RE.search(message)
     if not match:
         return []
@@ -99,7 +96,7 @@ def _parse_unsupported_characters(error: BaseException) -> list[str]:
     raw = match.group(1)
     try:
         value = ast.literal_eval(raw)
-    except Exception:
+    except (ValueError, SyntaxError):
         return []
 
     if isinstance(value, (list, tuple)):
@@ -150,7 +147,7 @@ def _configure_supertonic_gpu() -> None:
         supertonic_config.DEFAULT_ONNX_PROVIDERS = providers
         supertonic_loader.DEFAULT_ONNX_PROVIDERS = providers
         logger.info("Supertonic ONNX providers configured: %s", providers)
-    except Exception as exc:
+    except (ImportError, AttributeError, RuntimeError) as exc:
         logger.warning("Could not configure supertonic GPU providers: %s", exc)
 
 
@@ -187,8 +184,8 @@ class SupertonicPipeline:
         *,
         voice: str,
         speed: float,
-        split_pattern: Optional[str] = None,
-        total_steps: Optional[int] = None,
+        split_pattern: str | None = None,
+        total_steps: int | None = None,
     ) -> Iterator[SupertonicSegment]:
         voice_name = (voice or "").strip() or "M1"
         steps = int(total_steps) if total_steps is not None else self.total_steps
@@ -227,9 +224,7 @@ class SupertonicPipeline:
                         raise
 
                     removed.update(unsupported)
-                    sanitized = _remove_unsupported_characters(
-                        chunk_to_speak, unsupported
-                    ).strip()
+                    sanitized = _remove_unsupported_characters(chunk_to_speak, unsupported).strip()
 
                     # If we didn't change anything, don't loop forever.
                     if sanitized == chunk_to_speak.strip():
@@ -266,10 +261,10 @@ class SupertonicPipeline:
             try:
                 dur = float(duration)
                 if dur > 0 and audio.size > 0:
-                    inferred = int(round(audio.size / dur))
+                    inferred = round(audio.size / dur)
                     if 8000 <= inferred <= 96000:
                         src_rate = inferred
-            except Exception:
+            except (ValueError, TypeError, ZeroDivisionError):
                 pass
 
             if src_rate != self.sample_rate:

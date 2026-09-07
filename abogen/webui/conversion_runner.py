@@ -10,11 +10,12 @@ import sys
 import tempfile
 import traceback
 from collections import defaultdict
+from collections.abc import Callable, Iterable, Mapping
 from contextlib import ExitStack
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Set, cast
+from typing import Any, cast
 
 import numpy as np
 import soundfile as sf
@@ -82,7 +83,7 @@ def _supertonic_voice_from_spec(spec: Any, fallback: str) -> str:
     return "M1"
 
 
-def _split_speaker_reference(value: Any) -> tuple[Optional[str], str]:
+def _split_speaker_reference(value: Any) -> tuple[str | None, str]:
     raw = str(value or "").strip()
     if not raw or ":" not in raw:
         return None, raw
@@ -201,8 +202,7 @@ def _simplify_heading_text(text: str) -> str:
     if not raw:
         return ""
     simplified = _HEADING_SANITIZE_RE.sub("", raw)
-    if simplified.startswith("chapter"):
-        simplified = simplified[7:]
+    simplified = simplified.removeprefix("chapter")
     return simplified
 
 
@@ -229,10 +229,7 @@ def _headings_equivalent(left: str, right: str) -> bool:
         return True
 
     # Also check if the line is contained in the heading if it's long enough
-    if len(simple_left) > 5 and simple_left in simple_right:
-        return True
-
-    return False
+    return bool(len(simple_left) > 5 and simple_left in simple_right)
 
 
 def _format_spoken_chapter_title(title: str, index: int, apply_prefix: bool) -> str:
@@ -242,9 +239,7 @@ def _format_spoken_chapter_title(title: str, index: int, apply_prefix: bool) -> 
     if not apply_prefix:
         return base
     lowered = base.lower()
-    if lowered.startswith("chapter") and (
-        len(lowered) == 7 or not lowered[7].isalpha()
-    ):
+    if lowered.startswith("chapter") and (len(lowered) == 7 or not lowered[7].isalpha()):
         return base
     match = _HEADING_NUMBER_PREFIX_RE.match(base)
     if match:
@@ -265,14 +260,13 @@ def _strip_duplicate_heading_line(text: str, heading: str) -> tuple[str, bool]:
     if not normalized_heading:
         return source_text, False
     lines = source_text.splitlines()
-    new_lines: List[str] = []
+    new_lines: list[str] = []
     removed = False
     for line in lines:
         stripped = line.strip()
-        if not removed and stripped:
-            if _headings_equivalent(stripped, heading):
-                removed = True
-                continue
+        if not removed and stripped and _headings_equivalent(stripped, heading):
+            removed = True
+            continue
         new_lines.append(line)
     if not removed:
         return source_text, False
@@ -294,7 +288,7 @@ def _normalize_caps_word(word: str) -> str:
         return word
 
     parts = re.split(r"(['\-\u2019])", word)
-    normalized_parts: List[str] = []
+    normalized_parts: list[str] = []
     for part in parts:
         if part in {"'", "-", "\u2019"}:
             normalized_parts.append(part)
@@ -315,7 +309,7 @@ def _normalize_chapter_opening_caps(text: str) -> tuple[str, bool]:
     if not working:
         return text, False
 
-    builder: List[str] = []
+    builder: list[str] = []
     pos = 0
     changed = False
 
@@ -365,8 +359,8 @@ def _normalize_chapter_opening_caps(text: str) -> tuple[str, bool]:
     return leading + "".join(builder), True
 
 
-def _normalize_metadata_map(values: Optional[Mapping[str, Any]]) -> Dict[str, str]:
-    normalized: Dict[str, str] = {}
+def _normalize_metadata_map(values: Mapping[str, Any] | None) -> dict[str, str]:
+    normalized: dict[str, str] = {}
     if not values:
         return normalized
     for key, value in values.items():
@@ -379,7 +373,7 @@ def _normalize_metadata_map(values: Optional[Mapping[str, Any]]) -> Dict[str, st
     return normalized
 
 
-def _format_author_sentence(raw: Optional[str]) -> str:
+def _format_author_sentence(raw: str | None) -> str:
     if raw is None:
         return ""
     normalized = str(raw).strip()
@@ -391,7 +385,7 @@ def _format_author_sentence(raw: Optional[str]) -> str:
 
     working = normalized.replace("&", " and ")
     segments = [segment.strip() for segment in working.split(",") if segment.strip()]
-    tokens: List[str] = []
+    tokens: list[str] = []
 
     if segments:
         for segment in segments:
@@ -413,9 +407,7 @@ def _format_author_sentence(raw: Optional[str]) -> str:
         tokens.extend(parts or [normalized])
 
     cleaned = [
-        token
-        for token in tokens
-        if token and token.casefold() not in {"unknown", "various"}
+        token for token in tokens if token and token.casefold() not in {"unknown", "various"}
     ]
     if not cleaned:
         return ""
@@ -450,7 +442,7 @@ _SERIES_NUMBER_KEYS = (
 _SERIES_NUMBER_RE = re.compile(r"\d+(?:\.\d+)?")
 
 
-def _normalize_series_number(value: Any) -> Optional[str]:
+def _normalize_series_number(value: Any) -> str | None:
     text = str(value or "").strip()
     if not text:
         return None
@@ -478,8 +470,8 @@ def _normalize_series_number(value: Any) -> Optional[str]:
 
 def _extract_series_metadata(
     values: Mapping[str, str],
-) -> tuple[Optional[str], Optional[str]]:
-    series_name: Optional[str] = None
+) -> tuple[str | None, str | None]:
+    series_name: str | None = None
     for key in _SERIES_NAME_KEYS:
         raw = values.get(key)
         if raw:
@@ -488,7 +480,7 @@ def _extract_series_metadata(
                 series_name = cleaned
                 break
 
-    series_number: Optional[str] = None
+    series_number: str | None = None
     for key in _SERIES_NUMBER_KEYS:
         raw = values.get(key)
         if raw is None:
@@ -501,9 +493,7 @@ def _extract_series_metadata(
     return series_name, series_number
 
 
-def _format_series_sentence(
-    series_name: Optional[str], series_number: Optional[str]
-) -> str:
+def _format_series_sentence(series_name: str | None, series_number: str | None) -> str:
     if not series_name or not series_number:
         return ""
     name = series_name.strip()
@@ -516,7 +506,7 @@ def _format_series_sentence(
 
 
 def _build_title_intro_text(
-    metadata: Optional[Mapping[str, Any]],
+    metadata: Mapping[str, Any] | None,
     fallback_basename: str,
 ) -> str:
     normalized = _normalize_metadata_map(metadata)
@@ -549,7 +539,7 @@ def _build_title_intro_text(
     series_name, series_number = _extract_series_metadata(normalized)
     series_sentence = _format_series_sentence(series_name, series_number)
 
-    sentences: List[str] = []
+    sentences: list[str] = []
     if series_sentence:
         sentences.append(_ensure_sentence(series_sentence))
     if title:
@@ -563,7 +553,7 @@ def _build_title_intro_text(
 
 
 def _build_outro_text(
-    metadata: Optional[Mapping[str, Any]],
+    metadata: Mapping[str, Any] | None,
     fallback_basename: str,
 ) -> str:
     normalized = _normalize_metadata_map(metadata)
@@ -606,14 +596,14 @@ def _build_outro_text(
     series_name, series_number = _extract_series_metadata(normalized)
     series_sentence = _format_series_sentence(series_name, series_number)
 
-    sentences: List[str] = [_ensure_sentence(closing_line)]
+    sentences: list[str] = [_ensure_sentence(closing_line)]
     if series_sentence:
         sentences.append(_ensure_sentence(series_sentence))
 
     return " ".join(sentence for sentence in sentences if sentence).strip()
 
 
-def _spec_to_voice_ids(spec: Any) -> Set[str]:
+def _spec_to_voice_ids(spec: Any) -> set[str]:
     text = str(spec or "").strip()
     if not text:
         return set()
@@ -663,8 +653,8 @@ def _job_voice_fallback(job: Any) -> str:
     return ""
 
 
-def _collect_required_voice_ids(job: Job) -> Set[str]:
-    voices: Set[str] = set()
+def _collect_required_voice_ids(job: Job) -> set[str]:
+    voices: set[str] = set()
     voices.update(_spec_to_voice_ids(job.voice))
     voices.update(_spec_to_voice_ids(_job_voice_fallback(job)))
 
@@ -713,8 +703,8 @@ def _initialize_voice_cache(job: Job) -> None:
         job.add_log(f"Failed to cache voice '{voice_id}': {error}", level="warning")
 
 
-_SIGNIFICANT_LENGTH_THRESHOLDS: Dict[str, int] = {"epub": 1000, "markdown": 500}
-_MIN_SHORT_CONTENT: Dict[str, int] = {"epub": 240, "markdown": 160}
+_SIGNIFICANT_LENGTH_THRESHOLDS: dict[str, int] = {"epub": 1000, "markdown": 500}
+_MIN_SHORT_CONTENT: dict[str, int] = {"epub": 240, "markdown": 160}
 _STRUCTURAL_KEYWORDS = (
     "preface",
     "prologue",
@@ -751,9 +741,9 @@ def _looks_structural(title: str) -> bool:
 
 
 def _auto_select_relevant_chapters(
-    chapters: List[ExtractedChapter],
+    chapters: list[ExtractedChapter],
     file_type: str,
-) -> tuple[List[ExtractedChapter], List[tuple[str, int]]]:
+) -> tuple[list[ExtractedChapter], list[tuple[str, int]]]:
     if not chapters:
         return [], []
 
@@ -761,8 +751,8 @@ def _auto_select_relevant_chapters(
     threshold = _SIGNIFICANT_LENGTH_THRESHOLDS.get(normalized, 0)
     min_short = _MIN_SHORT_CONTENT.get(normalized, 0)
 
-    kept: List[ExtractedChapter] = []
-    skipped: List[tuple[str, int]] = []
+    kept: list[ExtractedChapter] = []
+    skipped: list[tuple[str, int]] = []
     short_kept = 0
 
     for chapter in chapters:
@@ -773,11 +763,7 @@ def _auto_select_relevant_chapters(
             continue
 
         keep = False
-        if threshold == 0:
-            keep = True
-        elif length >= threshold:
-            keep = True
-        elif not kept:
+        if threshold == 0 or length >= threshold or not kept:
             keep = True
         elif min_short and length >= min_short and short_kept < _MAX_SHORT_CHAPTERS:
             keep = True
@@ -820,7 +806,7 @@ def _chapter_label(file_type: str) -> str:
 
 
 def _update_metadata_for_chapter_count(
-    metadata: Dict[str, Any], count: int, file_type: str
+    metadata: dict[str, Any], count: int, file_type: str
 ) -> None:
     if not metadata or count <= 0:
         return
@@ -838,15 +824,15 @@ def _update_metadata_for_chapter_count(
 
 
 def _apply_chapter_overrides(
-    extracted: List[ExtractedChapter],
-    overrides: List[Dict[str, Any]],
-) -> tuple[List[ExtractedChapter], Dict[str, str], List[str]]:
+    extracted: list[ExtractedChapter],
+    overrides: list[dict[str, Any]],
+) -> tuple[list[ExtractedChapter], dict[str, str], list[str]]:
     if not overrides:
         return [], {}, []
 
-    selected: List[ExtractedChapter] = []
-    metadata_updates: Dict[str, str] = {}
-    diagnostics: List[str] = []
+    selected: list[ExtractedChapter] = []
+    metadata_updates: dict[str, str] = {}
+    diagnostics: list[str] = []
 
     for position, payload in enumerate(overrides):
         if not isinstance(payload, dict):
@@ -867,9 +853,9 @@ def _apply_chapter_overrides(
                     continue
                 metadata_updates[str(key)] = str(value)
 
-        base: Optional[ExtractedChapter] = None
+        base: ExtractedChapter | None = None
         idx_candidate = payload.get("index")
-        idx_normalized: Optional[int] = None
+        idx_normalized: int | None = None
         if isinstance(idx_candidate, int):
             idx_normalized = idx_candidate
         elif isinstance(idx_candidate, str):
@@ -893,11 +879,7 @@ def _apply_chapter_overrides(
             candidate_title = payload.get("title")
             if isinstance(candidate_title, str):
                 base = next(
-                    (
-                        chapter
-                        for chapter in extracted
-                        if chapter.title == candidate_title
-                    ),
+                    (chapter for chapter in extracted if chapter.title == candidate_title),
                     None,
                 )
 
@@ -934,10 +916,10 @@ def _apply_chapter_overrides(
 
 
 def _merge_metadata(
-    extracted: Optional[Dict[str, str]],
-    overrides: Dict[str, Any],
-) -> Dict[str, str]:
-    merged: Dict[str, str] = {}
+    extracted: dict[str, str] | None,
+    overrides: dict[str, Any],
+) -> dict[str, str]:
+    merged: dict[str, str] = {}
     if extracted:
         for key, value in extracted.items():
             if value is None:
@@ -958,24 +940,18 @@ _APOSTROPHE_CONFIG = ApostropheConfig()
 def _normalize_for_pipeline(
     text: str,
     *,
-    normalization_overrides: Optional[Mapping[str, Any]] = None,
+    normalization_overrides: Mapping[str, Any] | None = None,
 ) -> str:
     """Normalize text for tests or utilities with optional overrides."""
 
     runtime_settings = get_runtime_settings()
     if normalization_overrides:
-        runtime_settings = apply_normalization_overrides(
-            runtime_settings, normalization_overrides
-        )
-    apostrophe_config = build_apostrophe_config(
-        settings=runtime_settings, base=_APOSTROPHE_CONFIG
-    )
-    return normalize_for_pipeline(
-        text, config=apostrophe_config, settings=runtime_settings
-    )
+        runtime_settings = apply_normalization_overrides(runtime_settings, normalization_overrides)
+    apostrophe_config = build_apostrophe_config(settings=runtime_settings, base=_APOSTROPHE_CONFIG)
+    return normalize_for_pipeline(text, config=apostrophe_config, settings=runtime_settings)
 
 
-def _merge_pronunciation_overrides(job: Any) -> List[Dict[str, Any]]:
+def _merge_pronunciation_overrides(job: Any) -> list[dict[str, Any]]:
     """Return pronunciation override entries, ensuring manual overrides are included.
 
     Pending jobs keep both `manual_overrides` and `pronunciation_overrides`, but the
@@ -985,7 +961,7 @@ def _merge_pronunciation_overrides(job: Any) -> List[Dict[str, Any]]:
     Precedence: manual overrides win over existing entries for the same normalized key.
     """
 
-    collected: Dict[str, Dict[str, Any]] = {}
+    collected: dict[str, dict[str, Any]] = {}
 
     existing = getattr(job, "pronunciation_overrides", None)
     if isinstance(existing, list):
@@ -996,9 +972,9 @@ def _merge_pronunciation_overrides(job: Any) -> List[Dict[str, Any]]:
             pronunciation_value = str(entry.get("pronunciation") or "").strip()
             if not token_value or not pronunciation_value:
                 continue
-            normalized = str(
-                entry.get("normalized") or ""
-            ).strip() or normalize_entity_token(token_value)
+            normalized = str(entry.get("normalized") or "").strip() or normalize_entity_token(
+                token_value
+            )
             if not normalized:
                 continue
             collected[normalized] = {
@@ -1071,12 +1047,12 @@ def _merge_pronunciation_overrides(job: Any) -> List[Dict[str, Any]]:
 
 
 def _compile_pronunciation_rules(
-    overrides: Optional[Iterable[Mapping[str, Any]]],
-) -> List[Dict[str, Any]]:
+    overrides: Iterable[Mapping[str, Any]] | None,
+) -> list[dict[str, Any]]:
     if not overrides:
         return []
 
-    candidates: List[Dict[str, Any]] = []
+    candidates: list[dict[str, Any]] = []
     seen: set[str] = set()
 
     for entry in overrides:
@@ -1086,7 +1062,7 @@ def _compile_pronunciation_rules(
         if not pronunciation_value:
             continue
 
-        token_values: List[str] = []
+        token_values: list[str] = []
         token_raw = entry.get("token")
         if token_raw:
             token_value = str(token_raw).strip()
@@ -1107,9 +1083,7 @@ def _compile_pronunciation_rules(
 
         usage_normalized = str(entry.get("normalized") or "").strip()
         if not usage_normalized and token_values:
-            usage_normalized = (
-                normalize_entity_token(token_values[0]) or token_values[0]
-            )
+            usage_normalized = normalize_entity_token(token_values[0]) or token_values[0]
 
         for token_value in token_values:
             key = token_value.casefold()
@@ -1128,14 +1102,12 @@ def _compile_pronunciation_rules(
         return []
 
     candidates.sort(key=lambda item: len(item["token"]), reverse=True)
-    compiled: List[Dict[str, Any]] = []
+    compiled: list[dict[str, Any]] = []
     for candidate in candidates:
         token_value = candidate["token"]
         pronunciation_value = candidate["replacement"]
         escaped = re.escape(token_value)
-        pattern = re.compile(
-            rf"(?i)(?<!\w){escaped}(?P<possessive>'s|\u2019s|\u2019)?(?!\w)"
-        )
+        pattern = re.compile(rf"(?i)(?<!\w){escaped}(?P<possessive>'s|\u2019s|\u2019)?(?!\w)")
         compiled.append(
             {
                 "pattern": pattern,
@@ -1149,8 +1121,8 @@ def _compile_pronunciation_rules(
 
 
 def _compile_heteronym_sentence_rules(
-    overrides: Optional[Iterable[Mapping[str, Any]]],
-) -> List[Dict[str, Any]]:
+    overrides: Iterable[Mapping[str, Any]] | None,
+) -> list[dict[str, Any]]:
     """Compile sentence-level replacements for heteronym disambiguation.
 
     These are intentionally scoped to a specific sentence string rather than a token,
@@ -1164,7 +1136,7 @@ def _compile_heteronym_sentence_rules(
     if not overrides:
         return []
 
-    compiled: List[Dict[str, Any]] = []
+    compiled: list[dict[str, Any]] = []
     seen: set[str] = set()
 
     for entry in overrides:
@@ -1184,9 +1156,7 @@ def _compile_heteronym_sentence_rules(
                 if not isinstance(opt, Mapping):
                     continue
                 if str(opt.get("key") or "").strip() == choice:
-                    replacement_sentence = str(
-                        opt.get("replacement_sentence") or ""
-                    ).strip()
+                    replacement_sentence = str(opt.get("replacement_sentence") or "").strip()
                     break
         if not replacement_sentence:
             continue
@@ -1208,7 +1178,7 @@ def _compile_heteronym_sentence_rules(
     return compiled
 
 
-def _apply_heteronym_sentence_rules(text: str, rules: List[Dict[str, Any]]) -> str:
+def _apply_heteronym_sentence_rules(text: str, rules: list[dict[str, Any]]) -> str:
     if not text or not rules:
         return text
     result = text
@@ -1221,8 +1191,8 @@ def _apply_heteronym_sentence_rules(text: str, rules: List[Dict[str, Any]]) -> s
 
 def _apply_pronunciation_rules(
     text: str,
-    rules: List[Dict[str, Any]],
-    usage_counter: Optional[Dict[str, int]] = None,
+    rules: list[dict[str, Any]],
+    usage_counter: dict[str, int] | None = None,
 ) -> str:
     if not text or not rules:
         return text
@@ -1244,7 +1214,7 @@ def _apply_pronunciation_rules(
     return result
 
 
-def _chapter_voice_spec(job: Job, override: Optional[Dict[str, Any]]) -> str:
+def _chapter_voice_spec(job: Job, override: dict[str, Any] | None) -> str:
     if not override:
         return _job_voice_fallback(job)
 
@@ -1263,7 +1233,7 @@ def _chapter_voice_spec(job: Job, override: Optional[Dict[str, Any]]) -> str:
     return _job_voice_fallback(job)
 
 
-def _chunk_voice_spec(job: Any, chunk: Dict[str, Any], fallback: str) -> str:
+def _chunk_voice_spec(job: Any, chunk: dict[str, Any], fallback: str) -> str:
     for key in ("resolved_voice", "voice_formula", "voice"):
         value = chunk.get(key)
         if value:
@@ -1283,14 +1253,13 @@ def _chunk_voice_spec(job: Any, chunk: Dict[str, Any], fallback: str) -> str:
                 return str(profile_formula)
 
     profile_name = chunk.get("voice_profile")
-    if profile_name:
-        if isinstance(speakers, dict):
-            speaker_entry = speakers.get(profile_name)
-            if isinstance(speaker_entry, dict):
-                for key in ("resolved_voice", "voice_formula", "voice"):
-                    value = speaker_entry.get(key)
-                    if value:
-                        return str(value)
+    if profile_name and isinstance(speakers, dict):
+        speaker_entry = speakers.get(profile_name)
+        if isinstance(speaker_entry, dict):
+            for key in ("resolved_voice", "voice_formula", "voice"):
+                value = speaker_entry.get(key)
+                if value:
+                    return str(value)
 
     if fallback:
         return fallback
@@ -1298,9 +1267,9 @@ def _chunk_voice_spec(job: Any, chunk: Dict[str, Any], fallback: str) -> str:
 
 
 def _group_chunks_by_chapter(
-    chunks: Iterable[Dict[str, Any]],
-) -> Dict[int, List[Dict[str, Any]]]:
-    grouped: Dict[int, List[Dict[str, Any]]] = defaultdict(list)
+    chunks: Iterable[dict[str, Any]],
+) -> dict[int, list[dict[str, Any]]]:
+    grouped: dict[int, list[dict[str, Any]]] = defaultdict(list)
     for entry in chunks or []:
         if not isinstance(entry, dict):
             continue
@@ -1332,9 +1301,7 @@ def _record_override_usage(
         try:
             increment_usage(language=language, token=token_value, amount=int(amount))
         except Exception:  # pragma: no cover - defensive logging
-            job.add_log(
-                f"Failed to record usage for override {token_value}", level="warning"
-            )
+            job.add_log(f"Failed to record usage for override {token_value}", level="warning")
 
 
 def _safe_int(value: Any, default: int = 0) -> int:
@@ -1356,10 +1323,7 @@ def _chunk_text_for_tts(entry: Mapping[str, Any]) -> str:
     if not isinstance(entry, Mapping):
         return ""
     return str(
-        entry.get("text")
-        or entry.get("original_text")
-        or entry.get("normalized_text")
-        or ""
+        entry.get("text") or entry.get("original_text") or entry.get("normalized_text") or ""
     ).strip()
 
 
@@ -1369,7 +1333,7 @@ def _escape_ffmetadata_value(value: str) -> str:
     return escaped
 
 
-def _validate_cover_image(cover_path: Optional[Path], job: Any) -> Optional[Path]:
+def _validate_cover_image(cover_path: Path | None, job: Any) -> Path | None:
     """
     Validate that a cover image exists, is readable, and has a supported format.
 
@@ -1409,8 +1373,8 @@ def _validate_cover_image(cover_path: Optional[Path], job: Any) -> Optional[Path
         return None
 
 
-def _metadata_to_ffmpeg_args(metadata: Dict[str, Any]) -> List[str]:
-    args: List[str] = []
+def _metadata_to_ffmpeg_args(metadata: dict[str, Any]) -> list[str]:
+    args: list[str] = []
     for key, value in (metadata or {}).items():
         if value in (None, ""):
             continue
@@ -1448,9 +1412,9 @@ def _build_narration_phrase(voice_spec: Any) -> str:
 
 
 def _augment_metadata_with_narration(
-    metadata: Dict[str, Any],
+    metadata: dict[str, Any],
     voice_spec: Any,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     merged = dict(metadata or {})
     phrase = _build_narration_phrase(voice_spec)
     merged["composer"] = phrase
@@ -1463,8 +1427,8 @@ def _augment_metadata_with_narration(
     return merged
 
 
-def _render_ffmetadata(metadata: Dict[str, Any], chapters: List[Dict[str, Any]]) -> str:
-    lines: List[str] = [";FFMETADATA1"]
+def _render_ffmetadata(metadata: dict[str, Any], chapters: list[dict[str, Any]]) -> str:
+    lines: list[str] = [";FFMETADATA1"]
     for key, value in (metadata or {}).items():
         if value is None:
             continue
@@ -1479,8 +1443,8 @@ def _render_ffmetadata(metadata: Dict[str, Any], chapters: List[Dict[str, Any]])
         if start is None or end is None:
             continue
         try:
-            start_ms = max(0, int(round(float(start) * 1000)))
-            end_ms = int(round(float(end) * 1000))
+            start_ms = max(0, round(float(start) * 1000))
+            end_ms = round(float(end) * 1000)
         except (TypeError, ValueError):
             continue
         if end_ms <= start_ms:
@@ -1501,15 +1465,13 @@ def _render_ffmetadata(metadata: Dict[str, Any], chapters: List[Dict[str, Any]])
 
 def _write_ffmetadata_file(
     audio_path: Path,
-    metadata: Dict[str, Any],
-    chapters: List[Dict[str, Any]],
-) -> Optional[Path]:
+    metadata: dict[str, Any],
+    chapters: list[dict[str, Any]],
+) -> Path | None:
     content = _render_ffmetadata(metadata, chapters)
     if content.strip() == ";FFMETADATA1":
         return None
-    directory = (
-        audio_path.parent if audio_path.parent.exists() else Path(tempfile.gettempdir())
-    )
+    directory = audio_path.parent if audio_path.parent.exists() else Path(tempfile.gettempdir())
     with tempfile.NamedTemporaryFile(
         mode="w",
         encoding="utf-8",
@@ -1523,7 +1485,7 @@ def _write_ffmetadata_file(
 
 def _apply_m4b_chapters_with_mutagen(
     audio_path: Path,
-    chapters: List[Dict[str, Any]],
+    chapters: list[dict[str, Any]],
     job: Job,
 ) -> bool:
     if not chapters:
@@ -1546,7 +1508,7 @@ def _apply_m4b_chapters_with_mutagen(
         job.add_log(f"Failed to open m4b for chapter embedding: {exc}", level="warning")
         return False
 
-    chapter_objects: List[MP4Chapter] = []
+    chapter_objects: list[MP4Chapter] = []
     for index, entry in enumerate(
         sorted(chapters, key=lambda item: float(item.get("start") or 0.0))
     ):
@@ -1561,7 +1523,7 @@ def _apply_m4b_chapters_with_mutagen(
         title_value = entry.get("title")
         title_text = str(title_value) if title_value else f"Chapter {index + 1}"
 
-        start_fraction = Fraction(int(round(start_seconds * 1000)), 1000)
+        start_fraction = Fraction(round(start_seconds * 1000), 1000)
         chapter_atom = MP4Chapter(start_fraction, title_text)
 
         end_raw = entry.get("end")
@@ -1571,7 +1533,7 @@ def _apply_m4b_chapters_with_mutagen(
             except (TypeError, ValueError):
                 end_seconds = None
             if end_seconds is not None and end_seconds > start_seconds:
-                chapter_atom.end = Fraction(int(round(end_seconds * 1000)), 1000)
+                chapter_atom.end = Fraction(round(end_seconds * 1000), 1000)
 
         chapter_objects.append(chapter_atom)
 
@@ -1590,7 +1552,7 @@ def _apply_m4b_chapters_with_mutagen(
 
 def _embed_m4b_metadata(
     audio_path: Path,
-    metadata_payload: Dict[str, Any],
+    metadata_payload: dict[str, Any],
     job: Job,
 ) -> None:
     metadata_map = dict(metadata_payload.get("metadata") or {})
@@ -1598,7 +1560,7 @@ def _embed_m4b_metadata(
     ffmetadata_path = _write_ffmetadata_file(audio_path, metadata_map, chapter_entries)
 
     # Validate and use cover image if available and valid
-    cover_path: Optional[Path] = None
+    cover_path: Path | None = None
     if job.cover_image_path:
         candidate = Path(job.cover_image_path)
         cover_path = _validate_cover_image(candidate, job)
@@ -1612,9 +1574,9 @@ def _embed_m4b_metadata(
 
     job.add_log("Embedding metadata into m4b output")
 
-    command: List[str] = ["ffmpeg", "-y", "-i", str(audio_path)]
-    metadata_index: Optional[int] = None
-    cover_index: Optional[int] = None
+    command: list[str] = ["ffmpeg", "-y", "-i", str(audio_path)]
+    metadata_index: int | None = None
+    cover_index: int | None = None
     next_index = 1
 
     if ffmetadata_path:
@@ -1674,9 +1636,7 @@ def _embed_m4b_metadata(
 
     mutagen_applied = _apply_m4b_chapters_with_mutagen(audio_path, chapter_entries, job)
     if mutagen_applied:
-        job.add_log(
-            f"Applied {len(chapter_entries)} chapter markers via mutagen", level="info"
-        )
+        job.add_log(f"Applied {len(chapter_entries)} chapter markers via mutagen", level="info")
 
 
 def run_conversion_job(job: Job) -> None:  # pyright: ignore[reportGeneralTypeIssues]
@@ -1713,20 +1673,20 @@ def run_conversion_job(job: Job) -> None:  # pyright: ignore[reportGeneralTypeIs
             )
 
     sink_stack = ExitStack()
-    subtitle_writer: Optional[SubtitleWriter] = None
+    subtitle_writer: SubtitleWriter | None = None
     chapter_paths: list[Path] = []
-    chapter_markers: List[Dict[str, Any]] = []
-    chunk_markers: List[Dict[str, Any]] = []
-    metadata_payload: Dict[str, Any] = {}
-    audio_output_path: Optional[Path] = None
-    extraction: Optional[Any] = None
-    pipelines: Dict[str, Any] = {}
+    chapter_markers: list[dict[str, Any]] = []
+    chunk_markers: list[dict[str, Any]] = []
+    metadata_payload: dict[str, Any] = {}
+    audio_output_path: Path | None = None
+    extraction: Any | None = None
+    pipelines: dict[str, Any] = {}
     kokoro_cache_ready = False
-    normalized_profiles: Dict[str, Dict[str, Any]] = {}
-    chunk_groups: Dict[int, List[Dict[str, Any]]] = {}
-    active_chapter_configs: List[Dict[str, Any]] = []
-    usage_counter: Dict[str, int] = defaultdict(int)
-    override_token_map: Dict[str, str] = {}
+    normalized_profiles: dict[str, dict[str, Any]] = {}
+    chunk_groups: dict[int, list[dict[str, Any]]] = {}
+    active_chapter_configs: list[dict[str, Any]] = []
+    usage_counter: dict[str, int] = defaultdict(int)
+    override_token_map: dict[str, str] = {}
     try:
         # Load saved speakers once so we can resolve speaker: references during conversion.
         try:
@@ -1788,30 +1748,22 @@ def run_conversion_job(job: Job) -> None:  # pyright: ignore[reportGeneralTypeIs
 
         def resolve_voice_target(
             raw_spec: str,
-        ) -> tuple[str, str, Optional[float], Optional[int]]:
+        ) -> tuple[str, str, float | None, int | None]:
             """Return (provider, voice_spec, speed_override, steps_override)."""
             spec = str(raw_spec or "").strip()
             speaker_name, _ = _split_speaker_reference(spec)
             if speaker_name and speaker_name in normalized_profiles:
                 entry = normalized_profiles[speaker_name]
-                provider = (
-                    str(entry.get("provider") or "kokoro").strip().lower() or "kokoro"
-                )
+                provider = str(entry.get("provider") or "kokoro").strip().lower() or "kokoro"
                 if provider == "supertonic":
                     voice = (
-                        str(
-                            entry.get("voice") or getattr(job, "voice", "M1") or "M1"
-                        ).strip()
+                        str(entry.get("voice") or getattr(job, "voice", "M1") or "M1").strip()
                         or "M1"
                     )
                     steps = int(
-                        entry.get("total_steps")
-                        or getattr(job, "supertonic_total_steps", 5)
-                        or 5
+                        entry.get("total_steps") or getattr(job, "supertonic_total_steps", 5) or 5
                     )
-                    speed = float(
-                        entry.get("speed") or getattr(job, "speed", 1.0) or 1.0
-                    )
+                    speed = float(entry.get("speed") or getattr(job, "speed", 1.0) or 1.0)
                     return (
                         "supertonic",
                         _supertonic_voice_from_spec(voice, getattr(job, "voice", "M1")),
@@ -1822,8 +1774,7 @@ def run_conversion_job(job: Job) -> None:  # pyright: ignore[reportGeneralTypeIs
                 return "kokoro", formula or spec, None, None
 
             fallback_provider = (
-                str(getattr(job, "tts_provider", "kokoro") or "kokoro").strip().lower()
-                or "kokoro"
+                str(getattr(job, "tts_provider", "kokoro") or "kokoro").strip().lower() or "kokoro"
             )
             inferred = _infer_provider_from_spec(spec, fallback=fallback_provider)
             if inferred == "supertonic":
@@ -1837,7 +1788,7 @@ def run_conversion_job(job: Job) -> None:  # pyright: ignore[reportGeneralTypeIs
 
         def resolve_voice_choice(
             raw_spec: str,
-        ) -> tuple[str, str, Any, Optional[float], Optional[int]]:
+        ) -> tuple[str, str, Any, float | None, int | None]:
             """Resolve a raw voice spec into (provider, resolved_spec, choice, speed, steps).
 
             For Kokoro formulas, `choice` will be a resolved voice tensor (via `voice_formulas`).
@@ -1885,20 +1836,14 @@ def run_conversion_job(job: Job) -> None:  # pyright: ignore[reportGeneralTypeIs
             if not normalized_value and raw_token:
                 normalized_value = normalize_entity_token(raw_token) or raw_token
             if normalized_value:
-                override_token_map.setdefault(
-                    normalized_value, raw_token or normalized_value
-                )
+                override_token_map.setdefault(normalized_value, raw_token or normalized_value)
 
         if not job.chapters:
-            filtered, skipped_info = _auto_select_relevant_chapters(
-                extraction.chapters, file_type
-            )
+            filtered, skipped_info = _auto_select_relevant_chapters(extraction.chapters, file_type)
             original_count = len(extraction.chapters)
             if filtered and len(filtered) < original_count:
                 extraction.chapters = filtered
-                _update_metadata_for_chapter_count(
-                    extraction.metadata, len(filtered), file_type
-                )
+                _update_metadata_for_chapter_count(extraction.metadata, len(filtered), file_type)
                 threshold = _SIGNIFICANT_LENGTH_THRESHOLDS.get(file_type.lower())
                 label = _chapter_label(file_type)
                 qualifier = f" (< {threshold} characters)" if threshold else ""
@@ -1924,7 +1869,7 @@ def run_conversion_job(job: Job) -> None:  # pyright: ignore[reportGeneralTypeIs
                     level="warning",
                 )
 
-        metadata_overrides: Dict[str, Any] = dict(job.metadata_tags or {})
+        metadata_overrides: dict[str, Any] = dict(job.metadata_tags or {})
         if job.chapters:
             selected_chapters, chapter_metadata, diagnostics = _apply_chapter_overrides(
                 extraction.chapters,
@@ -1940,9 +1885,7 @@ def run_conversion_job(job: Job) -> None:  # pyright: ignore[reportGeneralTypeIs
                     level="info",
                 )
                 active_chapter_configs = [
-                    entry
-                    for entry in job.chapters
-                    if _coerce_truthy(entry.get("enabled", True))
+                    entry for entry in job.chapters if _coerce_truthy(entry.get("enabled", True))
                 ][: len(selected_chapters)]
                 if job.chunks:
                     chunk_groups = _group_chunks_by_chapter(job.chunks)
@@ -1962,7 +1905,7 @@ def run_conversion_job(job: Job) -> None:  # pyright: ignore[reportGeneralTypeIs
         _apply_newline_policy(extraction.chapters, job.replace_single_newlines)
 
         base_output_dir = _prepare_output_dir(job)
-        project_root, audio_dir, subtitle_dir, metadata_dir = _prepare_project_layout(
+        project_root, audio_dir, _subtitle_dir, metadata_dir = _prepare_project_layout(
             job, base_output_dir
         )
 
@@ -1974,34 +1917,26 @@ def run_conversion_job(job: Job) -> None:  # pyright: ignore[reportGeneralTypeIs
             job.merge_chapters_at_end = True
 
         merged_required = job.merge_chapters_at_end or not job.save_chapters_separately
-        audio_path: Optional[Path] = None
-        audio_sink: Optional[AudioSink] = None
+        audio_path: Path | None = None
+        audio_sink: AudioSink | None = None
         if merged_required:
-            audio_path = _build_output_path(
-                audio_dir, job.original_filename, job.output_format
-            )
+            audio_path = _build_output_path(audio_dir, job.original_filename, job.output_format)
             meta_for_sink = job.metadata_tags if job.metadata_tags else None
-            audio_sink = _open_audio_sink(
-                audio_path, job, sink_stack, metadata=meta_for_sink
-            )
+            audio_sink = _open_audio_sink(audio_path, job, sink_stack, metadata=meta_for_sink)
             subtitle_writer = _create_subtitle_writer(job, audio_path)
             job.result.audio_path = audio_path
             if subtitle_writer:
                 job.result.subtitle_paths.append(subtitle_writer.path)
 
-        chapter_dir: Optional[Path] = None
+        chapter_dir: Path | None = None
         if job.save_chapters_separately:
             chapter_dir = audio_dir / "chapters"
             chapter_dir.mkdir(parents=True, exist_ok=True)
 
         base_voice_spec = _job_voice_fallback(job)
-        voice_cache: Dict[str, Any] = {}
+        voice_cache: dict[str, Any] = {}
         base_provider, base_voice_resolved, _, _ = resolve_voice_target(base_voice_spec)
-        if (
-            base_provider == "kokoro"
-            and base_voice_resolved
-            and "*" not in base_voice_resolved
-        ):
+        if base_provider == "kokoro" and base_voice_resolved and "*" not in base_voice_resolved:
             kokoro_pipeline = get_pipeline("kokoro")
             voice_cache[f"kokoro:{base_voice_resolved}"] = _resolve_voice(
                 kokoro_pipeline, base_voice_resolved, job.use_gpu
@@ -2012,29 +1947,21 @@ def run_conversion_job(job: Job) -> None:  # pyright: ignore[reportGeneralTypeIs
         total_chapters = len(extraction.chapters)
         if chunk_groups:
             chunk_groups = {
-                idx: items
-                for idx, items in chunk_groups.items()
-                if 0 <= idx < total_chapters
+                idx: items for idx, items in chunk_groups.items() if 0 <= idx < total_chapters
             }
-        job.add_log(
-            f"Detected {total_chapters} chapter{'s' if total_chapters != 1 else ''}"
-        )
+        job.add_log(f"Detected {total_chapters} chapter{'s' if total_chapters != 1 else ''}")
         auto_prefix_titles = getattr(job, "auto_prefix_chapter_titles", True)
         read_title_intro = getattr(job, "read_title_intro", False)
         book_intro_text = ""
-        intro_provider: Optional[str] = None
+        intro_provider: str | None = None
         intro_voice_choice: Any = None
-        intro_speed: Optional[float] = None
-        intro_steps: Optional[int] = None
+        intro_speed: float | None = None
+        intro_steps: int | None = None
         if read_title_intro:
-            book_intro_text = _build_title_intro_text(
-                job.metadata_tags, job.original_filename
-            )
+            book_intro_text = _build_title_intro_text(job.metadata_tags, job.original_filename)
             if book_intro_text:
                 preview = (
-                    book_intro_text
-                    if len(book_intro_text) <= 120
-                    else f"{book_intro_text[:117]}…"
+                    book_intro_text if len(book_intro_text) <= 120 else f"{book_intro_text[:117]}…"
                 )
                 job.add_log(f"Title intro enabled: {preview}", level="debug")
 
@@ -2063,19 +1990,17 @@ def run_conversion_job(job: Job) -> None:  # pyright: ignore[reportGeneralTypeIs
             text: str,
             *,
             voice_choice: Any,
-            chapter_sink: Optional[AudioSink],
-            preview_prefix: Optional[str] = None,
-            split_pattern: Optional[str] = SPLIT_PATTERN,
-            tts_provider: Optional[str] = None,
-            speed_override: Optional[float] = None,
-            supertonic_steps_override: Optional[int] = None,
+            chapter_sink: AudioSink | None,
+            preview_prefix: str | None = None,
+            split_pattern: str | None = SPLIT_PATTERN,
+            tts_provider: str | None = None,
+            speed_override: float | None = None,
+            supertonic_steps_override: int | None = None,
         ) -> int:
             nonlocal processed_chars, subtitle_index, current_time
             source_text = str(text or "")
             if heteronym_sentence_rules:
-                source_text = _apply_heteronym_sentence_rules(
-                    source_text, heteronym_sentence_rules
-                )
+                source_text = _apply_heteronym_sentence_rules(source_text, heteronym_sentence_rules)
             if pronunciation_rules:
                 source_text = _apply_pronunciation_rules(
                     source_text,
@@ -2101,15 +2026,11 @@ def run_conversion_job(job: Job) -> None:  # pyright: ignore[reportGeneralTypeIs
             )
             if provider == "supertonic":
                 supertonic_pipeline = get_pipeline("supertonic")
-                voice_name = _supertonic_voice_from_spec(
-                    voice_choice, getattr(job, "voice", "M1")
-                )
+                voice_name = _supertonic_voice_from_spec(voice_choice, getattr(job, "voice", "M1"))
                 segment_iter = supertonic_pipeline(
                     normalized,
                     voice=voice_name,
-                    speed=float(
-                        speed_override if speed_override is not None else job.speed
-                    ),
+                    speed=float(speed_override if speed_override is not None else job.speed),
                     split_pattern=split_pattern,
                     total_steps=int(
                         supertonic_steps_override
@@ -2122,9 +2043,7 @@ def run_conversion_job(job: Job) -> None:  # pyright: ignore[reportGeneralTypeIs
                 segment_iter = kokoro_pipeline(
                     normalized,
                     voice=voice_choice,
-                    speed=float(
-                        speed_override if speed_override is not None else job.speed
-                    ),
+                    speed=float(speed_override if speed_override is not None else job.speed),
                     split_pattern=split_pattern,
                 )
 
@@ -2151,9 +2070,7 @@ def run_conversion_job(job: Job) -> None:  # pyright: ignore[reportGeneralTypeIs
                 else:
                     job.progress = 0.0 if processed_chars == 0 else 0.999
 
-                preview_text = graphemes or (
-                    graphemes_raw[:80] if graphemes_raw else "[silence]"
-                )
+                preview_text = graphemes or (graphemes_raw[:80] if graphemes_raw else "[silence]")
                 prefix = f"{preview_prefix} · " if preview_prefix else ""
                 job.add_log(
                     f"{prefix}{processed_chars:,}/{job.total_characters or '—'}: {preview_text[:80]}"
@@ -2177,12 +2094,12 @@ def run_conversion_job(job: Job) -> None:  # pyright: ignore[reportGeneralTypeIs
             duration_seconds: float,
             *,
             include_in_chapter: bool,
-            chapter_sink: Optional[AudioSink],
+            chapter_sink: AudioSink | None,
         ) -> None:
             nonlocal current_time
             if duration_seconds <= 0:
                 return
-            samples = int(round(duration_seconds * SAMPLE_RATE))
+            samples = round(duration_seconds * SAMPLE_RATE)
             if samples <= 0:
                 return
             silence = np.zeros(samples, dtype="float32")
@@ -2195,23 +2112,15 @@ def run_conversion_job(job: Job) -> None:  # pyright: ignore[reportGeneralTypeIs
         for idx, chapter in enumerate(extraction.chapters, start=1):
             canceller()
             raw_title = str(getattr(chapter, "title", "") or "").strip()
-            spoken_title = _format_spoken_chapter_title(
-                raw_title, idx, auto_prefix_titles
-            )
+            spoken_title = _format_spoken_chapter_title(raw_title, idx, auto_prefix_titles)
             heading_text = spoken_title or raw_title
             chapter_display_title = heading_text or f"Chapter {idx}"
-            job.add_log(
-                f"Processing chapter {idx}/{total_chapters}: {chapter_display_title}"
-            )
-            normalize_opening_caps = bool(
-                getattr(job, "normalize_chapter_opening_caps", True)
-            )
+            job.add_log(f"Processing chapter {idx}/{total_chapters}: {chapter_display_title}")
+            normalize_opening_caps = bool(getattr(job, "normalize_chapter_opening_caps", True))
 
             chapter_start_time = current_time
             chapter_override = (
-                active_chapter_configs[idx - 1]
-                if idx - 1 < len(active_chapter_configs)
-                else None
+                active_chapter_configs[idx - 1] if idx - 1 < len(active_chapter_configs) else None
             )
             chapter_voice_spec = _chapter_voice_spec(job, chapter_override)
             if not chapter_voice_spec:
@@ -2236,11 +2145,11 @@ def run_conversion_job(job: Job) -> None:  # pyright: ignore[reportGeneralTypeIs
             else:
                 voice_choice = chapter_voice_resolved
 
-            chapter_audio_path: Optional[Path] = None
+            chapter_audio_path: Path | None = None
             segments_emitted = 0
 
             with ExitStack() as chapter_sink_stack:
-                chapter_sink: Optional[AudioSink] = None
+                chapter_sink: AudioSink | None = None
 
                 if chapter_dir is not None:
                     chapter_audio_path = _build_output_path(
@@ -2259,11 +2168,7 @@ def run_conversion_job(job: Job) -> None:  # pyright: ignore[reportGeneralTypeIs
                 first_line = ""
                 if chapter.text:
                     first_line = next(
-                        (
-                            line.strip()
-                            for line in chapter.text.splitlines()
-                            if line.strip()
-                        ),
+                        (line.strip() for line in chapter.text.splitlines() if line.strip()),
                         "",
                     )
                 remove_heading_from_body = False
@@ -2276,16 +2181,10 @@ def run_conversion_job(job: Job) -> None:  # pyright: ignore[reportGeneralTypeIs
                 if not intro_emitted and book_intro_text:
                     intro_use_provider = intro_provider or chapter_provider
                     intro_use_voice_choice = (
-                        intro_voice_choice
-                        if intro_voice_choice is not None
-                        else voice_choice
+                        intro_voice_choice if intro_voice_choice is not None else voice_choice
                     )
-                    intro_use_speed = (
-                        intro_speed if intro_speed is not None else chapter_speed
-                    )
-                    intro_use_steps = (
-                        intro_steps if intro_steps is not None else chapter_steps
-                    )
+                    intro_use_speed = intro_speed if intro_speed is not None else chapter_speed
+                    intro_use_steps = intro_steps if intro_steps is not None else chapter_steps
                     intro_segments = emit_text(
                         book_intro_text,
                         voice_choice=intro_use_voice_choice,
@@ -2322,9 +2221,7 @@ def run_conversion_job(job: Job) -> None:  # pyright: ignore[reportGeneralTypeIs
                             chapter_sink=chapter_sink,
                         )
 
-                chunks_for_chapter = (
-                    chunk_groups.get(idx - 1, []) if chunk_groups else []
-                )
+                chunks_for_chapter = chunk_groups.get(idx - 1, []) if chunk_groups else []
                 body_segments = 0
                 pending_heading_strip = remove_heading_from_body
                 opening_caps_pending = normalize_opening_caps
@@ -2349,10 +2246,8 @@ def run_conversion_job(job: Job) -> None:  # pyright: ignore[reportGeneralTypeIs
                             if match:
                                 number = match.group("number")
                                 if number:
-                                    chunk_text, removed_heading = (
-                                        _strip_duplicate_heading_line(
-                                            chunk_text, number
-                                        )
+                                    chunk_text, removed_heading = _strip_duplicate_heading_line(
+                                        chunk_text, number
                                     )
 
                         if removed_heading:
@@ -2364,8 +2259,8 @@ def run_conversion_job(job: Job) -> None:  # pyright: ignore[reportGeneralTypeIs
                                 continue
 
                     if opening_caps_pending and chunk_text:
-                        normalized_text, normalized_changed = (
-                            _normalize_chapter_opening_caps(chunk_text)
+                        normalized_text, normalized_changed = _normalize_chapter_opening_caps(
+                            chunk_text
                         )
                         if normalized_changed:
                             if not mutated_entry:
@@ -2464,17 +2359,15 @@ def run_conversion_job(job: Job) -> None:  # pyright: ignore[reportGeneralTypeIs
                             if match:
                                 number = match.group("number")
                                 if number:
-                                    chapter_text, removed_heading = (
-                                        _strip_duplicate_heading_line(
-                                            chapter_text, number
-                                        )
+                                    chapter_text, removed_heading = _strip_duplicate_heading_line(
+                                        chapter_text, number
                                     )
 
                         if removed_heading:
                             pending_heading_strip = False
                     if opening_caps_pending and chapter_text:
-                        normalized_body, normalized_changed = (
-                            _normalize_chapter_opening_caps(chapter_text)
+                        normalized_body, normalized_changed = _normalize_chapter_opening_caps(
+                            chapter_text
                         )
                         if normalized_changed:
                             chapter_text = normalized_body
@@ -2568,7 +2461,7 @@ def run_conversion_job(job: Job) -> None:  # pyright: ignore[reportGeneralTypeIs
 
             if outro_text and outro_voice_spec:
                 outro_start_time = current_time
-                outro_audio_path: Optional[Path] = None
+                outro_audio_path: Path | None = None
                 outro_segments = 0
                 outro_index = total_chapters + 1
                 outro_provider, _, outro_voice_choice, outro_speed, outro_steps = (
@@ -2576,7 +2469,7 @@ def run_conversion_job(job: Job) -> None:  # pyright: ignore[reportGeneralTypeIs
                 )
 
                 with ExitStack() as outro_sink_stack:
-                    chapter_sink: Optional[AudioSink] = None
+                    chapter_sink: AudioSink | None = None
                     if chapter_dir is not None:
                         outro_audio_path = _build_output_path(
                             chapter_dir,
@@ -2604,9 +2497,7 @@ def run_conversion_job(job: Job) -> None:  # pyright: ignore[reportGeneralTypeIs
                 if outro_segments > 0:
                     job.add_log(f"Appended outro sequence: {outro_text}")
                     if outro_audio_path is not None:
-                        job.result.artifacts[f"chapter_{outro_index:02d}"] = (
-                            outro_audio_path
-                        )
+                        job.result.artifacts[f"chapter_{outro_index:02d}"] = outro_audio_path
                         chapter_paths.append(outro_audio_path)
                     chapter_markers.append(
                         {
@@ -2618,9 +2509,7 @@ def run_conversion_job(job: Job) -> None:  # pyright: ignore[reportGeneralTypeIs
                         }
                     )
                 else:
-                    job.add_log(
-                        "No audio generated for outro sequence.", level="warning"
-                    )
+                    job.add_log("No audio generated for outro sequence.", level="warning")
 
         if not audio_path and chapter_paths:
             job.result.audio_path = chapter_paths[0]
@@ -2644,9 +2533,7 @@ def run_conversion_job(job: Job) -> None:  # pyright: ignore[reportGeneralTypeIs
         if metadata_dir:
             metadata_dir.mkdir(parents=True, exist_ok=True)
             metadata_file = metadata_dir / "metadata.json"
-            metadata_file.write_text(
-                json.dumps(metadata_payload, indent=2), encoding="utf-8"
-            )
+            metadata_file.write_text(json.dumps(metadata_payload, indent=2), encoding="utf-8")
             job.result.artifacts["metadata"] = metadata_file
 
         if job.generate_epub3:
@@ -2657,12 +2544,8 @@ def run_conversion_job(job: Job) -> None:  # pyright: ignore[reportGeneralTypeIs
             if audio_asset:
                 try:
                     epub_root = project_root
-                    epub_output_path = _build_output_path(
-                        epub_root, job.original_filename, "epub"
-                    )
-                    job.add_log(
-                        "Generating EPUB 3 package with synchronized narration…"
-                    )
+                    epub_output_path = _build_output_path(epub_root, job.original_filename, "epub")
+                    job.add_log("Generating EPUB 3 package with synchronized narration…")
                     epub_path = build_epub3_package(
                         output_path=epub_output_path,
                         book_id=job.id,
@@ -2680,9 +2563,7 @@ def run_conversion_job(job: Job) -> None:  # pyright: ignore[reportGeneralTypeIs
                     job.result.artifacts["epub3"] = epub_path
                     job.add_log(f"EPUB 3 package created at {epub_path}")
                 except Exception as exc:
-                    job.add_log(
-                        f"Failed to generate EPUB 3 package: {exc}", level="error"
-                    )
+                    job.add_log(f"Failed to generate EPUB 3 package: {exc}", level="error")
             else:
                 job.add_log(
                     "Skipped EPUB 3 generation: audio output unavailable.",
@@ -2723,20 +2604,16 @@ def run_conversion_job(job: Job) -> None:  # pyright: ignore[reportGeneralTypeIs
             chunk_total = "unavailable"
 
         job.add_log(
-            "Context => chunk_level=%s, chapters=%s, chunk_groups=%s, chunks=%s"
-            % (job.chunk_level, chapter_count, chunk_group_count, chunk_total),
+            f"Context => chunk_level={job.chunk_level}, chapters={chapter_count}, chunk_groups={chunk_group_count}, chunks={chunk_total}",
             level="debug",
         )
 
-        first_nonempty_group = next(
-            (items for items in chunk_groups.values() if items), None
-        )
+        first_nonempty_group = next((items for items in chunk_groups.values() if items), None)
         if first_nonempty_group:
             first_chunk = dict(first_nonempty_group[0])
             sample_text = str(first_chunk.get("text") or "")[:160].replace("\n", " ")
             job.add_log(
-                "First chunk sample => id=%s, speaker=%s, chars=%s, preview=%s"
-                % (
+                "First chunk sample => id={}, speaker={}, chars={}, preview={}".format(
                     first_chunk.get("id") or first_chunk.get("chunk_index"),
                     first_chunk.get("speaker_id", "narrator"),
                     len(str(first_chunk.get("text") or "")),
@@ -2781,9 +2658,7 @@ def run_conversion_job(job: Job) -> None:  # pyright: ignore[reportGeneralTypeIs
                     f"Failed to embed metadata into m4b output: {exc}",
                     level="error",
                 )
-                raise RuntimeError(
-                    f"Failed to embed metadata into m4b output: {exc}"
-                ) from exc
+                raise RuntimeError(f"Failed to embed metadata into m4b output: {exc}") from exc
 
 
 def _load_pipeline(job: Job):
@@ -2801,9 +2676,7 @@ def _load_pipeline(job: Job):
     if not disable_gpu:
         device = _select_device()
     _np, KPipeline = load_numpy_kpipeline()
-    return KPipeline(
-        lang_code=job.language, repo_id="hexgrad/Kokoro-82M", device=device
-    )
+    return KPipeline(lang_code=job.language, repo_id="hexgrad/Kokoro-82M", device=device)
 
 
 def _select_device() -> str:
@@ -2839,9 +2712,7 @@ def _build_output_path(directory: Path, original_name: str, extension: str) -> P
     return directory / f"{sanitized}.{extension}"
 
 
-def _prepare_project_layout(
-    job: Job, base_dir: Path
-) -> tuple[Path, Path, Path, Optional[Path]]:
+def _prepare_project_layout(job: Job, base_dir: Path) -> tuple[Path, Path, Path, Path | None]:
     base_dir.mkdir(parents=True, exist_ok=True)
     sanitized = _sanitize_output_stem(job.original_filename)
     folder_name = f"{_output_timestamp_token()}_{sanitized}"
@@ -2859,9 +2730,7 @@ def _prepare_project_layout(
     return project_root, project_root, project_root, None
 
 
-def _apply_newline_policy(
-    chapters: List[ExtractedChapter], replace_single_newlines: bool
-) -> None:
+def _apply_newline_policy(chapters: list[ExtractedChapter], replace_single_newlines: bool) -> None:
     if not replace_single_newlines:
         return
     newline_regex = re.compile(r"(?<!\n)\n(?!\n)")
@@ -2891,8 +2760,8 @@ def _open_audio_sink(
     job: Job,
     stack: ExitStack,
     *,
-    fmt: Optional[str] = None,
-    metadata: Optional[Dict[str, str]] = None,
+    fmt: str | None = None,
+    metadata: dict[str, str] | None = None,
 ) -> AudioSink:
     ffmpeg_cache_root = get_internal_cache_path("ffmpeg")
     platform_cache = os.path.join(ffmpeg_cache_root, sys.platform)
@@ -2938,7 +2807,7 @@ def _open_audio_sink(
 
 
 def _build_ffmpeg_command(
-    path: Path, fmt: str, metadata: Optional[Dict[str, str]] = None
+    path: Path, fmt: str, metadata: dict[str, str] | None = None
 ) -> list[str]:
     base = [
         "ffmpeg",
@@ -3060,15 +2929,13 @@ class SubtitleWriter:
         )
 
 
-def _create_subtitle_writer(job: Job, audio_path: Path) -> Optional[SubtitleWriter]:
+def _create_subtitle_writer(job: Job, audio_path: Path) -> SubtitleWriter | None:
     if job.subtitle_mode == "Disabled":
         return None
 
     fmt = (job.subtitle_format or "srt").lower()
     if job.subtitle_mode == "Sentence + Highlighting" and fmt == "srt":
-        job.add_log(
-            "Highlighting requires ASS subtitles. Switching format.", level="warning"
-        )
+        job.add_log("Highlighting requires ASS subtitles. Switching format.", level="warning")
         fmt = "ass"
 
     if fmt == "srt":

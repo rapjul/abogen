@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import tempfile
 import zipfile
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, List, Sequence
 
 MARKER_PREFIX = "[[ABOGEN-DBG:"
 MARKER_SUFFIX = "]]"
@@ -285,7 +285,7 @@ def build_debug_epub(dest_path: Path, *, title: str = "abogen debug samples") ->
     dest_path = Path(dest_path)
     dest_path.parent.mkdir(parents=True, exist_ok=True)
 
-    chapter_lines: List[str] = [
+    chapter_lines: list[str] = [
         '<?xml version="1.0" encoding="utf-8"?>',
         "<!DOCTYPE html>",
         '<html xmlns="http://www.w3.org/1999/xhtml">',
@@ -302,11 +302,7 @@ def build_debug_epub(dest_path: Path, *, title: str = "abogen debug samples") ->
         safe_label = sample.label.replace("&", "and")
         chapter_lines.append(f"  <h2>{safe_label}</h2>")
         chapter_lines.append(
-            "  <p><strong>"
-            + marker_for(sample.code)
-            + "</strong> "
-            + sample.text
-            + "</p>"
+            "  <p><strong>" + marker_for(sample.code) + "</strong> " + sample.text + "</p>"
         )
 
     chapter_lines += ["</body>", "</html>"]
@@ -369,9 +365,7 @@ def build_debug_epub(dest_path: Path, *, title: str = "abogen debug samples") ->
 
         # Per EPUB spec: mimetype must be the first entry and stored (no compression).
         with zipfile.ZipFile(dest_path, "w") as zf:
-            zf.write(
-                tmp_path / "mimetype", "mimetype", compress_type=zipfile.ZIP_STORED
-            )
+            zf.write(tmp_path / "mimetype", "mimetype", compress_type=zipfile.ZIP_STORED)
             for source in (
                 meta_inf / "container.xml",
                 oebps / "content.opf",

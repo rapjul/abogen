@@ -1,6 +1,7 @@
 import os
 import re
-from typing import Any, Dict, Mapping, Optional
+from collections.abc import Mapping
+from typing import Any
 
 from abogen.constants import (
     LANGUAGE_DESCRIPTIONS,
@@ -8,13 +9,13 @@ from abogen.constants import (
     SUPPORTED_SOUND_FORMATS,
     VOICES_INTERNAL,
 )
+from abogen.integrations.audiobookshelf import AudiobookshelfConfig
+from abogen.integrations.calibre_opds import CalibreOPDSClient
 from abogen.normalization_settings import (
     DEFAULT_LLM_PROMPT,
     environment_llm_defaults,
 )
 from abogen.utils import load_config, save_config
-from abogen.integrations.calibre_opds import CalibreOPDSClient
-from abogen.integrations.audiobookshelf import AudiobookshelfConfig
 from abogen.webui.routes.utils.common import split_profile_spec
 
 SAVE_MODE_LABELS = {
@@ -194,7 +195,7 @@ _NORMALIZATION_GROUPS = [
 ]
 
 
-def integration_defaults() -> Dict[str, Dict[str, Any]]:
+def integration_defaults() -> dict[str, dict[str, Any]]:
     return {
         "calibre_opds": {
             "enabled": False,
@@ -221,19 +222,15 @@ def integration_defaults() -> Dict[str, Dict[str, Any]]:
 
 
 def has_output_override() -> bool:
-    return bool(
-        os.environ.get("ABOGEN_OUTPUT_DIR") or os.environ.get("ABOGEN_OUTPUT_ROOT")
-    )
+    return bool(os.environ.get("ABOGEN_OUTPUT_DIR") or os.environ.get("ABOGEN_OUTPUT_ROOT"))
 
 
-def settings_defaults() -> Dict[str, Any]:
+def settings_defaults() -> dict[str, Any]:
     llm_env_defaults = environment_llm_defaults()
     return {
         "output_format": "wav",
         "subtitle_format": "srt",
-        "save_mode": "default_output"
-        if has_output_override()
-        else "save_next_to_input",
+        "save_mode": "default_output" if has_output_override() else "save_next_to_input",
         "default_speaker": "",
         "default_voice": VOICES_INTERNAL[0] if VOICES_INTERNAL else "",
         "supertonic_total_steps": 5,
@@ -323,9 +320,7 @@ def coerce_float(value: Any, default: float) -> float:
         return default
 
 
-def coerce_int(
-    value: Any, default: int, *, minimum: int = 1, maximum: int = 200
-) -> int:
+def coerce_int(value: Any, default: int, *, minimum: int = 1, maximum: int = 200) -> int:
     try:
         parsed = int(value)
     except (TypeError, ValueError):
@@ -342,7 +337,7 @@ def normalize_save_mode(value: Any, default: str) -> str:
     return default
 
 
-def normalize_setting_value(key: str, value: Any, defaults: Dict[str, Any]) -> Any:
+def normalize_setting_value(key: str, value: Any, defaults: dict[str, Any]) -> Any:
     if key in BOOLEAN_SETTINGS:
         return coerce_bool(value, defaults[key])
     if key in FLOAT_SETTINGS:
@@ -412,9 +407,7 @@ def normalize_setting_value(key: str, value: Any, defaults: Dict[str, Any]) -> A
     if key == "speaker_random_languages":
         if isinstance(value, (list, tuple, set)):
             return [
-                code
-                for code in value
-                if isinstance(code, str) and code in LANGUAGE_DESCRIPTIONS
+                code for code in value if isinstance(code, str) and code in LANGUAGE_DESCRIPTIONS
             ]
         if isinstance(value, str):
             parts = [item.strip().lower() for item in value.split(",") if item.strip()]
@@ -435,17 +428,17 @@ def normalize_setting_value(key: str, value: Any, defaults: Dict[str, Any]) -> A
     return value if value is not None else defaults.get(key)
 
 
-def load_settings() -> Dict[str, Any]:
+def load_settings() -> dict[str, Any]:
     defaults = settings_defaults()
     cfg = load_config() or {}
-    settings: Dict[str, Any] = {}
+    settings: dict[str, Any] = {}
     for key, default in defaults.items():
         raw_value = cfg.get(key, default)
         settings[key] = normalize_setting_value(key, raw_value, defaults)
     return settings
 
 
-def load_integration_settings() -> Dict[str, Dict[str, Any]]:
+def load_integration_settings() -> dict[str, dict[str, Any]]:
     defaults = integration_defaults()
     cfg = load_config() or {}
     # Integrations are stored under the "integrations" key in the config
@@ -453,10 +446,10 @@ def load_integration_settings() -> Dict[str, Dict[str, Any]]:
     if not isinstance(stored_integrations, Mapping):
         stored_integrations = {}
 
-    integrations: Dict[str, Dict[str, Any]] = {}
+    integrations: dict[str, dict[str, Any]] = {}
     for key, default in defaults.items():
         stored = stored_integrations.get(key)
-        merged: Dict[str, Any] = dict(default)
+        merged: dict[str, Any] = dict(default)
         if isinstance(stored, Mapping):
             for field, default_value in default.items():
                 value = stored.get(field, default_value)
@@ -475,15 +468,11 @@ def load_integration_settings() -> Dict[str, Dict[str, Any]]:
                 else:
                     merged[field] = str(value or "")
         if key == "calibre_opds":
-            merged["has_password"] = bool(
-                isinstance(stored, Mapping) and stored.get("password")
-            )
+            merged["has_password"] = bool(isinstance(stored, Mapping) and stored.get("password"))
             # Do not clear the password here, let the template decide whether to show it or not
             # merged["password"] = ""
         elif key == "audiobookshelf":
-            merged["has_api_token"] = bool(
-                isinstance(stored, Mapping) and stored.get("api_token")
-            )
+            merged["has_api_token"] = bool(isinstance(stored, Mapping) and stored.get("api_token"))
             # Do not clear the token here
             # merged["api_token"] = ""
         integrations[key] = merged
@@ -509,7 +498,7 @@ def load_integration_settings() -> Dict[str, Dict[str, Any]]:
     return integrations
 
 
-def stored_integration_config(name: str) -> Dict[str, Any]:
+def stored_integration_config(name: str) -> dict[str, Any]:
     cfg = load_config() or {}
     # Check under "integrations" first (new structure)
     integrations = cfg.get("integrations")
@@ -525,7 +514,7 @@ def stored_integration_config(name: str) -> Dict[str, Any]:
     return {}
 
 
-def calibre_settings_from_payload(payload: Mapping[str, Any]) -> Dict[str, Any]:
+def calibre_settings_from_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
     defaults = integration_defaults()["calibre_opds"]
     stored = stored_integration_config("calibre_opds")
 
@@ -545,13 +534,11 @@ def calibre_settings_from_payload(payload: Mapping[str, Any]) -> Dict[str, Any]:
         payload.get("password") or payload.get("calibre_opds_password") or ""
     ).strip()
     use_saved_password = coerce_bool(
-        payload.get("use_saved_password")
-        or payload.get("calibre_opds_use_saved_password"),
+        payload.get("use_saved_password") or payload.get("calibre_opds_use_saved_password"),
         False,
     )
     clear_saved_password = coerce_bool(
-        payload.get("clear_saved_password")
-        or payload.get("calibre_opds_password_clear"),
+        payload.get("clear_saved_password") or payload.get("calibre_opds_password_clear"),
         False,
     )
     password = ""
@@ -578,7 +565,7 @@ def calibre_settings_from_payload(payload: Mapping[str, Any]) -> Dict[str, Any]:
     }
 
 
-def audiobookshelf_settings_from_payload(payload: Mapping[str, Any]) -> Dict[str, Any]:
+def audiobookshelf_settings_from_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
     defaults = integration_defaults()["audiobookshelf"]
     stored = stored_integration_config("audiobookshelf")
 
@@ -614,8 +601,7 @@ def audiobookshelf_settings_from_payload(payload: Mapping[str, Any]) -> Dict[str
         False,
     )
     clear_saved_token = coerce_bool(
-        payload.get("clear_saved_token")
-        or payload.get("audiobookshelf_api_token_clear"),
+        payload.get("clear_saved_token") or payload.get("audiobookshelf_api_token_clear"),
         False,
     )
     if token_input:
@@ -679,7 +665,7 @@ def audiobookshelf_settings_from_payload(payload: Mapping[str, Any]) -> Dict[str
 
 def build_audiobookshelf_config(
     settings: Mapping[str, Any],
-) -> Optional[AudiobookshelfConfig]:
+) -> AudiobookshelfConfig | None:
     base_url = str(settings.get("base_url") or "").strip()
     api_token = str(settings.get("api_token") or "").strip()
     library_id = str(settings.get("library_id") or "").strip()
@@ -704,13 +690,11 @@ def build_audiobookshelf_config(
 
 
 def calibre_integration_enabled(
-    integrations: Optional[Mapping[str, Any]] = None,
+    integrations: Mapping[str, Any] | None = None,
 ) -> bool:
     if integrations is None:
         integrations = load_integration_settings()
-    payload = (
-        integrations.get("calibre_opds") if isinstance(integrations, Mapping) else None
-    )
+    payload = integrations.get("calibre_opds") if isinstance(integrations, Mapping) else None
     if not isinstance(payload, Mapping):
         return False
     base_url = str(payload.get("base_url") or "").strip()
@@ -746,7 +730,7 @@ def build_calibre_client(settings: Mapping[str, Any]) -> CalibreOPDSClient:
     )
 
 
-def apply_integration_form(cfg: Dict[str, Any], form: Mapping[str, Any]) -> None:
+def apply_integration_form(cfg: dict[str, Any], form: Mapping[str, Any]) -> None:
     defaults = integration_defaults()
 
     current_calibre = dict(cfg.get("calibre_opds") or {})
@@ -778,16 +762,12 @@ def apply_integration_form(cfg: Dict[str, Any], form: Mapping[str, Any]) -> None
 
     current_abs = dict(cfg.get("audiobookshelf") or {})
     abs_enabled = coerce_bool(form.get("audiobookshelf_enabled"), False)
-    abs_base = str(
-        form.get("audiobookshelf_base_url") or current_abs.get("base_url") or ""
-    ).strip()
+    abs_base = str(form.get("audiobookshelf_base_url") or current_abs.get("base_url") or "").strip()
     abs_library = str(
         form.get("audiobookshelf_library_id") or current_abs.get("library_id") or ""
     ).strip()
     abs_collection = str(
-        form.get("audiobookshelf_collection_id")
-        or current_abs.get("collection_id")
-        or ""
+        form.get("audiobookshelf_collection_id") or current_abs.get("collection_id") or ""
     ).strip()
     abs_folder = str(
         form.get("audiobookshelf_folder_id") or current_abs.get("folder_id") or ""
@@ -841,5 +821,5 @@ def apply_integration_form(cfg: Dict[str, Any], form: Mapping[str, Any]) -> None
     }
 
 
-def save_settings(settings: Dict[str, Any]) -> None:
+def save_settings(settings: dict[str, Any]) -> None:
     save_config(settings)

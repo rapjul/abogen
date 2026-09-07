@@ -6,9 +6,10 @@ import mimetypes
 import re
 import textwrap
 import urllib.parse
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple, cast
+from typing import Any, cast
 
 import ebooklib  # type: ignore[import]
 import fitz  # type: ignore[import]
@@ -22,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 METADATA_PATTERN = re.compile(r"<<METADATA_([A-Z_]+):(.*?)>>", re.DOTALL)
 CHAPTER_PATTERN = re.compile(r"<<CHAPTER_MARKER:(.*?)>>", re.IGNORECASE)
-METADATA_KEY_MAP: Dict[str, str] = {
+METADATA_KEY_MAP: dict[str, str] = {
     "TITLE": "title",
     "ARTIST": "artist",
     "ALBUM": "album",
@@ -48,7 +49,7 @@ class ExtractedChapter:
         return calculate_text_length(self.text)
 
 
-def _is_valid_image_bytes(data: Optional[bytes]) -> bool:
+def _is_valid_image_bytes(data: bytes | None) -> bool:
     """Check whether binary data represents valid image data and not markup.
 
     Args:
@@ -60,24 +61,15 @@ def _is_valid_image_bytes(data: Optional[bytes]) -> bool:
     if not data or len(data) < 8:
         return False
     head = bytes(data[:64]).strip().lower()
-    if (
-        head.startswith(b"<?xml")
-        or head.startswith(b"<html")
-        or head.startswith(b"<!doctype")
-        or head.startswith(b"<svg")
-        or head.startswith(b"{\\")
-        or head.startswith(b"/*")
-    ):
-        return False
-    return True
+    return not (head.startswith((b"<?xml", b"<html", b"<!doctype", b"<svg", b"{\\", b"/*")))
 
 
 @dataclass
 class ExtractionResult:
-    chapters: List[ExtractedChapter]
-    metadata: Dict[str, str] = field(default_factory=dict)
-    cover_image: Optional[bytes] = None
-    cover_mime: Optional[str] = None
+    chapters: list[ExtractedChapter]
+    metadata: dict[str, str] = field(default_factory=dict)
+    cover_image: bytes | None = None
+    cover_mime: str | None = None
 
     @property
     def combined_text(self) -> str:
@@ -90,14 +82,14 @@ class ExtractionResult:
 
 @dataclass
 class MetadataSource:
-    title: Optional[str] = None
-    authors: List[str] = field(default_factory=list)
-    description: Optional[str] = None
-    publisher: Optional[str] = None
-    publication_year: Optional[str] = None
-    language: Optional[str] = None
-    series: Optional[str] = None
-    series_index: Optional[str] = None
+    title: str | None = None
+    authors: list[str] = field(default_factory=list)
+    description: str | None = None
+    publisher: str | None = None
+    publication_year: str | None = None
+    language: str | None = None
+    series: str | None = None
+    series_index: str | None = None
 
 
 @dataclass
@@ -135,26 +127,22 @@ def _extract_from_string(raw: str, default_title: str) -> ExtractionResult:
     chapter_count = len(chapters)
     artist_value = normalized_tags.get("artist")
     authors = (
-        [name.strip() for name in artist_value.split(",") if name.strip()]
-        if artist_value
-        else []
+        [name.strip() for name in artist_value.split(",") if name.strip()] if artist_value else []
     )
     metadata_source = MetadataSource(
         title=normalized_tags.get("title") or default_title,
         authors=authors,
         publication_year=normalized_tags.get("year"),
     )
-    metadata = _build_metadata_payload(
-        metadata_source, chapter_count, "text", default_title
-    )
+    metadata = _build_metadata_payload(metadata_source, chapter_count, "text", default_title)
     metadata.update(normalized_tags)
     if not chapters:
         chapters = [ExtractedChapter(title=default_title, text="")]
     return ExtractionResult(chapters=chapters, metadata=metadata)
 
 
-def _strip_metadata(content: str) -> Tuple[Dict[str, str], str]:
-    metadata: Dict[str, str] = {}
+def _strip_metadata(content: str) -> tuple[dict[str, str], str]:
+    metadata: dict[str, str] = {}
 
     def _replacer(match: re.Match) -> str:
         key = match.group(1).strip().upper()
@@ -167,22 +155,20 @@ def _strip_metadata(content: str) -> Tuple[Dict[str, str], str]:
     return metadata, stripped
 
 
-def _split_chapters(content: str, default_title: str) -> List[ExtractedChapter]:
+def _split_chapters(content: str, default_title: str) -> list[ExtractedChapter]:
     matches = list(CHAPTER_PATTERN.finditer(content))
     if not matches:
         cleaned = clean_text(content)
         return [ExtractedChapter(title=default_title, text=cleaned)]
 
-    chapters: List[ExtractedChapter] = []
+    chapters: list[ExtractedChapter] = []
     last_index = 0
     current_title = default_title
 
     for match in matches:
         segment = content[last_index : match.start()]
         if segment.strip():
-            chapters.append(
-                ExtractedChapter(title=current_title, text=clean_text(segment))
-            )
+            chapters.append(ExtractedChapter(title=current_title, text=clean_text(segment)))
         current_title = match.group(1).strip() or default_title
         last_index = match.end()
 
@@ -193,8 +179,8 @@ def _split_chapters(content: str, default_title: str) -> List[ExtractedChapter]:
     return chapters
 
 
-def _normalize_metadata_keys(metadata: Dict[str, str]) -> Dict[str, str]:
-    normalized: Dict[str, str] = {}
+def _normalize_metadata_keys(metadata: dict[str, str]) -> dict[str, str]:
+    normalized: dict[str, str] = {}
     for key, value in metadata.items():
         if not value:
             continue
@@ -208,7 +194,7 @@ def _build_metadata_payload(
     chapter_count: int,
     file_type: str,
     default_title: str,
-) -> Dict[str, str]:
+) -> dict[str, str]:
     now_year = str(datetime.datetime.now().year)
     title = metadata_source.title.strip() if metadata_source.title else default_title
     if not title:
@@ -243,7 +229,7 @@ def _build_metadata_payload(
 
 def _extract_pdf_cover(
     document: fitz.Document,
-) -> Tuple[Optional[bytes], Optional[str]]:
+) -> tuple[bytes | None, str | None]:
     """
     Extract the first page of a PDF as a cover image.
     Renders at 150 DPI and converts to PNG.
@@ -269,9 +255,9 @@ def _extract_pdf_cover(
 
 def _extract_pdf(path: Path) -> ExtractionResult:
     metadata_source = MetadataSource()
-    chapters: List[ExtractedChapter] = []
-    cover_image: Optional[bytes] = None
-    cover_mime: Optional[str] = None
+    chapters: list[ExtractedChapter] = []
+    cover_image: bytes | None = None
+    cover_mime: str | None = None
 
     with fitz.open(str(path)) as document:
         metadata_source = _collect_pdf_metadata(document)
@@ -341,19 +327,13 @@ def _extract_markdown(path: Path) -> ExtractionResult:
     metadata_source, chapters = _parse_markdown(raw, path.stem)
     if not chapters:
         chapters = [
-            ExtractedChapter(
-                title=metadata_source.title or path.stem, text=clean_text(raw)
-            )
+            ExtractedChapter(title=metadata_source.title or path.stem, text=clean_text(raw))
         ]
-    metadata = _build_metadata_payload(
-        metadata_source, len(chapters), "markdown", path.stem
-    )
+    metadata = _build_metadata_payload(metadata_source, len(chapters), "markdown", path.stem)
     return ExtractionResult(chapters=chapters, metadata=metadata)
 
 
-def _parse_markdown(
-    raw: str, default_title: str
-) -> Tuple[MetadataSource, List[ExtractedChapter]]:
+def _parse_markdown(raw: str, default_title: str) -> tuple[MetadataSource, list[ExtractedChapter]]:
     metadata = MetadataSource()
     text = textwrap.dedent(raw)
     frontmatter_match = re.match(r"^---\s*\n(.*?)\n---\s*\n", text, re.DOTALL)
@@ -374,7 +354,7 @@ def _parse_markdown(
         chapters = [ExtractedChapter(title=title, text=cleaned)] if cleaned else []
         return metadata, chapters
 
-    headers: List[dict] = []
+    headers: list[dict] = []
 
     def _flatten_tokens(tokens):
         for token in tokens:
@@ -384,7 +364,7 @@ def _parse_markdown(
 
     _flatten_tokens(toc_tokens)
 
-    header_positions: List[Tuple[str, int, str]] = []
+    header_positions: list[tuple[str, int, str]] = []
     for header in headers:
         header_id = header.get("id")
         if not header_id:
@@ -399,13 +379,9 @@ def _parse_markdown(
 
     header_positions.sort(key=lambda item: item[1])
 
-    chapters: List[ExtractedChapter] = []
+    chapters: list[ExtractedChapter] = []
     for index, (header_id, start, name) in enumerate(header_positions):
-        end = (
-            header_positions[index + 1][1]
-            if index + 1 < len(header_positions)
-            else len(html)
-        )
+        end = header_positions[index + 1][1] if index + 1 < len(header_positions) else len(html)
         section_html = html[start:end]
         section_soup = BeautifulSoup(section_html, "html.parser")
         header_tag = section_soup.find(attrs={"id": header_id})
@@ -418,11 +394,7 @@ def _parse_markdown(
 
     if not metadata.title:
         first_h1 = next(
-            (
-                header
-                for header in headers
-                if header.get("level") == 1 and header.get("name")
-            ),
+            (header for header in headers if header.get("level") == 1 and header.get("name")),
             None,
         )
         if first_h1:
@@ -432,21 +404,15 @@ def _parse_markdown(
 
 
 def _parse_markdown_frontmatter(frontmatter: str, metadata: MetadataSource) -> None:
-    title_match = re.search(
-        r"^title:\s*(.+)$", frontmatter, re.MULTILINE | re.IGNORECASE
-    )
+    title_match = re.search(r"^title:\s*(.+)$", frontmatter, re.MULTILINE | re.IGNORECASE)
     if title_match:
         metadata.title = title_match.group(1).strip().strip("\"'")
 
-    author_match = re.search(
-        r"^author:\s*(.+)$", frontmatter, re.MULTILINE | re.IGNORECASE
-    )
+    author_match = re.search(r"^author:\s*(.+)$", frontmatter, re.MULTILINE | re.IGNORECASE)
     if author_match:
         metadata.authors = [author_match.group(1).strip().strip("\"'")]
 
-    desc_match = re.search(
-        r"^description:\s*(.+)$", frontmatter, re.MULTILINE | re.IGNORECASE
-    )
+    desc_match = re.search(r"^description:\s*(.+)$", frontmatter, re.MULTILINE | re.IGNORECASE)
     if desc_match:
         metadata.description = desc_match.group(1).strip().strip("\"'")
 
@@ -467,8 +433,8 @@ class EpubExtractor:
     def __init__(self, path: Path) -> None:
         self.path = path
         self.book = epub.read_epub(str(path))
-        self.doc_content: Dict[str, str] = {}
-        self.spine_docs: List[str] = []
+        self.doc_content: dict[str, str] = {}
+        self.spine_docs: list[str] = []
 
     def extract(self) -> ExtractionResult:
         metadata_source = self._collect_metadata()
@@ -484,9 +450,7 @@ class EpubExtractor:
             chapters = self._process_spine_fallback()
         if not chapters:
             chapters = [ExtractedChapter(title=self.path.stem, text="")]
-        metadata = _build_metadata_payload(
-            metadata_source, len(chapters), "epub", self.path.stem
-        )
+        metadata = _build_metadata_payload(metadata_source, len(chapters), "epub", self.path.stem)
         metadata.setdefault("chapter_count", str(len(chapters)))
         if metadata_source.series:
             series_text = str(metadata_source.series).strip()
@@ -520,9 +484,7 @@ class EpubExtractor:
         try:
             author_items = self.book.get_metadata("DC", "creator")
             if author_items:
-                metadata.authors = [
-                    author[0] for author in author_items if author and author[0]
-                ]
+                metadata.authors = [author[0] for author in author_items if author and author[0]]
         except Exception as exc:
             logger.debug("Failed to extract EPUB author metadata: %s", exc)
 
@@ -545,9 +507,7 @@ class EpubExtractor:
             if date_items:
                 date_str = date_items[0][0]
                 year_match = re.search(r"\b(19|20)\d{2}\b", date_str)
-                metadata.publication_year = (
-                    year_match.group(0) if year_match else date_str
-                )
+                metadata.publication_year = year_match.group(0) if year_match else date_str
         except Exception as exc:
             logger.debug("Failed to extract EPUB publication year metadata: %s", exc)
 
@@ -567,8 +527,8 @@ class EpubExtractor:
             logger.debug("Failed to extract EPUB OPF meta tags: %s", exc)
             meta_items = []
 
-        series_name: Optional[str] = None
-        series_index: Optional[str] = None
+        series_name: str | None = None
+        series_index: str | None = None
         for value, attrs in meta_items or []:
             attrs_dict = attrs or {}
             name = str(attrs_dict.get("name") or "").strip().casefold()
@@ -604,7 +564,7 @@ class EpubExtractor:
 
         return metadata
 
-    def _extract_cover(self) -> Tuple[Optional[bytes], Optional[str]]:
+    def _extract_cover(self) -> tuple[bytes | None, str | None]:
         # 1. EPUB 2 OPF meta cover ID
         try:
             meta_items = self.book.get_metadata("OPF", "meta")
@@ -615,9 +575,7 @@ class EpubExtractor:
                     if cover_id:
                         for item in self.book.get_items():
                             item_id = str(getattr(item, "id", "") or "").strip()
-                            file_name = str(
-                                getattr(item, "file_name", "") or ""
-                            ).strip()
+                            file_name = str(getattr(item, "file_name", "") or "").strip()
                             if item_id == cover_id or file_name == cover_id:
                                 data = item.get_content()
                                 if _is_valid_image_bytes(data):
@@ -664,17 +622,11 @@ class EpubExtractor:
             for item in self.book.get_items_of_type(ebooklib.ITEM_IMAGE):
                 name = item.get_name().lower()
                 item_id = str(getattr(item, "id", "") or "").lower()
-                if (
-                    "cover" in name
-                    or "cover" in item_id
-                    or "front" in name
-                    or "front" in item_id
-                ):
+                if "cover" in name or "cover" in item_id or "front" in name or "front" in item_id:
                     data = item.get_content()
                     if _is_valid_image_bytes(data):
                         media_type = (
-                            getattr(item, "media_type", None)
-                            or mimetypes.guess_type(name)[0]
+                            getattr(item, "media_type", None) or mimetypes.guess_type(name)[0]
                         )
                         return data, media_type
         except Exception as exc:
@@ -682,7 +634,7 @@ class EpubExtractor:
 
         return None, None
 
-    def _process_nav(self) -> List[ExtractedChapter]:
+    def _process_nav(self) -> list[ExtractedChapter]:
         nav_item, nav_type = self._find_navigation_item()
         if not nav_item or not nav_type:
             raise ValueError("No navigation document found")
@@ -693,22 +645,18 @@ class EpubExtractor:
 
         self.spine_docs = self._build_spine_docs()
         doc_order = {href: index for index, href in enumerate(self.spine_docs)}
-        doc_order_decoded = {
-            urllib.parse.unquote(href): index for href, index in doc_order.items()
-        }
+        doc_order_decoded = {urllib.parse.unquote(href): index for href, index in doc_order.items()}
 
         nav_targets = self._collect_nav_targets(nav_soup, nav_type)
         self._cache_relevant_documents(doc_order, nav_targets)
 
-        ordered_entries: List[NavEntry] = []
+        ordered_entries: list[NavEntry] = []
         if nav_type == "ncx":
             nav_map = nav_soup.find("navMap")
             if not nav_map:
                 raise ValueError("NCX navigation missing <navMap>")
             for nav_point in nav_map.find_all("navPoint", recursive=False):
-                self._parse_ncx_navpoint(
-                    nav_point, ordered_entries, doc_order, doc_order_decoded
-                )
+                self._parse_ncx_navpoint(nav_point, ordered_entries, doc_order, doc_order_decoded)
         else:
             toc_nav = nav_soup.find("nav", attrs={"epub:type": "toc"})
             if toc_nav is None:
@@ -722,9 +670,7 @@ class EpubExtractor:
             if top_ol is None:
                 raise ValueError("TOC navigation missing <ol>")
             for li in top_ol.find_all("li", recursive=False):
-                self._parse_html_nav_li(
-                    li, ordered_entries, doc_order, doc_order_decoded
-                )
+                self._parse_html_nav_li(li, ordered_entries, doc_order, doc_order_decoded)
 
         if not ordered_entries:
             raise ValueError("No navigation entries found")
@@ -734,8 +680,8 @@ class EpubExtractor:
         self._append_prefix_content(ordered_entries, chapters)
         return chapters
 
-    def _process_spine_fallback(self) -> List[ExtractedChapter]:
-        chapters: List[ExtractedChapter] = []
+    def _process_spine_fallback(self) -> list[ExtractedChapter]:
+        chapters: list[ExtractedChapter] = []
         self.spine_docs = self._build_spine_docs()
         self.doc_content = {}
 
@@ -763,9 +709,9 @@ class EpubExtractor:
             chapters.append(ExtractedChapter(title=title, text=text))
         return chapters
 
-    def _find_navigation_item(self) -> Tuple[Optional[epub.EpubItem], Optional[str]]:
-        nav_item: Optional[epub.EpubItem] = None
-        nav_type: Optional[str] = None
+    def _find_navigation_item(self) -> tuple[epub.EpubItem | None, str | None]:
+        nav_item: epub.EpubItem | None = None
+        nav_type: str | None = None
 
         nav_items = list(self.book.get_items_of_type(ebooklib.ITEM_NAVIGATION))
         if nav_items:
@@ -796,11 +742,7 @@ class EpubExtractor:
 
         if not nav_item and nav_items:
             ncx_candidate = next(
-                (
-                    item
-                    for item in nav_items
-                    if item.get_name().lower().endswith(".ncx")
-                ),
+                (item for item in nav_items if item.get_name().lower().endswith(".ncx")),
                 None,
             )
             if ncx_candidate:
@@ -830,8 +772,8 @@ class EpubExtractor:
 
         return nav_item, nav_type
 
-    def _build_spine_docs(self) -> List[str]:
-        docs: List[str] = []
+    def _build_spine_docs(self) -> list[str]:
+        docs: list[str] = []
         for spine_entry in self.book.spine:
             item_id = spine_entry[0]
             item = self.book.get_item_with_id(item_id)
@@ -839,8 +781,8 @@ class EpubExtractor:
                 docs.append(item.get_name())
         return docs
 
-    def _collect_nav_targets(self, nav_soup: BeautifulSoup, nav_type: str) -> List[str]:
-        targets: List[str] = []
+    def _collect_nav_targets(self, nav_soup: BeautifulSoup, nav_type: str) -> list[str]:
+        targets: list[str] = []
         if nav_type == "ncx":
             for content_node in nav_soup.find_all("content"):
                 src = content_node.get("src")
@@ -855,9 +797,7 @@ class EpubExtractor:
                     targets.append(href_value.split("#", 1)[0])
         return targets
 
-    def _cache_relevant_documents(
-        self, doc_order: Dict[str, int], nav_targets: List[str]
-    ) -> None:
+    def _cache_relevant_documents(self, doc_order: dict[str, int], nav_targets: list[str]) -> None:
         needed: set[str] = set(doc_order.keys())
         for target in nav_targets:
             needed.add(target)
@@ -878,9 +818,9 @@ class EpubExtractor:
     def _parse_ncx_navpoint(
         self,
         nav_point,
-        ordered_entries: List[NavEntry],
-        doc_order: Dict[str, int],
-        doc_order_decoded: Dict[str, int],
+        ordered_entries: list[NavEntry],
+        doc_order: dict[str, int],
+        doc_order_decoded: dict[str, int],
     ) -> None:
         nav_label = nav_point.find("navLabel")
         content = nav_point.find("content")
@@ -893,9 +833,7 @@ class EpubExtractor:
 
         if src:
             base_href, fragment = src.split("#", 1) if "#" in src else (src, None)
-            doc_key, doc_idx = self._find_doc_key(
-                base_href, doc_order, doc_order_decoded
-            )
+            doc_key, doc_idx = self._find_doc_key(base_href, doc_order, doc_order_decoded)
             if doc_key is not None and doc_idx is not None:
                 position = self._find_position_robust(doc_key, fragment)
                 ordered_entries.append(
@@ -915,16 +853,14 @@ class EpubExtractor:
                 )
 
         for child_navpoint in nav_point.find_all("navPoint", recursive=False):
-            self._parse_ncx_navpoint(
-                child_navpoint, ordered_entries, doc_order, doc_order_decoded
-            )
+            self._parse_ncx_navpoint(child_navpoint, ordered_entries, doc_order, doc_order_decoded)
 
     def _parse_html_nav_li(
         self,
         li_element,
-        ordered_entries: List[NavEntry],
-        doc_order: Dict[str, int],
-        doc_order_decoded: Dict[str, int],
+        ordered_entries: list[NavEntry],
+        doc_order: dict[str, int],
+        doc_order_decoded: dict[str, int],
     ) -> None:
         link = li_element.find("a", recursive=False)
         span_text = li_element.find("span", recursive=False)
@@ -946,9 +882,7 @@ class EpubExtractor:
 
         if src:
             base_href, fragment = src.split("#", 1) if "#" in src else (src, None)
-            doc_key, doc_idx = self._find_doc_key(
-                base_href, doc_order, doc_order_decoded
-            )
+            doc_key, doc_idx = self._find_doc_key(base_href, doc_order, doc_order_decoded)
             if doc_key is not None and doc_idx is not None:
                 position = self._find_position_robust(doc_key, fragment)
                 ordered_entries.append(
@@ -969,16 +903,14 @@ class EpubExtractor:
 
         for child_ol in li_element.find_all("ol", recursive=False):
             for child_li in child_ol.find_all("li", recursive=False):
-                self._parse_html_nav_li(
-                    child_li, ordered_entries, doc_order, doc_order_decoded
-                )
+                self._parse_html_nav_li(child_li, ordered_entries, doc_order, doc_order_decoded)
 
     def _find_doc_key(
         self,
         base_href: str,
-        doc_order: Dict[str, int],
-        doc_order_decoded: Dict[str, int],
-    ) -> Tuple[Optional[str], Optional[int]]:
+        doc_order: dict[str, int],
+        doc_order_decoded: dict[str, int],
+    ) -> tuple[str | None, int | None]:
         candidates = {base_href, urllib.parse.unquote(base_href)}
         base_name = urllib.parse.unquote(base_href).split("/")[-1].lower()
         for key in list(doc_order.keys()) + list(doc_order_decoded.keys()):
@@ -991,7 +923,7 @@ class EpubExtractor:
                 return candidate, doc_order_decoded[candidate]
         return None, None
 
-    def _find_position_robust(self, doc_href: str, fragment_id: Optional[str]) -> int:
+    def _find_position_robust(self, doc_href: str, fragment_id: str | None) -> int:
         if doc_href not in self.doc_content:
             logger.warning("Document '%s' not found in cached EPUB content.", doc_href)
             return 0
@@ -1008,9 +940,7 @@ class EpubExtractor:
                 if pos != -1:
                     return pos
         except Exception:
-            logger.debug(
-                "BeautifulSoup failed to locate id '%s' in %s", fragment_id, doc_href
-            )
+            logger.debug("BeautifulSoup failed to locate id '%s' in %s", fragment_id, doc_href)
 
         safe_fragment_id = re.escape(fragment_id)
         id_name_pattern = re.compile(
@@ -1029,17 +959,13 @@ class EpubExtractor:
             tag_start = html_content.rfind("<", 0, pos)
             return tag_start if tag_start != -1 else pos
 
-        logger.warning(
-            "Anchor '%s' not found in %s. Defaulting to start.", fragment_id, doc_href
-        )
+        logger.warning("Anchor '%s' not found in %s. Defaulting to start.", fragment_id, doc_href)
         return 0
 
-    def _slice_entries(self, ordered_entries: List[NavEntry]) -> List[ExtractedChapter]:
-        chapters: List[ExtractedChapter] = []
+    def _slice_entries(self, ordered_entries: list[NavEntry]) -> list[ExtractedChapter]:
+        chapters: list[ExtractedChapter] = []
         for index, entry in enumerate(ordered_entries):
-            next_entry = (
-                ordered_entries[index + 1] if index + 1 < len(ordered_entries) else None
-            )
+            next_entry = ordered_entries[index + 1] if index + 1 < len(ordered_entries) else None
             slice_html = self._slice_entry(entry, next_entry)
             text = self._html_to_text(slice_html)
             if not text:
@@ -1051,7 +977,7 @@ class EpubExtractor:
     def _slice_entry(
         self,
         current_entry: NavEntry,
-        next_entry: Optional[NavEntry],
+        next_entry: NavEntry | None,
     ) -> str:
         current_doc = current_entry.doc_href
         current_pos = current_entry.position
@@ -1081,8 +1007,8 @@ class EpubExtractor:
             return current_html
         return slice_html
 
-    def _docs_between(self, current_doc: str, next_doc: Optional[str]) -> List[str]:
-        docs: List[str] = []
+    def _docs_between(self, current_doc: str, next_doc: str | None) -> list[str]:
+        docs: list[str] = []
         try:
             current_idx = self.spine_docs.index(current_doc)
         except ValueError:
@@ -1106,8 +1032,8 @@ class EpubExtractor:
 
     def _append_prefix_content(
         self,
-        ordered_entries: List[NavEntry],
-        chapters: List[ExtractedChapter],
+        ordered_entries: list[NavEntry],
+        chapters: list[ExtractedChapter],
     ) -> None:
         if not ordered_entries:
             return

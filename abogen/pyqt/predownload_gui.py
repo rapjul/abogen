@@ -8,7 +8,7 @@ and handles optional dependencies gracefully.
 
 import importlib
 import importlib.util
-from typing import Dict, List, Optional, Set, Tuple
+from typing import ClassVar
 
 from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QPalette
@@ -32,7 +32,7 @@ from abogen.spacy_utils import SPACY_MODELS
 
 
 # Helpers
-def _unique_sorted_models() -> List[str]:
+def _unique_sorted_models() -> list[str]:
     """Return a sorted list of unique spaCy model package names."""
     return sorted(set(SPACY_MODELS.values()))
 
@@ -58,17 +58,15 @@ def _voice_gender_code(voice_id: str) -> str:
 
 
 def _filter_voice_ids(
-    voices: List[str], selected_languages: Set[str], selected_genders: Set[str]
-) -> List[str]:
+    voices: list[str], selected_languages: set[str], selected_genders: set[str]
+) -> list[str]:
     """Filter voice ids by selected languages and genders.
 
     Empty language selection means all languages.
     Empty gender selection means both genders.
     """
     allowed_languages = (
-        set(selected_languages)
-        if selected_languages
-        else {_voice_language_code(v) for v in voices}
+        set(selected_languages) if selected_languages else {_voice_language_code(v) for v in voices}
     )
     allowed_genders = set(selected_genders) if selected_genders else {"f", "m"}
     return [
@@ -99,8 +97,8 @@ class PreDownloadWorker(QThread):
     def __init__(
         self,
         parent=None,
-        selected_languages: Optional[List[str]] = None,
-        selected_genders: Optional[List[str]] = None,
+        selected_languages: list[str] | None = None,
+        selected_genders: list[str] | None = None,
         voices_only: bool = False,
     ):
         super().__init__(parent)
@@ -114,10 +112,10 @@ class PreDownloadWorker(QThread):
         self._spacy_success = False
         # Suppress HF tracker warnings during downloads
         self._original_emitter = abogen.hf_tracker.show_warning_signal_emitter
-        self._selected_languages: Set[str] = {
+        self._selected_languages: set[str] = {
             str(code).strip().lower() for code in (selected_languages or []) if code
         }
-        self._selected_genders: Set[str] = {
+        self._selected_genders: set[str] = {
             str(code).strip().lower() for code in (selected_genders or []) if code
         }
         self._voices_only = voices_only
@@ -188,16 +186,12 @@ class PreDownloadWorker(QThread):
                     f"{idx}/{len(voice_list)}: {voice} already present",
                 )
                 continue
-            self.progress.emit(
-                "voice", "downloading", f"{idx}/{len(voice_list)}: {voice}..."
-            )
+            self.progress.emit("voice", "downloading", f"{idx}/{len(voice_list)}: {voice}...")
             try:
                 hf_hub_download(repo_id=self._repo_id, filename=filename)
                 self.progress.emit("voice", "downloaded", f"{voice} downloaded")
             except Exception as exc:
-                self.progress.emit(
-                    "voice", "warning", f"could not download {voice}: {exc}"
-                )
+                self.progress.emit("voice", "warning", f"could not download {voice}: {exc}")
                 self._voices_success = False
 
     # Kokoro model
@@ -217,18 +211,14 @@ class PreDownloadWorker(QThread):
                 return
             category = "config" if fname == "config.json" else "model"
             if try_to_load_from_cache(repo_id=self._repo_id, filename=fname):
-                self.progress.emit(
-                    category, "installed", f"file {fname} already present"
-                )
+                self.progress.emit(category, "installed", f"file {fname} already present")
                 continue
             self.progress.emit(category, "downloading", f"file {fname}...")
             try:
                 hf_hub_download(repo_id=self._repo_id, filename=fname)
                 self.progress.emit(category, "downloaded", f"file {fname} downloaded")
             except Exception as exc:
-                self.progress.emit(
-                    category, "warning", f"could not download file {fname}: {exc}"
-                )
+                self.progress.emit(category, "warning", f"could not download file {fname}: {exc}")
                 self._model_success = False
 
     # spaCy models
@@ -242,16 +232,14 @@ class PreDownloadWorker(QThread):
         # re-checking everything; otherwise use the full unique list.
         parent = self.parent()
         parent_any = parent if isinstance(parent, PreDownloadDialog) else None
-        models_to_process: List[str] = _unique_sorted_models()
+        models_to_process: list[str] = _unique_sorted_models()
         try:
             if (
                 parent_any is not None
                 and hasattr(parent_any, "_spacy_models_missing")
                 and parent_any._spacy_models_missing
             ):
-                models_to_process = list(
-                    dict.fromkeys(parent_any._spacy_models_missing)
-                )
+                models_to_process = list(dict.fromkeys(parent_any._spacy_models_missing))
         except Exception:
             pass
 
@@ -259,9 +247,7 @@ class PreDownloadWorker(QThread):
         try:
             import spacy.cli as _spacy_cli
         except Exception:
-            self.progress.emit(
-                "spacy", "warning", "spaCy not available, skipping spaCy models..."
-            )
+            self.progress.emit("spacy", "warning", "spaCy not available, skipping spaCy models...")
             self._spacy_success = False
             return
 
@@ -285,9 +271,7 @@ class PreDownloadWorker(QThread):
                 _spacy_cli.download(model_name)  # pyright: ignore[reportPrivateImportUsage]
                 self.progress.emit("spacy", "downloaded", f"{model_name} downloaded")
             except Exception as exc:
-                self.progress.emit(
-                    "spacy", "warning", f"could not download {model_name}: {exc}"
-                )
+                self.progress.emit("spacy", "warning", f"could not download {model_name}: {exc}")
                 self._spacy_success = False
 
 
@@ -299,8 +283,8 @@ class PreDownloadDialog(QDialog):
     CONFIG_PREFIX = "Kokoro config: "
     SPACY_PREFIX = "spaCy models: "
     VOICE_FILTER_PREFIX = "Voice filter: "
-    GENDER_LABELS = {"f": "Female", "m": "Male"}
-    LANGUAGE_UI = {
+    GENDER_LABELS: ClassVar[dict[str, str]] = {"f": "Female", "m": "Male"}
+    LANGUAGE_UI: ClassVar[dict[str, tuple[str, str, str]]] = {
         "a": ("🇺🇸", "American English", "English (US)"),
         "b": ("🇬🇧", "British English", "English (UK)"),
         "e": ("🇪🇸", "Spanish", "Español"),
@@ -316,25 +300,25 @@ class PreDownloadDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Pre-download Models and Voices")
         self.setMinimumWidth(500)
-        self.worker: Optional[PreDownloadWorker] = None
+        self.worker: PreDownloadWorker | None = None
         self.has_missing = False
-        self._spacy_models_checked: List[tuple] = []
-        self._spacy_models_missing: List[str] = []
-        self._voices_missing_all: List[str] = []
+        self._spacy_models_checked: list[tuple] = []
+        self._spacy_models_missing: list[str] = []
+        self._voices_missing_all: list[str] = []
         self._voices_missing_selected = False
         self._model_missing = False
         self._config_missing = False
         self._spacy_missing = False
         self._status_worker = None
-        self._language_checkboxes: Dict[str, QCheckBox] = {}
-        self._gender_checkboxes: Dict[str, QCheckBox] = {}
+        self._language_checkboxes: dict[str, QCheckBox] = {}
+        self._gender_checkboxes: dict[str, QCheckBox] = {}
         self._downloading_voices_only = False
         self._active_voice_target_count = 0
-        self._progress_counts: Dict[str, Dict[str, int]] = {}
+        self._progress_counts: dict[str, dict[str, int]] = {}
         self._voice_no_match = False
 
         # Map keywords to (label, prefix) - labels filled after UI creation
-        self.status_map: Dict[str, Tuple[Optional[QLabel], str]] = {
+        self.status_map: dict[str, tuple[QLabel | None, str]] = {
             "voice": (None, self.VOICE_PREFIX),
             "spacy": (None, self.SPACY_PREFIX),
             "model": (None, self.MODEL_PREFIX),
@@ -468,9 +452,7 @@ class PreDownloadDialog(QDialog):
 
         # Voice filter summary
         self.voice_filter_summary = QLabel(self.VOICE_FILTER_PREFIX)
-        self.voice_filter_summary.setStyleSheet(
-            f"color: {COLORS['BLUE']}; margin-left: 22px;"
-        )
+        self.voice_filter_summary.setStyleSheet(f"color: {COLORS['BLUE']}; margin-left: 22px;")
         filter_layout.addWidget(self.voice_filter_summary)
         layout.addWidget(filter_frame)
         self._update_voice_filter_summary()
@@ -481,9 +463,7 @@ class PreDownloadDialog(QDialog):
         self.status_map["config"] = (self.config_status, self.CONFIG_PREFIX)
         self.status_map["spacy"] = (self.spacy_status, self.SPACY_PREFIX)
 
-        layout.addItem(
-            QSpacerItem(0, 20, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
-        )
+        layout.addItem(QSpacerItem(0, 20, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed))
 
         # Buttons
         button_row = QHBoxLayout()
@@ -539,7 +519,7 @@ class PreDownloadDialog(QDialog):
 
             # Check spaCy models by package name to detect site-package installs
             unique = _unique_sorted_models()
-            missing: List[str] = []
+            missing: list[str] = []
             for name in unique:
                 self.spacy_model_checking.emit(name)
                 ok = _is_package_installed(name)
@@ -598,18 +578,14 @@ class PreDownloadDialog(QDialog):
         else:
             self.spacy_status.setText(f"{self.SPACY_PREFIX}{checked} checked...")
 
-    def _update_voices_status(self, ok: bool, missing: List[str]) -> None:
+    def _update_voices_status(self, ok: bool, missing: list[str]) -> None:
         self._voices_missing_all = list(missing)
-        selected_missing = [
-            voice for voice in missing if voice in set(self._selected_voice_ids())
-        ]
+        selected_missing = [voice for voice in missing if voice in set(self._selected_voice_ids())]
         self._voices_missing_selected = len(selected_missing) > 0
         if not selected_missing:
             self._set_status("voice", "✓ Downloaded", COLORS["GREEN"])
         else:
-            self._set_status(
-                "voice", f"✗ Missing {len(selected_missing)} voices", COLORS["RED"]
-            )
+            self._set_status("voice", f"✗ Missing {len(selected_missing)} voices", COLORS["RED"])
         self._refresh_download_button_state()
 
     def _update_model_status(self, ok: bool) -> None:
@@ -628,16 +604,14 @@ class PreDownloadDialog(QDialog):
             self._set_status("config", "✗ Not downloaded", COLORS["RED"])
         self._refresh_download_button_state()
 
-    def _update_spacy_status(self, ok: bool, missing: List[str]) -> None:
+    def _update_spacy_status(self, ok: bool, missing: list[str]) -> None:
         self._spacy_missing = not ok
         warn_color = self._spacy_warning_color()
         if ok:
             self._set_status("spacy", "✓ Downloaded", COLORS["GREEN"])
         else:
             if missing:
-                self._set_status(
-                    "spacy", f"✗ Missing {len(missing)} model(s)", warn_color
-                )
+                self._set_status("spacy", f"✗ Missing {len(missing)} model(s)", warn_color)
             else:
                 self._set_status("spacy", "✗ Not downloaded", warn_color)
         self._refresh_download_button_state()
@@ -664,21 +638,15 @@ class PreDownloadDialog(QDialog):
         self.download_btn.setEnabled(self.has_missing)
         self.download_voice_btn.setEnabled(selected_voice_count > 0)
 
-    def _selected_language_codes(self) -> Set[str]:
+    def _selected_language_codes(self) -> set[str]:
         return {
-            code
-            for code, checkbox in self._language_checkboxes.items()
-            if checkbox.isChecked()
+            code for code, checkbox in self._language_checkboxes.items() if checkbox.isChecked()
         }
 
-    def _selected_gender_codes(self) -> Set[str]:
-        return {
-            code
-            for code, checkbox in self._gender_checkboxes.items()
-            if checkbox.isChecked()
-        }
+    def _selected_gender_codes(self) -> set[str]:
+        return {code for code, checkbox in self._gender_checkboxes.items() if checkbox.isChecked()}
 
-    def _selected_voice_ids(self) -> List[str]:
+    def _selected_voice_ids(self) -> list[str]:
         selected_languages = self._selected_language_codes()
         if not selected_languages:
             return []
@@ -690,9 +658,7 @@ class PreDownloadDialog(QDialog):
 
     def _update_voice_filter_summary(self) -> None:
         selected = self._selected_voice_ids()
-        self.voice_filter_summary.setText(
-            f"{self.VOICE_FILTER_PREFIX}{len(selected)} selected"
-        )
+        self.voice_filter_summary.setText(f"{self.VOICE_FILTER_PREFIX}{len(selected)} selected")
 
     def _on_filter_changed(self) -> None:
         self._update_voice_filter_summary()
@@ -702,9 +668,7 @@ class PreDownloadDialog(QDialog):
         )
         self._voices_missing_selected = selected_missing_count > 0
         if selected_missing_count:
-            self._set_status(
-                "voice", f"✗ Missing {selected_missing_count} voices", COLORS["RED"]
-            )
+            self._set_status("voice", f"✗ Missing {selected_missing_count} voices", COLORS["RED"])
         elif self._voices_missing_all:
             self._set_status("voice", "✓ Downloaded", COLORS["GREEN"])
         self._refresh_download_button_state()
@@ -723,7 +687,7 @@ class PreDownloadDialog(QDialog):
         lbl.setStyleSheet(f"color: {color};")
 
     # Helper checks
-    def _check_kokoro_voices(self) -> Tuple[bool, List[str]]:
+    def _check_kokoro_voices(self) -> tuple[bool, list[str]]:
         """Return (ok, missing_list) for Kokoro voices check."""
         missing = []
         try:
@@ -744,9 +708,7 @@ class PreDownloadDialog(QDialog):
             from huggingface_hub import try_to_load_from_cache
 
             return (
-                try_to_load_from_cache(
-                    repo_id="hexgrad/Kokoro-82M", filename="kokoro-v1_0.pth"
-                )
+                try_to_load_from_cache(repo_id="hexgrad/Kokoro-82M", filename="kokoro-v1_0.pth")
                 is not None
             )
         except Exception:
@@ -757,9 +719,7 @@ class PreDownloadDialog(QDialog):
             from huggingface_hub import try_to_load_from_cache
 
             return (
-                try_to_load_from_cache(
-                    repo_id="hexgrad/Kokoro-82M", filename="config.json"
-                )
+                try_to_load_from_cache(repo_id="hexgrad/Kokoro-82M", filename="config.json")
                 is not None
             )
         except Exception:
@@ -840,19 +800,8 @@ class PreDownloadDialog(QDialog):
                     lbl.setStyleSheet(f"color: {COLORS['ORANGE']};")
                 elif status in ("installed", "downloaded"):
                     lbl.setStyleSheet(f"color: {COLORS['GREEN']};")
-                elif status == "warning":
-                    color = (
-                        self._spacy_warning_color()
-                        if category == "spacy"
-                        else COLORS["RED"]
-                    )
-                    lbl.setStyleSheet(f"color: {color};")
-                elif status == "error":
-                    color = (
-                        self._spacy_warning_color()
-                        if category == "spacy"
-                        else COLORS["RED"]
-                    )
+                elif status == "warning" or status == "error":
+                    color = self._spacy_warning_color() if category == "spacy" else COLORS["RED"]
                     lbl.setStyleSheet(f"color: {color};")
                 return
 
@@ -905,11 +854,7 @@ class PreDownloadDialog(QDialog):
             if voice_warning:
                 lines.append(f"Warnings: {voice_warning}")
 
-            if (
-                self._active_voice_target_count > 0
-                and voice_downloaded == 0
-                and voice_warning == 0
-            ):
+            if self._active_voice_target_count > 0 and voice_downloaded == 0 and voice_warning == 0:
                 lines.append("\nAll selected voices were already downloaded.")
 
             self._show_centered_info_popup("Selected Voices", "\n".join(lines))

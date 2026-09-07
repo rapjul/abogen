@@ -1,6 +1,7 @@
 import json
 import os
-from typing import Any, Dict, Iterable, List, Tuple
+from collections.abc import Iterable
+from typing import Any
 
 from abogen.constants import VOICES_INTERNAL
 from abogen.tts_supertonic import DEFAULT_SUPERTONIC_VOICES
@@ -26,7 +27,7 @@ def load_profiles():
                 # fallback: treat as profiles dict
                 if isinstance(data, dict):
                     return data
-        except Exception:
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
             return {}
     return {}
 
@@ -63,7 +64,7 @@ def export_profiles(export_path):
         json.dump({"abogen_voice_profiles": profiles}, f, indent=2)
 
 
-def serialize_profiles() -> Dict[str, Dict[str, Iterable[Tuple[str, float]]]]:
+def serialize_profiles() -> dict[str, dict[str, Iterable[tuple[str, float]]]]:
     """Return profiles in canonical dictionary form."""
     return load_profiles()
 
@@ -89,7 +90,7 @@ def _coerce_supertonic_speed(value: Any) -> float:
     return max(0.7, min(2.0, speed))
 
 
-def normalize_profile_entry(entry: Any) -> Dict[str, Any]:
+def normalize_profile_entry(entry: Any) -> dict[str, Any]:
     """Normalize a stored profile entry.
 
     Backwards compatible:
@@ -118,9 +119,7 @@ def normalize_profile_entry(entry: Any) -> Dict[str, Any]:
                 or entry.get("supertonic_total_steps")
                 or entry.get("quality")
             ),
-            "speed": _coerce_supertonic_speed(
-                entry.get("speed") or entry.get("supertonic_speed")
-            ),
+            "speed": _coerce_supertonic_speed(entry.get("speed") or entry.get("supertonic_speed")),
         }
 
     voices = _normalize_voice_entries(entry.get("voices", []))
@@ -133,8 +132,8 @@ def normalize_profile_entry(entry: Any) -> Dict[str, Any]:
     }
 
 
-def _normalize_voice_entries(entries: Iterable) -> List[Tuple[str, float]]:
-    normalized: List[Tuple[str, float]] = []
+def _normalize_voice_entries(entries: Iterable) -> list[tuple[str, float]]:
+    normalized: list[tuple[str, float]] = []
     for item in entries or []:
         if isinstance(item, dict):
             voice = item.get("id") or item.get("voice")
@@ -157,7 +156,7 @@ def _normalize_voice_entries(entries: Iterable) -> List[Tuple[str, float]]:
     return normalized
 
 
-def normalize_voice_entries(entries: Iterable) -> List[Tuple[str, float]]:
+def normalize_voice_entries(entries: Iterable) -> list[tuple[str, float]]:
     """Public helper to normalize voice-weight pairs from arbitrary payloads."""
 
     return _normalize_voice_entries(entries)
@@ -186,23 +185,23 @@ def remove_profile(name: str) -> None:
     delete_profile(name)
 
 
-def import_profiles_data(data: Dict, *, replace_existing: bool = False) -> List[str]:
+def import_profiles_data(data: dict, *, replace_existing: bool = False) -> list[str]:
     """Merge profiles from a dictionary structure and persist them.
 
     Returns the list of profile names that were added or updated.
     """
 
     if not isinstance(data, dict):
-        raise ValueError("Invalid profile payload")
+        raise TypeError("Invalid profile payload")
 
     if "abogen_voice_profiles" in data:
         data = data["abogen_voice_profiles"]
 
     if not isinstance(data, dict):
-        raise ValueError("Invalid profile payload")
+        raise TypeError("Invalid profile payload")
 
     current = load_profiles()
-    updated: List[str] = []
+    updated: list[str] = []
     for name, entry in data.items():
         normalized = normalize_profile_entry(entry)
         if not normalized:
@@ -218,7 +217,7 @@ def import_profiles_data(data: Dict, *, replace_existing: bool = False) -> List[
     return updated
 
 
-def export_profiles_payload(names: Iterable[str] | None = None) -> Dict[str, Dict]:
+def export_profiles_payload(names: Iterable[str] | None = None) -> dict[str, dict]:
     """Return profiles limited to the provided names for download/export."""
 
     profiles = load_profiles()

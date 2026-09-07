@@ -1,28 +1,39 @@
 import time
 import uuid
-from typing import Any, Dict, Iterable, List, Mapping, Optional
+from collections.abc import Iterable, Mapping
+from typing import Any
 
-from abogen.webui.service import PendingJob
 from abogen.entity_analysis import (
     extract_entities,
     merge_override,
-    normalize_token as normalize_entity_token,
     normalize_manual_override_token,
+)
+from abogen.entity_analysis import (
+    normalize_token as normalize_entity_token,
+)
+from abogen.entity_analysis import (
     search_tokens as search_entity_tokens,
 )
+from abogen.heteronym_overrides import extract_heteronym_overrides
 from abogen.pronunciation_store import (
     delete_override as delete_pronunciation_override,
+)
+from abogen.pronunciation_store import (
     load_overrides as load_pronunciation_overrides,
+)
+from abogen.pronunciation_store import (
     save_override as save_pronunciation_override,
+)
+from abogen.pronunciation_store import (
     search_overrides as search_pronunciation_overrides,
 )
 from abogen.webui.routes.utils.settings import load_settings
-from abogen.heteronym_overrides import extract_heteronym_overrides
+from abogen.webui.service import PendingJob
 
 
-def collect_pronunciation_overrides(pending: PendingJob) -> List[Dict[str, Any]]:
+def collect_pronunciation_overrides(pending: PendingJob) -> list[dict[str, Any]]:
     language = pending.language or "en"
-    collected: Dict[str, Dict[str, Any]] = {}
+    collected: dict[str, dict[str, Any]] = {}
 
     summary = pending.entity_summary or {}
     for group in ("people", "entities"):
@@ -35,12 +46,8 @@ def collect_pronunciation_overrides(pending: PendingJob) -> List[Dict[str, Any]]
             override_payload = entry.get("override")
             if not isinstance(override_payload, Mapping):
                 continue
-            token_value = str(
-                entry.get("label") or override_payload.get("token") or ""
-            ).strip()
-            pronunciation_value = str(
-                override_payload.get("pronunciation") or ""
-            ).strip()
+            token_value = str(entry.get("label") or override_payload.get("token") or "").strip()
+            pronunciation_value = str(override_payload.get("pronunciation") or "").strip()
             if not token_value or not pronunciation_value:
                 continue
             normalized = normalize_entity_token(entry.get("normalized") or token_value)
@@ -62,9 +69,7 @@ def collect_pronunciation_overrides(pending: PendingJob) -> List[Dict[str, Any]]
             if not isinstance(speaker_payload, Mapping):
                 continue
             token_value = str(speaker_payload.get("label") or "").strip()
-            pronunciation_value = str(
-                speaker_payload.get("pronunciation") or ""
-            ).strip()
+            pronunciation_value = str(speaker_payload.get("pronunciation") or "").strip()
             if not token_value or not pronunciation_value:
                 continue
             normalized = normalize_entity_token(token_value)
@@ -93,9 +98,7 @@ def collect_pronunciation_overrides(pending: PendingJob) -> List[Dict[str, Any]]
         pronunciation_value = str(manual_entry.get("pronunciation") or "").strip()
         if not token_value or not pronunciation_value:
             continue
-        normalized = manual_entry.get("normalized") or normalize_manual_override_token(
-            token_value
-        )
+        normalized = manual_entry.get("normalized") or normalize_manual_override_token(token_value)
         if not normalized:
             continue
         collected[normalized] = {
@@ -119,7 +122,7 @@ def sync_pronunciation_overrides(pending: PendingJob) -> None:
         return
 
     summary = pending.entity_summary or {}
-    manual_map: Dict[str, Mapping[str, Any]] = {}
+    manual_map: dict[str, Mapping[str, Any]] = {}
     for override in pending.manual_overrides or []:
         if not isinstance(override, Mapping):
             continue
@@ -137,9 +140,7 @@ def sync_pronunciation_overrides(pending: PendingJob) -> None:
         for entry in entries:
             if not isinstance(entry, dict):
                 continue
-            normalized = normalize_entity_token(
-                entry.get("normalized") or entry.get("label") or ""
-            )
+            normalized = normalize_entity_token(entry.get("normalized") or entry.get("label") or "")
             manual_override = manual_map.get(normalized)
             if manual_override:
                 entry["override"] = {
@@ -152,12 +153,10 @@ def sync_pronunciation_overrides(pending: PendingJob) -> None:
                 }
 
 
-def refresh_entity_summary(
-    pending: PendingJob, chapters: Iterable[Mapping[str, Any]]
-) -> None:
+def refresh_entity_summary(pending: PendingJob, chapters: Iterable[Mapping[str, Any]]) -> None:
     settings = load_settings()
     language = pending.language or "en"
-    chapter_list: List[Mapping[str, Any]] = [
+    chapter_list: list[Mapping[str, Any]] = [
         chapter for chapter in chapters if isinstance(chapter, Mapping)
     ]
     if not chapter_list:
@@ -188,7 +187,7 @@ def refresh_entity_summary(
 
     result = extract_entities(target_chapters, language=language)
     summary = dict(result.summary)
-    tokens: List[str] = []
+    tokens: list[str] = []
     for group in ("people", "entities"):
         entries = summary.get(group)
         if not isinstance(entries, list):
@@ -196,15 +195,11 @@ def refresh_entity_summary(
         for entry in entries:
             if not isinstance(entry, Mapping):
                 continue
-            token_value = str(
-                entry.get("normalized") or entry.get("label") or ""
-            ).strip()
+            token_value = str(entry.get("normalized") or entry.get("label") or "").strip()
             if token_value:
                 tokens.append(token_value)
 
-    overrides_from_store = load_pronunciation_overrides(
-        language=language, tokens=tokens
-    )
+    overrides_from_store = load_pronunciation_overrides(language=language, tokens=tokens)
     merged_summary = merge_override(summary, overrides_from_store)
     if result.errors:
         merged_summary["errors"] = list(result.errors)
@@ -214,9 +209,7 @@ def refresh_entity_summary(
     sync_pronunciation_overrides(pending)
 
 
-def find_manual_override(
-    pending: PendingJob, identifier: str
-) -> Optional[Dict[str, Any]]:
+def find_manual_override(pending: PendingJob, identifier: str) -> dict[str, Any] | None:
     for entry in pending.manual_overrides or []:
         if not isinstance(entry, dict):
             continue
@@ -225,9 +218,7 @@ def find_manual_override(
     return None
 
 
-def upsert_manual_override(
-    pending: PendingJob, payload: Mapping[str, Any]
-) -> Dict[str, Any]:
+def upsert_manual_override(pending: PendingJob, payload: Mapping[str, Any]) -> dict[str, Any]:
     token_value = str(payload.get("token") or "").strip()
     if not token_value:
         raise ValueError("Token is required")
@@ -235,15 +226,13 @@ def upsert_manual_override(
     voice_value = str(payload.get("voice") or "").strip()
     notes_value = str(payload.get("notes") or "").strip()
     context_value = str(payload.get("context") or "").strip()
-    normalized = payload.get("normalized") or normalize_manual_override_token(
-        token_value
-    )
+    normalized = payload.get("normalized") or normalize_manual_override_token(token_value)
     if not normalized:
         raise ValueError("Token is required")
 
-    existing = find_manual_override(
-        pending, payload.get("id", "")
-    ) or find_manual_override(pending, normalized)
+    existing = find_manual_override(pending, payload.get("id", "")) or find_manual_override(
+        pending, normalized
+    )
     timestamp = time.time()
     language = pending.language or "en"
 
@@ -312,16 +301,14 @@ def delete_manual_override(pending: PendingJob, override_id: str) -> bool:
 
 def search_manual_override_candidates(
     pending: PendingJob, query: str, *, limit: int = 15
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     normalized_query = (query or "").strip()
     summary_index = (pending.entity_summary or {}).get("index", {})
     matches = search_entity_tokens(summary_index, normalized_query, limit=limit)
-    registry: Dict[str, Dict[str, Any]] = {}
+    registry: dict[str, dict[str, Any]] = {}
 
     for entry in matches:
-        normalized = normalize_entity_token(
-            entry.get("normalized") or entry.get("token") or ""
-        )
+        normalized = normalize_entity_token(entry.get("normalized") or entry.get("token") or "")
         if not normalized:
             continue
         registry.setdefault(
@@ -387,7 +374,7 @@ def search_manual_override_candidates(
     return ordered
 
 
-def pending_entities_payload(pending: PendingJob) -> Dict[str, Any]:
+def pending_entities_payload(pending: PendingJob) -> dict[str, Any]:
     settings = load_settings()
     recognition_enabled = bool(settings.get("enable_entity_recognition", True))
     return {

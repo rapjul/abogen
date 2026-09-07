@@ -1,23 +1,28 @@
-from typing import Mapping
-from flask import Blueprint, request, jsonify, abort, render_template, redirect, url_for
+from collections.abc import Mapping
+
+from flask import Blueprint, abort, jsonify, redirect, render_template, request, url_for
 from flask.typing import ResponseReturnValue
 
-from abogen.webui.routes.utils.service import require_pending_job, get_service
-from abogen.webui.routes.utils.entity import (
-    refresh_entity_summary,
-    pending_entities_payload,
-    upsert_manual_override,
-    delete_manual_override,
-    search_manual_override_candidates,
+from abogen.pronunciation_store import (
+    all_overrides,
+    get_override_stats,
 )
-from abogen.webui.routes.utils.settings import coerce_int, load_settings
-from abogen.webui.routes.utils.voice import template_options
 from abogen.pronunciation_store import (
     delete_override as delete_pronunciation_override,
-    save_override as save_pronunciation_override,
-    get_override_stats,
-    all_overrides,
 )
+from abogen.pronunciation_store import (
+    save_override as save_pronunciation_override,
+)
+from abogen.webui.routes.utils.entity import (
+    delete_manual_override,
+    pending_entities_payload,
+    refresh_entity_summary,
+    search_manual_override_candidates,
+    upsert_manual_override,
+)
+from abogen.webui.routes.utils.service import get_service, require_pending_job
+from abogen.webui.routes.utils.settings import coerce_int, load_settings
+from abogen.webui.routes.utils.voice import template_options
 
 entities_bp = Blueprint("entities", __name__)
 
@@ -108,9 +113,7 @@ def search_candidates(pending_id: str) -> ResponseReturnValue:
     query = (request.args.get("q") or request.args.get("query") or "").strip()
     limit_param = request.args.get("limit")
     limit_value = (
-        coerce_int(limit_param, 15, minimum=1, maximum=50)
-        if limit_param is not None
-        else 15
+        coerce_int(limit_param, 15, minimum=1, maximum=50) if limit_param is not None else 15
     )
 
     results = search_manual_override_candidates(pending, query, limit=limit_value)

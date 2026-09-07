@@ -7,7 +7,7 @@ import re
 import textwrap
 import urllib.parse
 from abc import ABC, abstractmethod
-from typing import Any, Optional
+from typing import Any
 
 import ebooklib
 import fitz  # PyMuPDF
@@ -27,12 +27,10 @@ from abogen.utils import detect_encoding
 _BRACKETED_NUMBERS_PATTERN = re.compile(r"\[\s*\d+\s*\]")
 _STANDALONE_PAGE_NUMBERS_PATTERN = re.compile(r"^\s*\d+\s*$", re.MULTILINE)
 _PAGE_NUMBERS_AT_END_PATTERN = re.compile(r"\s+\d+\s*$", re.MULTILINE)
-_PAGE_NUMBERS_WITH_DASH_PATTERN = re.compile(
-    r"\s+[-–—]\s*\d+\s*[-–—]?\s*$", re.MULTILINE
-)
+_PAGE_NUMBERS_WITH_DASH_PATTERN = re.compile(r"\s+[-–—]\s*\d+\s*[-–—]?\s*$", re.MULTILINE)
 
 
-def _is_valid_image_bytes(data: Optional[bytes]) -> bool:
+def _is_valid_image_bytes(data: bytes | None) -> bool:
     """Check whether binary data represents valid image data and not markup.
 
     Args:
@@ -44,19 +42,10 @@ def _is_valid_image_bytes(data: Optional[bytes]) -> bool:
     if not data or len(data) < 8:
         return False
     head = bytes(data[:64]).strip().lower()
-    if (
-        head.startswith(b"<?xml")
-        or head.startswith(b"<html")
-        or head.startswith(b"<!doctype")
-        or head.startswith(b"<svg")
-        or head.startswith(b"{\\")
-        or head.startswith(b"/*")
-    ):
-        return False
-    return True
+    return not (head.startswith((b"<?xml", b"<html", b"<!doctype", b"<svg", b"{\\", b"/*")))
 
 
-def _guess_image_extension(image_bytes: Optional[bytes]) -> str:
+def _guess_image_extension(image_bytes: bytes | None) -> str:
     """Guess the image file extension from image binary header bytes.
 
     Args:
@@ -70,7 +59,7 @@ def _guess_image_extension(image_bytes: Optional[bytes]) -> str:
         return ".png"
     if head.startswith(b"\xff\xd8\xff"):
         return ".jpg"
-    if head.startswith(b"GIF87a") or head.startswith(b"GIF89a"):
+    if head.startswith((b"GIF87a", b"GIF89a")):
         return ".gif"
     if head.startswith(b"RIFF") and b"WEBP" in head:
         return ".webp"
@@ -97,11 +86,9 @@ class BaseBookParser(ABC):
     @abstractmethod
     def load(self):
         """Load the book file."""
-        pass
 
     def close(self):
         """Close any open file handles."""
-        pass
 
     def __enter__(self):
         # Already loaded in __init__, or lazily.
@@ -114,13 +101,11 @@ class BaseBookParser(ABC):
     @abstractmethod
     def process_content(self, replace_single_newlines=True):
         """Process the book content to extract text and structure."""
-        pass
 
     @property
     @abstractmethod
     def file_type(self):
         """Return the type of the file (pdf, epub, markdown)."""
-        pass
 
     def get_chapters(self):
         """Return a list of chapter IDs and Names."""
@@ -137,7 +122,7 @@ class BaseBookParser(ABC):
             flatten_nav(self.processed_nav_structure)
         else:
             # Fallback for simple content without nav structure
-            for ch_id, content in self.content_texts.items():
+            for ch_id in self.content_texts:
                 # This could be improved, but serves as a generic fallback
                 chapters.append((ch_id, ch_id))
         return chapters
@@ -227,9 +212,7 @@ class PdfParser(BaseBookParser):
             # Add all pages as children
             for page_num in range(len(pdf_doc)):
                 page_id = f"page_{page_num + 1}"
-                title = self._get_page_title(
-                    page_num, self.content_texts.get(page_id, "")
-                )
+                title = self._get_page_title(page_num, self.content_texts.get(page_id, ""))
                 pages_node["children"].append(
                     {
                         "title": title,
@@ -372,9 +355,7 @@ class MarkdownParser(BaseBookParser):
             node = {
                 "title": html.unescape(token["name"]),
                 "src": token["id"],
-                "children": self._convert_markdown_toc_to_nav(
-                    token.get("children", [])
-                ),
+                "children": self._convert_markdown_toc_to_nav(token.get("children", [])),
                 "has_content": True,
             }
             nav_nodes.append(node)
@@ -429,9 +410,7 @@ class MarkdownParser(BaseBookParser):
             content_start = header_pos["start"]
 
             content_end = (
-                header_positions[i + 1]["start"]
-                if i + 1 < len(header_positions)
-                else len(html)
+                header_positions[i + 1]["start"] if i + 1 < len(header_positions) else len(html)
             )
             section_html = html[content_start:content_end]
             section_soup = BeautifulSoup(section_html, "html.parser")
@@ -441,9 +420,7 @@ class MarkdownParser(BaseBookParser):
                 header_tag.decompose()
 
             section_text = clean_text(section_soup.get_text()).strip()
-            section_text = deduplicate_chapter_title(
-                section_text, header_name, force_remove=True
-            )
+            section_text = deduplicate_chapter_title(section_text, header_name, force_remove=True)
             chapter_id = header_id
             if section_text:
                 full_content = f"{header_name}\n\n{section_text}"
@@ -486,9 +463,7 @@ class EpubParser(BaseBookParser):
                 try:
                     return orig_read_file(self, name)
                 except KeyError:
-                    logging.warning(
-                        f"Missing file in EPUB: {name}. Returning empty bytes."
-                    )
+                    logging.warning(f"Missing file in EPUB: {name}. Returning empty bytes.")
                     return b""
 
             reader_class.read_file = safe_read_file
@@ -547,9 +522,7 @@ class EpubParser(BaseBookParser):
             author_items = self.book.get_metadata("DC", "creator")
             if author_items:
                 metadata["authors"] = [
-                    author[0]
-                    for author in author_items
-                    if len(author) > 0 and author[0]
+                    author[0] for author in author_items if len(author) > 0 and author[0]
                 ]
                 if metadata["authors"]:
                     metadata["author"] = metadata["authors"][0]
@@ -707,7 +680,7 @@ class EpubParser(BaseBookParser):
         metadata["cover_image"] = cover_bytes
         return metadata
 
-    def _extract_cover_bytes_from_zip(self, epub_path: str) -> Optional[bytes]:
+    def _extract_cover_bytes_from_zip(self, epub_path: str) -> bytes | None:
         """Extract cover image bytes directly from the EPUB zip container.
 
         Args:
@@ -748,15 +721,9 @@ class EpubParser(BaseBookParser):
                         elif tag == "item":
                             item_id = (elem.attrib.get("id") or "").strip()
                             href = (elem.attrib.get("href") or "").strip()
-                            media_type = (
-                                (elem.attrib.get("media-type") or "").strip().lower()
-                            )
-                            properties = (
-                                (elem.attrib.get("properties") or "").strip().lower()
-                            )
-                            manifest_entries.append(
-                                (item_id, href, media_type, properties)
-                            )
+                            media_type = (elem.attrib.get("media-type") or "").strip().lower()
+                            properties = (elem.attrib.get("properties") or "").strip().lower()
+                            manifest_entries.append((item_id, href, media_type, properties))
                             if not href:
                                 continue
 
@@ -779,15 +746,11 @@ class EpubParser(BaseBookParser):
                                 target_href = href
                                 break
 
-                    selected_href = (
-                        target_href or fallback_cover_href or first_image_href
-                    )
+                    selected_href = target_href or fallback_cover_href or first_image_href
                     if not selected_href:
                         continue
 
-                    full_path = posixpath.normpath(
-                        posixpath.join(opf_dir, selected_href)
-                    )
+                    full_path = posixpath.normpath(posixpath.join(opf_dir, selected_href))
                     if full_path in names:
                         data = zf.read(full_path)
                         if _is_valid_image_bytes(data):
@@ -890,9 +853,7 @@ class EpubParser(BaseBookParser):
 
         if src:
             base_href, fragment = src.split("#", 1) if "#" in src else (src, None)
-            doc_key, doc_idx = self._find_doc_key(
-                base_href, doc_order, doc_order_decoded
-            )
+            doc_key, doc_idx = self._find_doc_key(base_href, doc_order, doc_order_decoded)
             if not doc_key:
                 current_entry_node["has_content"] = False
             else:
@@ -922,8 +883,7 @@ class EpubParser(BaseBookParser):
                 )
 
         if title and (
-            current_entry_node.get("has_content", False)
-            or current_entry_node["children"]
+            current_entry_node.get("has_content", False) or current_entry_node["children"]
         ):
             tree_structure_list.append(current_entry_node)
 
@@ -986,9 +946,7 @@ class EpubParser(BaseBookParser):
         fragment = None
         if src:
             base_href, fragment = src.split("#", 1) if "#" in src else (src, None)
-            doc_key, doc_idx = self._find_doc_key(
-                base_href, doc_order, doc_order_decoded
-            )
+            doc_key, doc_idx = self._find_doc_key(base_href, doc_order, doc_order_decoded)
             if doc_key is not None:
                 position = find_position_func(doc_key, fragment)
                 entry_data = {
@@ -1029,10 +987,7 @@ class EpubParser(BaseBookParser):
         if not nav_items:
             # Look in ITEM_DOCUMENT for items with 'nav' property
             for item in self.book.get_items_of_type(ebooklib.ITEM_DOCUMENT):
-                if (
-                    hasattr(item, "get_type")
-                    and item.get_type() == ebooklib.ITEM_DOCUMENT
-                ):
+                if hasattr(item, "get_type") and item.get_type() == ebooklib.ITEM_DOCUMENT:
                     # Check properties - ebooklib stores opf properties in list
                     # Some versions use item.properties, some need checking
                     props = getattr(item, "properties", [])
@@ -1062,11 +1017,7 @@ class EpubParser(BaseBookParser):
         # 2. NCX in NAV
         if not nav_item and nav_items:
             ncx_in_nav = next(
-                (
-                    item
-                    for item in nav_items
-                    if item.get_name().lower().endswith(".ncx")
-                ),
+                (item for item in nav_items if item.get_name().lower().endswith(".ncx")),
                 None,
             )
             if ncx_in_nav:
@@ -1119,9 +1070,7 @@ class EpubParser(BaseBookParser):
             if item:
                 spine_docs.append(item.get_name())
         doc_order = {href: i for i, href in enumerate(spine_docs)}
-        doc_order_decoded = {
-            urllib.parse.unquote(href): i for href, i in doc_order.items()
-        }
+        doc_order_decoded = {urllib.parse.unquote(href): i for href, i in doc_order.items()}
 
         self.content_texts = {}
         self.content_lengths = {}
@@ -1133,9 +1082,7 @@ class EpubParser(BaseBookParser):
                 for nav_point in nav_soup.find_all(["content", "a"])
             ):
                 try:
-                    self.doc_content[href] = item.get_content().decode(
-                        "utf-8", errors="ignore"
-                    )
+                    self.doc_content[href] = item.get_content().decode("utf-8", errors="ignore")
                 except Exception:
                     self.doc_content[href] = ""
 
@@ -1207,17 +1154,12 @@ class EpubParser(BaseBookParser):
                         idx_current = spine_docs.index(current_doc)
                         idx_next = spine_docs.index(next_doc)
                         if idx_current < idx_next:
-                            docs_between = [
-                                spine_docs[k] for k in range(idx_current + 1, idx_next)
-                            ]
+                            docs_between = [spine_docs[k] for k in range(idx_current + 1, idx_next)]
                         elif idx_current > idx_next:
                             docs_between = [
-                                spine_docs[k]
-                                for k in range(idx_current + 1, len(spine_docs))
+                                spine_docs[k] for k in range(idx_current + 1, len(spine_docs))
                             ]
-                            docs_between.extend(
-                                [spine_docs[k] for k in range(0, idx_next)]
-                            )
+                            docs_between.extend([spine_docs[k] for k in range(idx_next)])
                     except ValueError:
                         pass
 

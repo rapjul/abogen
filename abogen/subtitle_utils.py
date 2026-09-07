@@ -60,9 +60,7 @@ def calculate_text_length(text):
     return char_count
 
 
-def deduplicate_chapter_title(
-    text: str, chapter_title: str, force_remove: bool = False
-) -> str:
+def deduplicate_chapter_title(text: str, chapter_title: str, force_remove: bool = False) -> str:
     """
     Deduplicate the chapter title if it appears at the very beginning of the text.
 
@@ -115,9 +113,7 @@ def deduplicate_chapter_title(
         # Smarter check: is the title repeated in the next line(s)?
         if len(lines) > 1:
             next_line = lines[1].strip()
-            if standardize(next_line) == std_title or standardize(next_line).startswith(
-                std_title
-            ):
+            if standardize(next_line) == std_title or standardize(next_line).startswith(std_title):
                 return "\n".join(lines[1:]).strip()
         return text
 
@@ -128,9 +124,7 @@ def deduplicate_chapter_title(
     # Smarter check: is the title repeated in the second paragraph?
     if len(paragraphs) > 1:
         second_para = paragraphs[1].strip()
-        if standardize(second_para) == std_title or standardize(second_para).startswith(
-            std_title
-        ):
+        if standardize(second_para) == std_title or standardize(second_para).startswith(std_title):
             return "\n\n".join(paragraphs[1:]).strip()
 
     return text
@@ -340,13 +334,11 @@ def detect_timestamps_in_text(file_path):
         # Count lines that are ONLY timestamps (no other text)
         # Supports HH:MM:SS or HH:MM:SS,ms format
         # Use pre-compiled pattern for better performance
-        timestamp_lines = sum(
-            1 for line in lines if _TIMESTAMP_ONLY_PATTERN.match(line)
-        )
+        timestamp_lines = sum(1 for line in lines if _TIMESTAMP_ONLY_PATTERN.match(line))
 
         # Must have at least 2 timestamp-only lines and they should be >5% of total lines
         return timestamp_lines >= 2 and (timestamp_lines / max(len(lines), 1)) > 0.05
-    except Exception:
+    except (OSError, UnicodeDecodeError, ValueError, TypeError):
         return False
 
 
@@ -456,17 +448,13 @@ def parse_ass_file(file_path):
                 format_indices[part.strip().lower()] = i
             continue
 
-        if in_events and (line.startswith("Dialogue:") or line.startswith("Comment:")):
+        if in_events and (line.startswith(("Dialogue:", "Comment:"))):
             if line.startswith("Comment:"):
                 continue  # Skip comments
 
             parts = line.split(":", 1)[1].strip().split(",", len(format_indices) - 1)
 
-            if (
-                "start" in format_indices
-                and "end" in format_indices
-                and "text" in format_indices
-            ):
+            if "start" in format_indices and "end" in format_indices and "text" in format_indices:
                 start_str = parts[format_indices["start"]].strip()
                 end_str = parts[format_indices["end"]].strip()
                 text = parts[format_indices["text"]].strip()
@@ -479,9 +467,7 @@ def parse_ass_file(file_path):
                         s_parts = s.split(".")
                         seconds = float(s_parts[0])
                         centiseconds = float(s_parts[1]) if len(s_parts) > 1 else 0
-                        return (
-                            int(h) * 3600 + int(m) * 60 + seconds + centiseconds / 100.0
-                        )
+                        return int(h) * 3600 + int(m) * 60 + seconds + centiseconds / 100.0
                     return 0
 
                 start_sec = ass_time_to_seconds(start_str)
@@ -490,9 +476,7 @@ def parse_ass_file(file_path):
                 # Clean text of ASS styling tags using pre-compiled patterns
                 text = _ASS_STYLING_PATTERN.sub("", text)  # Remove {tags}
                 text = _ASS_NEWLINE_N_PATTERN.sub("\n", text)  # Convert \N to newline
-                text = _ASS_NEWLINE_LOWER_N_PATTERN.sub(
-                    "\n", text
-                )  # Convert \n to newline
+                text = _ASS_NEWLINE_LOWER_N_PATTERN.sub("\n", text)  # Convert \n to newline
                 # Remove chapter markers and metadata tags
                 text = clean_subtitle_text(text)
 
@@ -648,13 +632,11 @@ def split_text_by_voice_markers(text, default_voice):
     for idx, match in enumerate(voice_splits):
         voice_name = match.group(1).strip()
         start = match.end()
-        end = (
-            voice_splits[idx + 1].start() if idx + 1 < len(voice_splits) else len(text)
-        )
+        end = voice_splits[idx + 1].start() if idx + 1 < len(voice_splits) else len(text)
         segment_text = text[start:end].strip()
 
         # Validate voice name
-        is_valid, invalid_voice = validate_voice_name(voice_name)
+        is_valid, _invalid_voice = validate_voice_name(voice_name)
         if is_valid:
             # Normalize to lowercase to match canonical form
             # Handle both single voices and formulas
@@ -668,11 +650,7 @@ def split_text_by_voice_markers(text, default_voice):
                         # Find the canonical (lowercase) voice name
                         voice_part_lower = voice_part.strip().lower()
                         canonical_voice = next(
-                            (
-                                v
-                                for v in VOICES_INTERNAL
-                                if v.lower() == voice_part_lower
-                            ),
+                            (v for v in VOICES_INTERNAL if v.lower() == voice_part_lower),
                             voice_part.strip(),
                         )
                         normalized_parts.append(f"{canonical_voice}*{weight.strip()}")

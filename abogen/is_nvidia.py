@@ -1,10 +1,16 @@
 import gpustat
 
+try:
+    from pynvml import NVMLError  # type: ignore[import-untyped]
+except ImportError:
+    NVMLError = ()  # type: ignore[misc,assignment]
 
-def check():
+
+def check() -> bool:
+    """Check if an NVIDIA GPU is available on the system."""
     try:
         stats = gpustat.new_query()
-    except Exception:
+    except (NVMLError, OSError, RuntimeError, AttributeError):
         return False
 
     nvidia_keywords = ["nvidia", "rtx", "gtx", "quadro", "tesla", "titan", "mx"]

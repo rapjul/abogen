@@ -3,9 +3,10 @@ from __future__ import annotations
 import json
 import re
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Tuple
+from typing import Any
 
 import numpy as np
 
@@ -18,17 +19,16 @@ from abogen.debug_tts_samples import (
 from abogen.kokoro_text_normalization import normalize_for_pipeline
 from abogen.normalization_settings import build_apostrophe_config
 from abogen.text_extractor import extract_from_path
+from abogen.utils import load_numpy_kpipeline
 from abogen.voice_cache import ensure_voice_assets
 from abogen.webui.conversion_runner import (
     SAMPLE_RATE,
     SPLIT_PATTERN,
-    _select_device,
-    _to_float32,
     _resolve_voice,
+    _select_device,
     _spec_to_voice_ids,
+    _to_float32,
 )
-from abogen.utils import load_numpy_kpipeline
-
 
 _MARKER_RE = re.compile(
     re.escape(MARKER_PREFIX) + r"(?P<code>[A-Z0-9_]+)" + re.escape(MARKER_SUFFIX)
@@ -39,11 +39,11 @@ _MARKER_RE = re.compile(
 class DebugWavArtifact:
     label: str
     filename: str
-    code: Optional[str] = None
-    text: Optional[str] = None
+    code: str | None = None
+    text: str | None = None
 
 
-def _resolve_voice_setting(value: str) -> tuple[str, Optional[str], Optional[str]]:
+def _resolve_voice_setting(value: str) -> tuple[str, str | None, str | None]:
     """Resolve settings voice strings into a pipeline-ready voice spec.
 
     Supports "profile:<name>" by converting it into a concrete voice formula.
@@ -63,10 +63,10 @@ def _load_pipeline(language: str, use_gpu: bool) -> Any:
     return KPipeline(lang_code=language, repo_id="hexgrad/Kokoro-82M", device=device)
 
 
-def _extract_cases_from_text(text: str) -> List[Tuple[str, str]]:
+def _extract_cases_from_text(text: str) -> list[tuple[str, str]]:
     raw = str(text or "")
     matches = list(_MARKER_RE.finditer(raw))
-    cases: List[Tuple[str, str]] = []
+    cases: list[tuple[str, str]] = []
     if not matches:
         return cases
     for idx, match in enumerate(matches):
@@ -82,7 +82,7 @@ def _extract_cases_from_text(text: str) -> List[Tuple[str, str]]:
 
 def _spoken_id(code: str) -> str:
     # Make IDs pronounceable and stable (avoid reading as a word).
-    out: List[str] = []
+    out: list[str] = []
     for ch in str(code or ""):
         if ch == "_":
             out.append(" ")
@@ -99,8 +99,8 @@ def run_debug_tts_wavs(
     *,
     output_root: Path,
     settings: Mapping[str, Any],
-    epub_path: Optional[Path] = None,
-) -> Dict[str, Any]:
+    epub_path: Path | None = None,
+) -> dict[str, Any]:
     """Generate WAV artifacts for the debug EPUB samples.
 
     Writes:
@@ -173,9 +173,7 @@ def run_debug_tts_wavs(
     # Resolve it to a concrete voice formula (e.g. "af_heart*0.5+...") so Kokoro
     # doesn't attempt to download a non-existent "voices/profile:<name>.pt".
     try:
-        resolved_voice, _profile_name, profile_language = _resolve_voice_setting(
-            voice_spec
-        )
+        resolved_voice, _profile_name, profile_language = _resolve_voice_setting(voice_spec)
         if resolved_voice:
             voice_spec = resolved_voice
         if profile_language:
@@ -199,10 +197,10 @@ def run_debug_tts_wavs(
     apostrophe_config = build_apostrophe_config(settings=settings)
     normalization_settings = dict(settings)
 
-    artifacts: List[DebugWavArtifact] = []
+    artifacts: list[DebugWavArtifact] = []
 
     overall_path = run_dir / "overall.wav"
-    overall_audio: List[np.ndarray] = []
+    overall_audio: list[np.ndarray] = []
 
     def synth(text: str, *, apply_normalization: bool = True) -> np.ndarray:
         normalized = (
@@ -214,7 +212,7 @@ def run_debug_tts_wavs(
             if apply_normalization
             else str(text or "")
         )
-        parts: List[np.ndarray] = []
+        parts: list[np.ndarray] = []
         for segment in pipeline(
             normalized,
             voice=voice_choice,
@@ -238,9 +236,7 @@ def run_debug_tts_wavs(
             continue
         id_audio = synth(_spoken_id(code), apply_normalization=False)
         text_audio = synth(snippet, apply_normalization=True)
-        audio = np.concatenate([id_audio, pause_1s, text_audio]).astype(
-            "float32", copy=False
-        )
+        audio = np.concatenate([id_audio, pause_1s, text_audio]).astype("float32", copy=False)
         filename = f"case_{code}.wav"
         path = run_dir / filename
         # Write float32 PCM WAV.
@@ -248,9 +244,7 @@ def run_debug_tts_wavs(
 
         sf.write(path, audio, SAMPLE_RATE, subtype="FLOAT")
         artifacts.append(
-            DebugWavArtifact(
-                label=f"{code}", filename=filename, code=code, text=snippet
-            )
+            DebugWavArtifact(label=f"{code}", filename=filename, code=code, text=snippet)
         )
         overall_audio.append(audio)
         overall_audio.append(between_cases)
@@ -274,7 +268,5 @@ def run_debug_tts_wavs(
         "artifacts": [artifact.__dict__ for artifact in artifacts],
         "sample_rate": SAMPLE_RATE,
     }
-    (run_dir / "manifest.json").write_text(
-        json.dumps(manifest, indent=2), encoding="utf-8"
-    )
+    (run_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     return manifest

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
-from typing import Dict, Iterable, Iterator, List, Literal, Optional, Pattern, Tuple
+from re import Pattern
+from typing import Literal
 
 from abogen.kokoro_text_normalization import ApostropheConfig, normalize_for_pipeline
 from abogen.normalization_settings import build_apostrophe_config, get_runtime_settings
@@ -28,12 +30,12 @@ class Chunk:
     level: ChunkLevel
     text: str
     speaker_id: str = "narrator"
-    voice: Optional[str] = None
-    voice_profile: Optional[str] = None
-    voice_formula: Optional[str] = None
-    display_text: Optional[str] = None
+    voice: str | None = None
+    voice_profile: str | None = None
+    voice_formula: str | None = None
+    display_text: str | None = None
 
-    def as_dict(self) -> Dict[str, object]:
+    def as_dict(self) -> dict[str, object]:
         return {
             "id": self.id,
             "chapter_index": self.chapter_index,
@@ -55,7 +57,7 @@ def _iter_paragraphs(text: str) -> Iterator[str]:
             yield normalized
 
 
-def _iter_sentences(paragraph: str) -> Iterator[Tuple[str, str]]:
+def _iter_sentences(paragraph: str) -> Iterator[tuple[str, str]]:
     if not paragraph:
         return
     start = 0
@@ -78,21 +80,19 @@ def _normalize_whitespace(value: str) -> str:
 
 def _normalize_chunk_text(value: str) -> str:
     settings = get_runtime_settings()
-    config = build_apostrophe_config(
-        settings=settings, base=_PIPELINE_APOSTROPHE_CONFIG
-    )
+    config = build_apostrophe_config(settings=settings, base=_PIPELINE_APOSTROPHE_CONFIG)
     normalized = normalize_for_pipeline(value, config=config, settings=settings)
     return _normalize_whitespace(normalized)
 
 
-def _split_sentences(paragraph: str) -> List[Tuple[str, str]]:
+def _split_sentences(paragraph: str) -> list[tuple[str, str]]:
     sentences = list(_iter_sentences(paragraph))
     if not sentences:
         return []
 
-    merged: List[Tuple[str, str]] = []
-    buffer_norm: List[str] = []
-    buffer_raw: List[str] = []
+    merged: list[tuple[str, str]] = []
+    buffer_norm: list[str] = []
+    buffer_raw: list[str] = []
 
     for normalized_sentence, raw_sentence in sentences:
         if buffer_norm:
@@ -122,15 +122,15 @@ def chunk_text(
     text: str,
     level: ChunkLevel,
     speaker_id: str = "narrator",
-    voice: Optional[str] = None,
-    voice_profile: Optional[str] = None,
-    voice_formula: Optional[str] = None,
-    chunk_prefix: Optional[str] = None,
-) -> List[Dict[str, object]]:
+    voice: str | None = None,
+    voice_profile: str | None = None,
+    voice_formula: str | None = None,
+    chunk_prefix: str | None = None,
+) -> list[dict[str, object]]:
     """Split text into ordered chunk dictionaries."""
 
     prefix = chunk_prefix or f"chap{chapter_index:04d}"
-    chunks: List[Dict[str, object]] = []
+    chunks: list[dict[str, object]] = []
 
     if level == "paragraph":
         paragraphs = list(_iter_paragraphs(text)) or [text.strip()]
@@ -158,16 +158,12 @@ def chunk_text(
 
     # Sentence level – flatten paragraphs into individual sentences
     sentence_index = 0
-    for para_index, paragraph in enumerate(
-        list(_iter_paragraphs(text)) or [text.strip()]
-    ):
+    for para_index, paragraph in enumerate(list(_iter_paragraphs(text)) or [text.strip()]):
         normalized_para = _normalize_whitespace(paragraph)
         if not normalized_para:
             continue
         sentence_pairs = _split_sentences(paragraph) or [(normalized_para, paragraph)]
-        for sent_local_index, (normalized_sentence, raw_sentence) in enumerate(
-            sentence_pairs
-        ):
+        for sent_local_index, (normalized_sentence, raw_sentence) in enumerate(sentence_pairs):
             normalized_sentence = _normalize_whitespace(normalized_sentence)
             if not normalized_sentence:
                 continue
@@ -193,7 +189,7 @@ def chunk_text(
     return chunks
 
 
-_DISPLAY_PATTERN_CACHE: Dict[str, Pattern[str]] = {}
+_DISPLAY_PATTERN_CACHE: dict[str, Pattern[str]] = {}
 
 
 def _build_display_pattern(text: str) -> Pattern[str]:
@@ -207,9 +203,7 @@ def _build_display_pattern(text: str) -> Pattern[str]:
     return pattern
 
 
-def _search_source_span(
-    source: str, normalized: str, start: int
-) -> Optional[Tuple[int, int]]:
+def _search_source_span(source: str, normalized: str, start: int) -> tuple[int, int] | None:
     if not normalized:
         return None
     pattern = _build_display_pattern(normalized)
@@ -219,7 +213,7 @@ def _search_source_span(
     return match.start(1), match.end(1)
 
 
-def _attach_display_text(source: str, chunks: List[Dict[str, object]]) -> None:
+def _attach_display_text(source: str, chunks: list[dict[str, object]]) -> None:
     if not source or not chunks:
         return
     cursor = 0
@@ -241,13 +235,13 @@ def _attach_display_text(source: str, chunks: List[Dict[str, object]]) -> None:
 
 
 def build_chunks_for_chapters(
-    chapters: Iterable[Dict[str, object]],
+    chapters: Iterable[dict[str, object]],
     *,
     level: ChunkLevel,
     speaker_id: str = "narrator",
-) -> List[Dict[str, object]]:
+) -> list[dict[str, object]]:
     """Generate chunk dictionaries for a sequence of chapter payloads."""
-    all_chunks: List[Dict[str, object]] = []
+    all_chunks: list[dict[str, object]] = []
     for chapter_index, entry in enumerate(chapters):
         if not isinstance(entry, dict):  # defensive
             continue

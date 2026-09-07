@@ -4,7 +4,7 @@ import atexit
 import logging
 import os
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from flask import Flask
 
@@ -21,9 +21,7 @@ from .service import build_service
 class _SuppressSuccessfulAccessFilter(logging.Filter):
     """Filter out successful (HTTP 200) werkzeug access logs."""
 
-    def filter(
-        self, record: logging.LogRecord
-    ) -> bool:  # pragma: no cover - small utility
+    def filter(self, record: logging.LogRecord) -> bool:  # pragma: no cover - small utility
         try:
             message = record.getMessage()
         except Exception:  # pragma: no cover - defensive
@@ -31,9 +29,7 @@ class _SuppressSuccessfulAccessFilter(logging.Filter):
         # Werkzeug access logs include the status code near the end, e.g.
         # "GET /path HTTP/1.1" 200 -
         # Treat any 2xx response as success to suppress.
-        return (
-            " 200 " not in message and " 201 " not in message and " 204 " not in message
-        )
+        return " 200 " not in message and " 201 " not in message and " 204 " not in message
 
 
 _access_log_filter_attached = False
@@ -78,7 +74,7 @@ def _get_secret_key() -> str:
         return os.urandom(24).hex()
 
 
-def create_app(config: Optional[dict[str, Any]] = None) -> Flask:
+def create_app(config: dict[str, Any] | None = None) -> Flask:
     uploads_dir, outputs_dir = _default_dirs()
 
     app = Flask(
@@ -110,13 +106,13 @@ def create_app(config: Optional[dict[str, Any]] = None) -> Flask:
     app.extensions["conversion_service"] = service
 
     from abogen.webui.routes import (
-        main_bp,
+        api_bp,
+        books_bp,
+        entities_bp,
         jobs_bp,
+        main_bp,
         settings_bp,
         voices_bp,
-        entities_bp,
-        books_bp,
-        api_bp,
     )
 
     app.register_blueprint(main_bp)

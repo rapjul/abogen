@@ -95,6 +95,7 @@ def _apply_patch(patch_file: Path, target: Path) -> bool:
         ],
         capture_output=True,
         text=True,
+        check=False,
     )
     if result.returncode == 0:
         return True
@@ -169,9 +170,7 @@ def main() -> int:
 
         target = _find_package_file(entry["target"])
         if target is None:
-            print(
-                f"[SKIP] Package file not installed — skipping patch: {entry['target']}"
-            )
+            print(f"[SKIP] Package file not installed — skipping patch: {entry['target']}")
             continue
 
         # Check whether the upstream package has silently fixed the bug.

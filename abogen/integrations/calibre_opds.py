@@ -6,19 +6,11 @@ import re
 import unicodedata
 import xml.etree.ElementTree as ET
 from collections import deque
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 from typing import (
     Any,
-    Deque,
-    Dict,
-    Iterable,
-    Iterator,
-    List,
-    Mapping,
-    Optional,
-    Set,
-    Tuple,
 )
 from urllib.parse import quote, urljoin, urlparse
 
@@ -46,9 +38,7 @@ _SERIES_NUMBER_BRACKET_RE = re.compile(
 _SERIES_NUMBER_HASH_RE = re.compile(r"#\s*(\d+(?:\.\d+)?)")
 _SERIES_NUMBER_BOOK_RE = re.compile(r"\bbook\s+(\d+(?:\.\d+)?)\b", re.IGNORECASE)
 _SERIES_LINE_TEXT_RE = re.compile(r"^\s*series\s*[:\-]\s*(.+)$", re.IGNORECASE)
-_SUMMARY_METADATA_LINE_RE = re.compile(
-    r"^([A-Z][A-Z0-9&/\- +'\u2019]{1,40})\s*[:\-]\s*(.+)$"
-)
+_SUMMARY_METADATA_LINE_RE = re.compile(r"^([A-Z][A-Z0-9&/\- +'\u2019]{1,40})\s*[:\-]\s*(.+)$")
 _EPUB_MIME_TYPES = {
     "application/epub+zip",
     "application/zip",
@@ -103,11 +93,11 @@ class CalibreOPDSError(RuntimeError):
 @dataclass
 class OPDSLink:
     href: str
-    rel: Optional[str] = None
-    type: Optional[str] = None
-    title: Optional[str] = None
+    rel: str | None = None
+    type: str | None = None
+    title: str | None = None
 
-    def to_dict(self) -> Dict[str, Optional[str]]:
+    def to_dict(self) -> dict[str, str | None]:
         return {
             "href": self.href,
             "rel": self.rel,
@@ -120,23 +110,23 @@ class OPDSLink:
 class OPDSEntry:
     id: str
     title: str
-    position: Optional[int] = None
-    authors: List[str] = field(default_factory=list)
-    subtitle: Optional[str] = None
-    updated: Optional[str] = None
-    published: Optional[str] = None
-    summary: Optional[str] = None
-    download: Optional[OPDSLink] = None
-    alternate: Optional[OPDSLink] = None
-    thumbnail: Optional[OPDSLink] = None
-    links: List[OPDSLink] = field(default_factory=list)
-    series: Optional[str] = None
-    series_index: Optional[float] = None
-    tags: List[str] = field(default_factory=list)
-    rating: Optional[float] = None
-    rating_max: Optional[float] = None
+    position: int | None = None
+    authors: list[str] = field(default_factory=list)
+    subtitle: str | None = None
+    updated: str | None = None
+    published: str | None = None
+    summary: str | None = None
+    download: OPDSLink | None = None
+    alternate: OPDSLink | None = None
+    thumbnail: OPDSLink | None = None
+    links: list[OPDSLink] = field(default_factory=list)
+    series: str | None = None
+    series_index: float | None = None
+    tags: list[str] = field(default_factory=list)
+    rating: float | None = None
+    rating_max: float | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "title": self.title,
@@ -160,12 +150,12 @@ class OPDSEntry:
 
 @dataclass
 class OPDSFeed:
-    id: Optional[str]
-    title: Optional[str]
-    entries: List[OPDSEntry]
-    links: Dict[str, OPDSLink] = field(default_factory=dict)
+    id: str | None
+    title: str | None
+    entries: list[OPDSEntry]
+    links: dict[str, OPDSLink] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "title": self.title,
@@ -174,7 +164,7 @@ class OPDSFeed:
         }
 
 
-def feed_to_dict(feed: OPDSFeed) -> Dict[str, Any]:
+def feed_to_dict(feed: OPDSFeed) -> dict[str, Any]:
     return feed.to_dict()
 
 
@@ -192,8 +182,8 @@ class CalibreOPDSClient:
         self,
         base_url: str,
         *,
-        username: Optional[str] = None,
-        password: Optional[str] = None,
+        username: str | None = None,
+        password: str | None = None,
         timeout: float = 15.0,
         verify: bool = True,
     ) -> None:
@@ -216,34 +206,32 @@ class CalibreOPDSClient:
         }
 
     @staticmethod
-    def _strip_html(value: Optional[str]) -> Optional[str]:
+    def _strip_html(value: str | None) -> str | None:
         if not value:
             return None
         cleaned = _TAG_STRIP_RE.sub("", value)
         return html.unescape(cleaned).strip() or None
 
-    def _make_url(self, href: Optional[str]) -> str:
+    def _make_url(self, href: str | None) -> str:
         if not href:
             return self._base_url
         href = href.strip()
-        if href.startswith("http://") or href.startswith("https://"):
+        if href.startswith(("http://", "https://")):
             return href
         if href.startswith("/"):
             # Absolute path - join with origin only
             parsed = urlparse(self._base_url)
             return f"{parsed.scheme}://{parsed.netloc}{href}"
-        if href.startswith("?") or href.startswith("#"):
+        if href.startswith(("?", "#")):
             return f"{self._base_url}{href}"
-        if href.startswith("./") or href.startswith("../"):
+        if href.startswith(("./", "../")):
             # For relative paths, we need a trailing slash for urljoin to work correctly
             base_with_slash = (
                 self._base_url if self._base_url.endswith("/") else f"{self._base_url}/"
             )
             return urljoin(base_with_slash, href)
         # Relative path like "search" or "catalog?page=1" - treat as sibling
-        base_with_slash = (
-            self._base_url if self._base_url.endswith("/") else f"{self._base_url}/"
-        )
+        base_with_slash = self._base_url if self._base_url.endswith("/") else f"{self._base_url}/"
         return urljoin(base_with_slash, href)
 
     def _open_client(self) -> httpx.Client:
@@ -255,7 +243,7 @@ class CalibreOPDSClient:
         )
 
     def fetch_feed(
-        self, href: Optional[str] = None, *, params: Optional[Mapping[str, Any]] = None
+        self, href: str | None = None, *, params: Mapping[str, Any] | None = None
     ) -> OPDSFeed:
         target = self._make_url(href)
         try:
@@ -271,7 +259,7 @@ class CalibreOPDSClient:
 
         return self._parse_feed(response.text, base_url=target)
 
-    def _fetch_opensearch_template(self, href: str) -> Optional[str]:
+    def _fetch_opensearch_template(self, href: str) -> str | None:
         target = self._make_url(href)
         try:
             with self._open_client() as client:
@@ -290,7 +278,7 @@ class CalibreOPDSClient:
                         if "atom" in mime or "xml" in mime:
                             return template
             return None
-        except Exception:
+        except (httpx.HTTPError, ET.ParseError, ValueError):
             return None
 
     def _find_best_seed_feed(self, root_feed: OPDSFeed) -> OPDSFeed:
@@ -324,12 +312,12 @@ class CalibreOPDSClient:
 
         return root_feed
 
-    def search(self, query: str, start_href: Optional[str] = None) -> OPDSFeed:
+    def search(self, query: str, start_href: str | None = None) -> OPDSFeed:
         cleaned = (query or "").strip()
         if not cleaned:
             return self.fetch_feed(start_href) if start_href else self.fetch_feed()
 
-        base_feed: Optional[OPDSFeed] = None
+        base_feed: OPDSFeed | None = None
         try:
             base_feed = self.fetch_feed()
         except CalibreOPDSError:
@@ -339,10 +327,7 @@ class CalibreOPDSClient:
         if base_feed:
             # Check for OpenSearch description first
             search_link = self._resolve_link(base_feed.links, "search")
-            if (
-                search_link
-                and search_link.type == "application/opensearchdescription+xml"
-            ):
+            if search_link and search_link.type == "application/opensearchdescription+xml":
                 template = self._fetch_opensearch_template(search_link.href)
                 if template:
                     search_url = template.replace("{searchTerms}", quote(cleaned))
@@ -368,13 +353,13 @@ class CalibreOPDSClient:
                     pass
 
         # 2. Try common guesses if explicit link failed
-        candidates: List[Tuple[Optional[str], Optional[Mapping[str, Any]]]] = [
+        candidates: list[tuple[str | None, Mapping[str, Any] | None]] = [
             ("search", {"query": cleaned}),
             ("search", {"q": cleaned}),
             (None, {"search": cleaned}),
         ]
 
-        last_error: Optional[Exception] = None
+        last_error: Exception | None = None
 
         for path, params in candidates:
             try:
@@ -394,7 +379,7 @@ class CalibreOPDSClient:
                 continue
 
         # 3. Fallback to local search (crawling)
-        seed_feed: Optional[OPDSFeed] = None
+        seed_feed: OPDSFeed | None = None
         if start_href:
             try:
                 seed_feed = self.fetch_feed(start_href)
@@ -408,10 +393,10 @@ class CalibreOPDSClient:
         if not seed_feed:
             try:
                 seed_feed = self.fetch_feed()
-            except CalibreOPDSError as exc:
+            except CalibreOPDSError:
                 if last_error:
                     raise last_error
-                raise exc
+                raise
 
         # Heuristic: If the seed feed has acquisition links, use linear scan.
         # Otherwise, use BFS to find content.
@@ -440,8 +425,8 @@ class CalibreOPDSClient:
         normalized = (query or "").strip()
         if not normalized:
             return seed_feed
-        seen_ids: Set[str] = set()
-        collected: List[OPDSEntry] = []
+        seen_ids: set[str] = set()
+        collected: list[OPDSEntry] = []
         for page in self._iter_paginated_feeds(seed_feed, max_pages=max_pages):
             filtered = self._filter_feed_entries(page, normalized)
             for entry in filtered.entries:
@@ -458,7 +443,7 @@ class CalibreOPDSClient:
     ) -> Iterator[OPDSFeed]:
         yield seed_feed
         next_link = self._resolve_link(seed_feed.links, "next")
-        visited: Set[str] = set()
+        visited: set[str] = set()
         pages_examined = 0
         while next_link and pages_examined < max_pages:
             href = (next_link.href or "").strip()
@@ -480,8 +465,8 @@ class CalibreOPDSClient:
     def _merge_feed_entries(primary: OPDSFeed, secondary: OPDSFeed) -> OPDSFeed:
         if primary is secondary or not secondary.entries:
             return primary
-        seen_ids: Set[str] = set()
-        combined: List[OPDSEntry] = list(primary.entries)
+        seen_ids: set[str] = set()
+        combined: list[OPDSEntry] = list(primary.entries)
         for entry in primary.entries:
             entry_id = (entry.id or "").strip()
             if entry_id:
@@ -499,7 +484,7 @@ class CalibreOPDSClient:
         self,
         query: str,
         *,
-        seed_feed: Optional[OPDSFeed] = None,
+        seed_feed: OPDSFeed | None = None,
         max_pages: int = 40,
     ) -> OPDSFeed:
         normalized = (query or "").strip()
@@ -510,8 +495,8 @@ class CalibreOPDSClient:
             return seed_feed or self.fetch_feed()
 
         start_feed = seed_feed or self.fetch_feed()
-        collected: List[OPDSEntry] = []
-        seen_match_ids: Set[str] = set()
+        collected: list[OPDSEntry] = []
+        seen_match_ids: set[str] = set()
 
         def add_matches(feed: OPDSFeed) -> None:
             filtered = self._filter_feed_entries(feed, normalized)
@@ -525,19 +510,17 @@ class CalibreOPDSClient:
 
         add_matches(start_feed)
 
-        queue: Deque[str] = deque()
-        queued: Set[str] = set()
-        visited: Set[str] = set()
+        queue: deque[str] = deque()
+        queued: set[str] = set()
+        visited: set[str] = set()
 
-        def is_navigation_link(rel_hint: Optional[str], link: OPDSLink) -> bool:
-            rel_candidates: List[str] = []
+        def is_navigation_link(rel_hint: str | None, link: OPDSLink) -> bool:
+            rel_candidates: list[str] = []
             if rel_hint:
                 rel_candidates.append(rel_hint)
             if link.rel and link.rel not in rel_candidates:
                 rel_candidates.append(link.rel)
-            rel_candidates = [
-                (rel or "").strip().lower() for rel in rel_candidates if rel
-            ]
+            rel_candidates = [(rel or "").strip().lower() for rel in rel_candidates if rel]
             link_type = (link.type or "").strip().lower()
             if link_type and "opds-catalog" in link_type:
                 return True
@@ -552,20 +535,18 @@ class CalibreOPDSClient:
                     return True
                 if rel_value in {"start", "up", "down"}:
                     return True
-                if rel_value.endswith("navigation") or rel_value.endswith("collection"):
+                if rel_value.endswith(("navigation", "collection")):
                     return True
                 if rel_value.startswith("http://opds-spec.org/"):
                     if rel_value.startswith(
-                        "http://opds-spec.org/group"
-                    ) or rel_value.startswith("http://opds-spec.org/sort"):
-                        return True
-                    if rel_value.endswith("navigation") or rel_value.endswith(
-                        "collection"
+                        ("http://opds-spec.org/group", "http://opds-spec.org/sort")
                     ):
+                        return True
+                    if rel_value.endswith(("navigation", "collection")):
                         return True
             return False
 
-        def enqueue_link(link: OPDSLink, rel_hint: Optional[str] = None) -> None:
+        def enqueue_link(link: OPDSLink, rel_hint: str | None = None) -> None:
             if not is_navigation_link(rel_hint, link):
                 return
             href = (link.href or "").strip()
@@ -620,18 +601,12 @@ class CalibreOPDSClient:
             raise CalibreOPDSError(f"Download failed: {exc}") from exc
 
         mime_type = (
-            response.headers.get("Content-Type", "application/octet-stream")
-            .split(";")[0]
-            .strip()
+            response.headers.get("Content-Type", "application/octet-stream").split(";")[0].strip()
         )
         filename = self._deduce_filename(response, target, mime_type)
-        return DownloadedResource(
-            filename=filename, mime_type=mime_type, content=response.content
-        )
+        return DownloadedResource(filename=filename, mime_type=mime_type, content=response.content)
 
-    def _deduce_filename(
-        self, response: httpx.Response, url: str, mime_type: str
-    ) -> str:
+    def _deduce_filename(self, response: httpx.Response, url: str, mime_type: str) -> str:
         header = response.headers.get("Content-Disposition", "")
         match = re.search(r'filename="?([^";]+)"?', header)
         if match:
@@ -672,7 +647,7 @@ class CalibreOPDSClient:
         parsed_entries = [
             self._parse_entry(node, base_url) for node in root.findall("atom:entry", NS)
         ]
-        entries: List[OPDSEntry] = []
+        entries: list[OPDSEntry] = []
         for entry in parsed_entries:
             if entry.download and self._is_supported_download(entry.download):
                 entries.append(entry)
@@ -683,10 +658,7 @@ class CalibreOPDSClient:
 
     def _parse_entry(self, node: ET.Element, base_url: str) -> OPDSEntry:
         entry_id = node.findtext("atom:id", default="", namespaces=NS).strip()
-        title = (
-            node.findtext("atom:title", default="Untitled", namespaces=NS).strip()
-            or "Untitled"
-        )
+        title = node.findtext("atom:title", default="Untitled", namespaces=NS).strip() or "Untitled"
 
         subtitle = (
             node.findtext("calibre_md:subtitle", default=None, namespaces=NS)
@@ -697,9 +669,9 @@ class CalibreOPDSClient:
 
         position_value = self._extract_position(node)
         updated = node.findtext("atom:updated", default=None, namespaces=NS)
-        published = node.findtext(
-            "dc:date", default=None, namespaces=NS
-        ) or node.findtext("atom:published", default=None, namespaces=NS)
+        published = node.findtext("dc:date", default=None, namespaces=NS) or node.findtext(
+            "atom:published", default=None, namespaces=NS
+        )
         if published:
             published = published.strip() or None
 
@@ -708,13 +680,13 @@ class CalibreOPDSClient:
             or self._extract_text(node.find("atom:content", NS))
             or self._extract_text(node.find("dc:description", NS))
         )
-        summary_metadata: Dict[str, str] = {}
-        summary_body: Optional[str] = None
+        summary_metadata: dict[str, str] = {}
+        summary_body: str | None = None
         if summary_text:
             summary_metadata, summary_body = self._split_summary_metadata(summary_text)
         cleaned_summary = self._strip_html(summary_body or summary_text)
 
-        authors: List[str] = []
+        authors: list[str] = []
         for author_node in node.findall("atom:author", NS):
             name = author_node.findtext("atom:name", default="", namespaces=NS).strip()
             if name:
@@ -731,20 +703,20 @@ class CalibreOPDSClient:
         link_dict = self._links_to_dict(all_links)
         download_link = self._select_download_link(all_links)
         alternate_link = link_dict.get("alternate")
-        thumb_link = link_dict.get(
-            "http://opds-spec.org/image/thumbnail"
-        ) or link_dict.get("thumbnail")
+        thumb_link = link_dict.get("http://opds-spec.org/image/thumbnail") or link_dict.get(
+            "thumbnail"
+        )
 
-        series_name = node.findtext(
-            "calibre:series", default=None, namespaces=NS
-        ) or node.findtext("calibre_md:series", default=None, namespaces=NS)
+        series_name = node.findtext("calibre:series", default=None, namespaces=NS) or node.findtext(
+            "calibre_md:series", default=None, namespaces=NS
+        )
         if series_name:
             series_name = series_name.strip() or None
 
         series_index_raw = node.findtext(
             "calibre:series_index", default=None, namespaces=NS
         ) or node.findtext("calibre_md:series_index", default=None, namespaces=NS)
-        series_index: Optional[float] = None
+        series_index: float | None = None
         if series_index_raw is not None:
             text = str(series_index_raw).strip()
             if text:
@@ -759,11 +731,9 @@ class CalibreOPDSClient:
                             series_index = None
 
         if series_name is None or series_index is None:
-            category_series_name, category_series_index = (
-                self._extract_series_from_categories(
-                    node.findall("atom:category", NS),
-                    authors=authors,
-                )
+            category_series_name, category_series_index = self._extract_series_from_categories(
+                node.findall("atom:category", NS),
+                authors=authors,
             )
             if series_name is None and category_series_name:
                 series_name = category_series_name
@@ -771,9 +741,7 @@ class CalibreOPDSClient:
                 series_index = category_series_index
 
         if (series_name is None or series_index is None) and summary_text:
-            text_series_name, text_series_index = self._extract_series_from_text(
-                summary_text
-            )
+            text_series_name, text_series_index = self._extract_series_from_text(summary_text)
             if series_name is None and text_series_name:
                 series_name = text_series_name
             if series_index is None and text_series_index is not None:
@@ -782,9 +750,7 @@ class CalibreOPDSClient:
         tags_value = summary_metadata.get("TAGS")
         tags = self._parse_tags(tags_value) if tags_value else []
         rating_value = summary_metadata.get("RATING")
-        rating, rating_max = (
-            self._parse_rating(rating_value) if rating_value else (None, None)
-        )
+        rating, rating_max = self._parse_rating(rating_value) if rating_value else (None, None)
 
         return OPDSEntry(
             id=entry_id or title,
@@ -808,22 +774,20 @@ class CalibreOPDSClient:
 
     def _extract_series_from_categories(
         self,
-        category_nodes: List[ET.Element],
+        category_nodes: list[ET.Element],
         *,
-        authors: Optional[List[str]] = None,
-    ) -> tuple[Optional[str], Optional[float]]:
-        name: Optional[str] = None
-        index: Optional[float] = None
+        authors: list[str] | None = None,
+    ) -> tuple[str | None, float | None]:
+        name: str | None = None
+        index: float | None = None
         author_set = {
-            str(author).strip().casefold()
-            for author in (authors or [])
-            if str(author).strip()
+            str(author).strip().casefold() for author in (authors or []) if str(author).strip()
         }
         for category in category_nodes:
             scheme = (category.attrib.get("scheme") or "").strip().lower()
             label = (category.attrib.get("label") or "").strip()
             term = (category.attrib.get("term") or "").strip()
-            values: List[str] = []
+            values: list[str] = []
             if label:
                 values.append(label)
             if term and term not in values:
@@ -861,13 +825,13 @@ class CalibreOPDSClient:
             return False
         return bool(re.search(r"(^|[/#:\-])series([/#:\-]|$)", cleaned))
 
-    def _parse_series_value(self, value: str) -> tuple[Optional[str], Optional[float]]:
+    def _parse_series_value(self, value: str) -> tuple[str | None, float | None]:
         cleaned = re.sub(r"\s+", " ", value or "").strip()
         if not cleaned:
             return None, None
         cleaned = _SERIES_PREFIX_RE.sub("", cleaned)
         working = cleaned
-        number: Optional[float] = None
+        number: float | None = None
 
         bracket_match = _SERIES_NUMBER_BRACKET_RE.search(working)
         if bracket_match:
@@ -896,7 +860,7 @@ class CalibreOPDSClient:
         return name, number
 
     @staticmethod
-    def _extract_text(node: Optional[ET.Element]) -> Optional[str]:
+    def _extract_text(node: ET.Element | None) -> str | None:
         if node is None:
             return None
         # Prefer itertext to capture nested XHTML content
@@ -906,9 +870,7 @@ class CalibreOPDSClient:
         combined = "".join(parts).strip()
         return combined or None
 
-    def _extract_series_from_text(
-        self, text: str
-    ) -> tuple[Optional[str], Optional[float]]:
+    def _extract_series_from_text(self, text: str) -> tuple[str | None, float | None]:
         for line in text.splitlines():
             match = _SERIES_LINE_TEXT_RE.match(line)
             if not match:
@@ -921,10 +883,8 @@ class CalibreOPDSClient:
                 return name, number
         return None, None
 
-    def _split_summary_metadata(
-        self, text: Optional[str]
-    ) -> tuple[Dict[str, str], Optional[str]]:
-        metadata: Dict[str, str] = {}
+    def _split_summary_metadata(self, text: str | None) -> tuple[dict[str, str], str | None]:
+        metadata: dict[str, str] = {}
         if text is None:
             return metadata, None
         lines = text.splitlines()
@@ -948,11 +908,11 @@ class CalibreOPDSClient:
         return metadata, (remainder or None)
 
     @staticmethod
-    def _parse_tags(value: str) -> List[str]:
+    def _parse_tags(value: str) -> list[str]:
         if not value:
             return []
         tokens = re.split(r"[;,\n]\s*", value)
-        cleaned: List[str] = []
+        cleaned: list[str] = []
         seen: set[str] = set()
         for token in tokens:
             entry = token.strip()
@@ -966,7 +926,7 @@ class CalibreOPDSClient:
         return cleaned
 
     @staticmethod
-    def _parse_rating(value: str) -> tuple[Optional[float], Optional[float]]:
+    def _parse_rating(value: str) -> tuple[float | None, float | None]:
         if not value:
             return None, None
         text = value.strip()
@@ -987,7 +947,7 @@ class CalibreOPDSClient:
         return None, None
 
     @staticmethod
-    def _coerce_series_index(value: str) -> Optional[float]:
+    def _coerce_series_index(value: str) -> float | None:
         text = value.strip().replace(",", ".")
         if not text:
             return None
@@ -996,7 +956,7 @@ class CalibreOPDSClient:
         except ValueError:
             return None
 
-    def _extract_position(self, node: ET.Element) -> Optional[int]:
+    def _extract_position(self, node: ET.Element) -> int | None:
         candidates = [
             node.findtext("opds:position", default=None, namespaces=NS),
             node.findtext("opds:groupPosition", default=None, namespaces=NS),
@@ -1015,10 +975,8 @@ class CalibreOPDSClient:
                 continue
         return None
 
-    def _extract_links(
-        self, link_nodes: List[ET.Element], base_url: str
-    ) -> List[OPDSLink]:
-        links: List[OPDSLink] = []
+    def _extract_links(self, link_nodes: list[ET.Element], base_url: str) -> list[OPDSLink]:
+        links: list[OPDSLink] = []
         for link in link_nodes:
             href = link.attrib.get("href")
             if not href:
@@ -1028,13 +986,11 @@ class CalibreOPDSClient:
             title = link.attrib.get("title")
             base_for_join = base_url or self._base_url
             absolute_href = urljoin(base_for_join, href)
-            links.append(
-                OPDSLink(href=absolute_href, rel=rel, type=link_type, title=title)
-            )
+            links.append(OPDSLink(href=absolute_href, rel=rel, type=link_type, title=title))
         return links
 
-    def _links_to_dict(self, links: List[OPDSLink]) -> Dict[str, OPDSLink]:
-        results: Dict[str, OPDSLink] = {}
+    def _links_to_dict(self, links: list[OPDSLink]) -> dict[str, OPDSLink]:
+        results: dict[str, OPDSLink] = {}
         for entry in links:
             key = entry.rel or entry.href
             if not key:
@@ -1067,15 +1023,13 @@ class CalibreOPDSClient:
     @staticmethod
     def _select_download_link(
         links: Mapping[str, OPDSLink] | Iterable[OPDSLink],
-    ) -> Optional[OPDSLink]:
+    ) -> OPDSLink | None:
         if isinstance(links, Mapping):
-            iterable: List[OPDSLink] = list(links.values())
+            iterable: list[OPDSLink] = list(links.values())
         else:
             iterable = list(links)
-        supported = [
-            link for link in iterable if CalibreOPDSClient._is_supported_download(link)
-        ]
-        best: Optional[OPDSLink] = None
+        supported = [link for link in iterable if CalibreOPDSClient._is_supported_download(link)]
+        best: OPDSLink | None = None
         for link in supported:
             rel = (link.rel or "").lower()
             if "acquisition" not in rel:
@@ -1093,9 +1047,7 @@ class CalibreOPDSClient:
         return None
 
     @staticmethod
-    def _resolve_link(
-        links: Optional[Mapping[str, OPDSLink]], rel: str
-    ) -> Optional[OPDSLink]:
+    def _resolve_link(links: Mapping[str, OPDSLink] | None, rel: str) -> OPDSLink | None:
         if not links:
             return None
         if rel in links:
@@ -1120,20 +1072,16 @@ class CalibreOPDSClient:
             return False
         if "opds-catalog" in link_type:
             return True
-        if rel.endswith("navigation") or rel.endswith("collection"):
+        if rel.endswith(("navigation", "collection")):
             return True
-        if rel.startswith("http://opds-spec.org/sort") or rel.startswith(
-            "http://opds-spec.org/group"
-        ):
-            return True
-        return False
+        return bool(rel.startswith(("http://opds-spec.org/sort", "http://opds-spec.org/group")))
 
     @staticmethod
     def _has_navigation_link(entry: OPDSEntry) -> bool:
         return any(CalibreOPDSClient._is_navigation_link(link) for link in entry.links)
 
     @staticmethod
-    def _browse_mode_for_title(title: Optional[str]) -> str:
+    def _browse_mode_for_title(title: str | None) -> str:
         if not title:
             return "generic"
         lowered = title.lower()
@@ -1180,15 +1128,11 @@ class CalibreOPDSClient:
         if not text:
             return ""
         # Normalize unicode characters to their base form (e.g. é -> e)
-        normalized = (
-            unicodedata.normalize("NFKD", text)
-            .encode("ASCII", "ignore")
-            .decode("utf-8")
-        )
+        normalized = unicodedata.normalize("NFKD", text).encode("ASCII", "ignore").decode("utf-8")
         return normalized.lower().strip()
 
     @staticmethod
-    def _alphabet_letter_for_entry(entry: OPDSEntry, mode: str) -> Optional[str]:
+    def _alphabet_letter_for_entry(entry: OPDSEntry, mode: str) -> str | None:
         source = CalibreOPDSClient._alphabet_source(entry, mode)
         if not source:
             return None
@@ -1197,9 +1141,7 @@ class CalibreOPDSClient:
 
         # Normalize to handle accents (É -> E)
         normalized_source = (
-            unicodedata.normalize("NFKD", source)
-            .encode("ASCII", "ignore")
-            .decode("utf-8")
+            unicodedata.normalize("NFKD", source).encode("ASCII", "ignore").decode("utf-8")
         )
 
         cleaned = re.sub(r"^[^0-9A-Za-z]+", "", normalized_source)
@@ -1213,10 +1155,10 @@ class CalibreOPDSClient:
         return "#"
 
     @staticmethod
-    def _entry_matches_query(entry: OPDSEntry, tokens: List[str]) -> bool:
+    def _entry_matches_query(entry: OPDSEntry, tokens: list[str]) -> bool:
         if not tokens:
             return True
-        search_fragments: List[str] = []
+        search_fragments: list[str] = []
 
         if entry.title:
             search_fragments.append(CalibreOPDSClient._normalize_text(entry.title))
@@ -1239,9 +1181,7 @@ class CalibreOPDSClient:
 
         # Check if all tokens match at least one fragment
         # Tokens are already normalized in _filter_feed_entries
-        return all(
-            any(token in fragment for fragment in search_fragments) for token in tokens
-        )
+        return all(any(token in fragment for fragment in search_fragments) for token in tokens)
 
     def _filter_feed_entries(self, feed: OPDSFeed, query: str) -> OPDSFeed:
         normalized_query = CalibreOPDSClient._normalize_text(query)
@@ -1305,7 +1245,7 @@ class CalibreOPDSClient:
         }
         return weights.get(letter.upper(), 0.0)
 
-    def _attempt_smart_jump(self, feed: OPDSFeed, letter: str) -> Optional[OPDSFeed]:
+    def _attempt_smart_jump(self, feed: OPDSFeed, letter: str) -> OPDSFeed | None:
         """
         Attempt to jump to a page closer to the target letter by analyzing pagination links.
         Returns a new OPDSFeed if a jump was successful, or None.
@@ -1319,15 +1259,13 @@ class CalibreOPDSClient:
 
         # Try to extract offsets from URLs to determine page size and total items
         # Common Calibre pattern: .../offset/0, .../offset/50
-        def extract_offset(href: str) -> Optional[int]:
+        def extract_offset(href: str) -> int | None:
             match = re.search(r"/(\d+)/?$", href)
             if match:
                 return int(match.group(1))
             # Try query param
             parsed = urlparse(href)
-            qs = dict(
-                pair.split("=") for pair in parsed.query.split("&") if "=" in pair
-            )
+            qs = dict(pair.split("=") for pair in parsed.query.split("&") if "=" in pair)
             if "offset" in qs:
                 try:
                     return int(qs["offset"])
@@ -1374,7 +1312,7 @@ class CalibreOPDSClient:
                 new_href = f"{parts[0]}{target_offset}{parts[1]}"
                 try:
                     return self.fetch_feed(new_href)
-                except Exception:
+                except (httpx.HTTPError, ET.ParseError, ValueError):
                     return None
 
         return None
@@ -1383,7 +1321,7 @@ class CalibreOPDSClient:
         self,
         letter: str,
         *,
-        start_href: Optional[str] = None,
+        start_href: str | None = None,
         max_pages: int = 40,
     ) -> OPDSFeed:
         normalized = (letter or "").strip()
@@ -1422,9 +1360,9 @@ class CalibreOPDSClient:
                 return letter_value == "#"
             return letter_value == key
 
-        collected: List[OPDSEntry] = []
-        seen_ids: Set[str] = set()
-        letter_href: Optional[str] = None
+        collected: list[OPDSEntry] = []
+        seen_ids: set[str] = set()
+        letter_href: str | None = None
 
         def add_entry(entry: OPDSEntry) -> None:
             entry_id = (entry.id or "").strip()
@@ -1470,7 +1408,7 @@ class CalibreOPDSClient:
                 else:
                     add_entry(entry)
 
-        letter_feed: Optional[OPDSFeed] = None
+        letter_feed: OPDSFeed | None = None
         if letter_href:
             try:
                 letter_feed = self.fetch_feed(letter_href)
@@ -1478,9 +1416,7 @@ class CalibreOPDSClient:
                 letter_feed = None
             else:
                 letter_mode = self._browse_mode_for_title(letter_feed.title)
-                for page in self._iter_paginated_feeds(
-                    letter_feed, max_pages=max_pages
-                ):
+                for page in self._iter_paginated_feeds(letter_feed, max_pages=max_pages):
                     for entry in page.entries:
                         if not letter_matches(entry, letter_mode):
                             continue
@@ -1493,7 +1429,7 @@ class CalibreOPDSClient:
             return dataclasses.replace(template, entries=collected)
         return dataclasses.replace(template, entries=[])
 
-    def _resolve_search_url(self, feed: OPDSFeed, query: str) -> Optional[str]:
+    def _resolve_search_url(self, feed: OPDSFeed, query: str) -> str | None:
         link = self._resolve_link(feed.links, "search")
         if not link:
             link = self._resolve_link(feed.links, "http://opds-spec.org/search")
@@ -1507,7 +1443,7 @@ class CalibreOPDSClient:
 
         return href
 
-    def _calculate_match_score(self, entry: OPDSEntry, tokens: List[str]) -> int:
+    def _calculate_match_score(self, entry: OPDSEntry, tokens: list[str]) -> int:
         if not tokens:
             return 0
 

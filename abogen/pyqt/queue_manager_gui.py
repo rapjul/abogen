@@ -88,9 +88,7 @@ class ElidedLabel(QLabel):
 
     def _update_elided_text(self):
         metrics = QFontMetrics(self.font())
-        elided = metrics.elidedText(
-            self._full_text, Qt.TextElideMode.ElideRight, self.width()
-        )
+        elided = metrics.elidedText(self._full_text, Qt.TextElideMode.ElideRight, self.width())
         super().setText(elided)
         if elided != self._full_text:
             self.setToolTip(self._full_text)
@@ -143,13 +141,9 @@ class DroppableQueueTableWidget(QTableWidget):
         if horizontal_header is not None:
             horizontal_header.setStretchLastSection(False)
             horizontal_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-            horizontal_header.setSectionResizeMode(
-                1, QHeaderView.ResizeMode.ResizeToContents
-            )
+            horizontal_header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
             horizontal_header.sectionClicked.connect(self._handle_header_clicked)
-            horizontal_header.sortIndicatorChanged.connect(
-                self._notify_parent_view_changed
-            )
+            horizontal_header.sortIndicatorChanged.connect(self._notify_parent_view_changed)
         model = self.model()
         if model is not None:
             model.layoutChanged.connect(self._notify_parent_view_changed)
@@ -160,9 +154,7 @@ class DroppableQueueTableWidget(QTableWidget):
             f"border:2px dashed {COLORS['BLUE_BORDER_HOVER']}; border-radius:5px; padding:20px; background:{COLORS['BLUE_BG_HOVER']};"
         )
         self.drag_overlay.setVisible(False)
-        self.drag_overlay.setAttribute(
-            Qt.WidgetAttribute.WA_TransparentForMouseEvents, True
-        )
+        self.drag_overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
 
     def dragEnterEvent(self, e):
         if e is None:
@@ -172,9 +164,7 @@ class DroppableQueueTableWidget(QTableWidget):
         if mime_data is not None and mime_data.hasUrls():
             for url in mime_data.urls():
                 file_path = url.toLocalFile().lower()
-                if url.isLocalFile() and self.parent_dialog.is_supported_file(
-                    file_path
-                ):
+                if url.isLocalFile() and self.parent_dialog.is_supported_file(file_path):
                     self.drag_overlay.resize(self.size())
                     self.drag_overlay.setVisible(True)
                     e.acceptProposedAction()
@@ -189,9 +179,7 @@ class DroppableQueueTableWidget(QTableWidget):
         if mime_data is not None and mime_data.hasUrls():
             for url in mime_data.urls():
                 file_path = url.toLocalFile().lower()
-                if url.isLocalFile() and self.parent_dialog.is_supported_file(
-                    file_path
-                ):
+                if url.isLocalFile() and self.parent_dialog.is_supported_file(file_path):
                     e.acceptProposedAction()
                     return
         e.ignore()
@@ -213,8 +201,7 @@ class DroppableQueueTableWidget(QTableWidget):
             file_paths = [
                 url.toLocalFile()
                 for url in mime_data.urls()
-                if url.isLocalFile()
-                and self.parent_dialog.is_supported_file(url.toLocalFile())
+                if url.isLocalFile() and self.parent_dialog.is_supported_file(url.toLocalFile())
             ]
             if file_paths:
                 self.parent_dialog.add_files_from_paths(file_paths)
@@ -251,14 +238,12 @@ class QueueManager(QDialog):
     def __init__(self, parent, queue: list, title="Queue Manager", size=(600, 700)):
         super().__init__()
         self.queue = queue
-        self._original_queue = deepcopy(
-            queue
-        )  # Store a deep copy of the original queue
+        self._original_queue = deepcopy(queue)  # Store a deep copy of the original queue
         self.parent_gui = parent
         self.config = load_config()  # Load config for persistence
-        self.last_input_folder = getattr(
-            parent, "last_input_folder", ""
-        ) or self.config.get("last_input_folder", "")
+        self.last_input_folder = getattr(parent, "last_input_folder", "") or self.config.get(
+            "last_input_folder", ""
+        )
         self._document_checked_chapters: dict[str, set[str]] = {}
 
         layout = QVBoxLayout()
@@ -266,9 +251,7 @@ class QueueManager(QDialog):
         layout.setSpacing(12)  # set spacing between widgets in main layout
         # list of queued items
         self.listwidget = DroppableQueueTableWidget(self)
-        self.listwidget.setSelectionMode(
-            QAbstractItemView.SelectionMode.ExtendedSelection
-        )
+        self.listwidget.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.listwidget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.listwidget.customContextMenuRequested.connect(self.show_context_menu)
         # Add informative instructions at the top
@@ -298,9 +281,7 @@ class QueueManager(QDialog):
             f"color: {COLORS['LIGHT_DISABLED']}; background: transparent; padding: 20px;"
         )
         self.empty_overlay.setWordWrap(True)
-        self.empty_overlay.setAttribute(
-            Qt.WidgetAttribute.WA_TransparentForMouseEvents, True
-        )
+        self.empty_overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.empty_overlay.hide()
 
         button_row = QHBoxLayout()
@@ -355,9 +336,7 @@ class QueueManager(QDialog):
         # 1. Move to Top button
         self.move_top_button = QPushButton("Move to Top")
         self.move_top_button.setFixedHeight(36)
-        self.move_top_button.setToolTip(
-            "Move selected item(s) to the beginning of the queue."
-        )
+        self.move_top_button.setToolTip("Move selected item(s) to the beginning of the queue.")
         self.move_top_button.clicked.connect(self.move_selected_to_top)
         reorder_row.addWidget(self.move_top_button)
 
@@ -378,9 +357,7 @@ class QueueManager(QDialog):
         # 4. Move to Bottom button
         self.move_bottom_button = QPushButton("Move to Bottom")
         self.move_bottom_button.setFixedHeight(36)
-        self.move_bottom_button.setToolTip(
-            "Move selected item(s) to the end of the queue."
-        )
+        self.move_bottom_button.setToolTip("Move selected item(s) to the end of the queue.")
         self.move_bottom_button.clicked.connect(self.move_selected_to_bottom)
         reorder_row.addWidget(self.move_bottom_button)
 
@@ -433,9 +410,7 @@ class QueueManager(QDialog):
             # Get current global settings and checkbox state for overrides.
             current_global_settings = self.get_current_attributes()
             override_chk = getattr(self, "override_chk", None)
-            is_override_active = bool(
-                override_chk is not None and override_chk.isChecked()
-            )
+            is_override_active = bool(override_chk is not None and override_chk.isChecked())
 
             icon_provider = QFileIconProvider()
             for item in self.queue:
@@ -448,16 +423,12 @@ class QueueManager(QDialog):
                     return getattr(item, attr, default)
 
                 # Determine display file path (prefer save_base_path for original file)
-                display_file_path = (
-                    getattr(item, "save_base_path", None) or item.file_name
-                )
+                display_file_path = getattr(item, "save_base_path", None) or item.file_name
                 processing_file_path = item.file_name
 
                 # Normalize paths for consistent display (fixes Windows path separator issues)
                 display_file_path = (
-                    os.path.normpath(display_file_path)
-                    if display_file_path
-                    else display_file_path
+                    os.path.normpath(display_file_path) if display_file_path else display_file_path
                 )
                 processing_file_path = (
                     os.path.normpath(processing_file_path)
@@ -471,17 +442,15 @@ class QueueManager(QDialog):
                 tooltip = ""
                 # If override is active, add the warning header on its own line
                 if is_override_active:
-                    tooltip += (
-                        "<b style='color: #ff9900;'>(Global Override Active)</b><br>"
-                    )
+                    tooltip += "<b style='color: #ff9900;'>(Global Override Active)</b><br>"
 
                 output_folder = get_val("output_folder")
                 # For plain .txt inputs we don't need to show a separate processing file
                 show_processing = True
                 try:
-                    if isinstance(
-                        display_file_path, str
-                    ) and display_file_path.lower().endswith(".txt"):
+                    if isinstance(display_file_path, str) and display_file_path.lower().endswith(
+                        ".txt"
+                    ):
                         show_processing = False
                 except Exception:
                     show_processing = True
@@ -502,9 +471,7 @@ class QueueManager(QDialog):
                 )
                 if output_folder not in (None, "", "None"):
                     tooltip += f"<b>Output Folder:</b> {output_folder}<br>"
-                formatted_char_count = format_char_count(
-                    getattr(item, "total_char_count", 0)
-                )
+                formatted_char_count = format_char_count(getattr(item, "total_char_count", 0))
                 tooltip += (
                     f"<b>Subtitle Mode:</b> {get_val('subtitle_mode')}<br>"
                     f"<b>Output Format:</b> {get_val('output_format')}<br>"
@@ -514,9 +481,7 @@ class QueueManager(QDialog):
                     f"<b>Speed Method:</b> {get_val('subtitle_speed_method', 'tts')}"
                 )
                 # Add book handler options if present (Preserve logic: specific to file structure)
-                save_chapters_separately = getattr(
-                    item, "save_chapters_separately", None
-                )
+                save_chapters_separately = getattr(item, "save_chapters_separately", None)
                 merge_chapters_at_end = getattr(item, "merge_chapters_at_end", None)
                 if save_chapters_separately is not None:
                     tooltip += f"<br><b>Save chapters separately:</b> {'Yes' if save_chapters_separately else 'No'}"
@@ -530,9 +495,7 @@ class QueueManager(QDialog):
                 # Determine display name for table row
                 display_name = os.path.basename(display_file_path) or display_file_path
                 # Strip extension for documents to match main window display style
-                if display_file_path.lower().endswith(
-                    (".epub", ".pdf", ".md", ".markdown")
-                ):
+                if display_file_path.lower().endswith((".epub", ".pdf", ".md", ".markdown")):
                     display_name = os.path.splitext(display_name)[0]
 
                 import re
@@ -563,9 +526,7 @@ class QueueManager(QDialog):
                 char_item.setTextAlignment(
                     Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
                 )
-                char_item.setFont(
-                    QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
-                )
+                char_item.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
                 char_item.setForeground(QColor(COLORS["LIGHT_DISABLED"]))
                 char_item.setData(Qt.ItemDataRole.UserRole, int(char_count or 0))
                 char_item.setFlags(char_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
@@ -606,9 +567,7 @@ class QueueManager(QDialog):
         self.process_queue()
         self.update_button_states()
         if self.listwidget.rowCount() > 0:
-            self._restore_selection(
-                [min(focus_row_hint, self.listwidget.rowCount() - 1)]
-            )
+            self._restore_selection([min(focus_row_hint, self.listwidget.rowCount() - 1)])
         self.listwidget.setFocus()
 
     def _get_selected_rows(self):
@@ -702,8 +661,7 @@ class QueueManager(QDialog):
             index = model.index(row, 0)
             selection_model.select(
                 index,
-                QItemSelectionModel.SelectionFlag.Select
-                | QItemSelectionModel.SelectionFlag.Rows,
+                QItemSelectionModel.SelectionFlag.Select | QItemSelectionModel.SelectionFlag.Rows,
             )
         if valid_rows:
             first_index = model.index(valid_rows[0], 0)
@@ -757,9 +715,7 @@ class QueueManager(QDialog):
                 return False
             selected_set = set(selected_rows)
             selected_items = [items[row] for row in selected_rows]
-            remaining_items = [
-                item for idx, item in enumerate(items) if idx not in selected_set
-            ]
+            remaining_items = [item for idx, item in enumerate(items) if idx not in selected_set]
             items[:] = selected_items + remaining_items
             return True
 
@@ -771,9 +727,7 @@ class QueueManager(QDialog):
                 return False
             selected_set = set(selected_rows)
             selected_items = [items[row] for row in selected_rows]
-            remaining_items = [
-                item for idx, item in enumerate(items) if idx not in selected_set
-            ]
+            remaining_items = [item for idx, item in enumerate(items) if idx not in selected_set]
             items[:] = remaining_items + selected_items
             return True
 
@@ -795,9 +749,7 @@ class QueueManager(QDialog):
                 return
         self.queue.clear()
         self.listwidget.setRowCount(0)
-        self.empty_overlay.resize(
-            self.listwidget.size()
-        )  # Ensure overlay is sized correctly
+        self.empty_overlay.resize(self.listwidget.size())  # Ensure overlay is sized correctly
         self.empty_overlay.show()  # Show the overlay when queue is empty
         self.update_button_states()
 
@@ -810,9 +762,7 @@ class QueueManager(QDialog):
         parent = self.parent_gui
         if parent is not None:
             # lang_code: use parent's get_voice_formula and get_selected_lang
-            if hasattr(parent, "get_voice_formula") and hasattr(
-                parent, "get_selected_lang"
-            ):
+            if hasattr(parent, "get_voice_formula") and hasattr(parent, "get_selected_lang"):
                 voice_formula = parent.get_voice_formula()
                 attrs["lang_code"] = parent.get_selected_lang(voice_formula)
                 attrs["voice"] = voice_formula
@@ -838,22 +788,16 @@ class QueueManager(QDialog):
             # total_char_count
             attrs["total_char_count"] = getattr(parent, "char_count", "")
             # replace_single_newlines
-            attrs["replace_single_newlines"] = getattr(
-                parent, "replace_single_newlines", True
-            )
+            attrs["replace_single_newlines"] = getattr(parent, "replace_single_newlines", True)
             # use_silent_gaps
             attrs["use_silent_gaps"] = getattr(parent, "use_silent_gaps", False)
             # subtitle_speed_method
-            attrs["subtitle_speed_method"] = getattr(
-                parent, "subtitle_speed_method", "tts"
-            )
+            attrs["subtitle_speed_method"] = getattr(parent, "subtitle_speed_method", "tts")
             # word substitutions
             attrs["word_substitutions_enabled"] = getattr(
                 parent, "word_substitutions_enabled", False
             )
-            attrs["word_substitutions_list"] = getattr(
-                parent, "word_substitutions_list", ""
-            )
+            attrs["word_substitutions_list"] = getattr(parent, "word_substitutions_list", "")
             attrs["case_sensitive_substitutions"] = getattr(
                 parent, "case_sensitive_substitutions", False
             )
@@ -863,12 +807,8 @@ class QueueManager(QDialog):
                 parent, "fix_nonstandard_punctuation", False
             )
             # book handler options
-            attrs["save_chapters_separately"] = getattr(
-                parent, "save_chapters_separately", None
-            )
-            attrs["merge_chapters_at_end"] = getattr(
-                parent, "merge_chapters_at_end", None
-            )
+            attrs["save_chapters_separately"] = getattr(parent, "save_chapters_separately", None)
+            attrs["merge_chapters_at_end"] = getattr(parent, "merge_chapters_at_end", None)
             attrs["chapter_visual_indentation"] = getattr(
                 parent, "chapter_visual_indentation", True
             )
@@ -917,17 +857,13 @@ class QueueManager(QDialog):
                     continue
                 new_items.extend(items)
             else:
-                item = self._create_text_or_subtitle_queue_item(
-                    file_path, current_attrs
-                )
+                item = self._create_text_or_subtitle_queue_item(file_path, current_attrs)
                 if getattr(item, "total_char_count", 0) == 0:
                     try:
                         with open(file_path, "r", encoding="utf-8", errors="ignore"):
                             pass
                     except Exception as e:
-                        char_count_failures.append(
-                            os.path.basename(file_path) or file_path
-                        )
+                        char_count_failures.append(os.path.basename(file_path) or file_path)
                         logger.warning(
                             "Could not read file for character count; defaulting to 0: %s (%s)",
                             file_path,
@@ -938,9 +874,7 @@ class QueueManager(QDialog):
 
             for item in new_items:
                 if self._is_duplicate_candidate(item, pending_items):
-                    decision = self._resolve_duplicate_decision(
-                        file_path, duplicate_policy
-                    )
+                    decision = self._resolve_duplicate_decision(file_path, duplicate_policy)
                     if decision == "skip":
                         duplicates.append(os.path.basename(file_path) or file_path)
                         continue
@@ -966,9 +900,7 @@ class QueueManager(QDialog):
         if duplicates:
             summary_lines.append(f"Skipped duplicates: {len(duplicates)}")
         if cancelled_documents:
-            summary_lines.append(
-                f"Cancelled document selections: {len(cancelled_documents)}"
-            )
+            summary_lines.append(f"Cancelled document selections: {len(cancelled_documents)}")
         if unsupported:
             summary_lines.append(f"Unsupported files: {len(unsupported)}")
         if summary_lines:
@@ -980,9 +912,7 @@ class QueueManager(QDialog):
         self.process_queue()
         self.update_button_states()
 
-    def _create_text_or_subtitle_queue_item(
-        self, file_path: str, current_attrs: dict[str, Any]
-    ):
+    def _create_text_or_subtitle_queue_item(self, file_path: str, current_attrs: dict[str, Any]):
         item: Any = SimpleNamespace()
         item.file_name = file_path
         item.save_base_path = file_path
@@ -998,9 +928,7 @@ class QueueManager(QDialog):
             item.total_char_count = 0
         return item
 
-    def _create_document_queue_item(
-        self, file_path: str, current_attrs: dict[str, Any]
-    ):
+    def _create_document_queue_item(self, file_path: str, current_attrs: dict[str, Any]):
         file_type = self._document_file_type(file_path)
         checked = self._document_checked_chapters.get(file_path, set())
         dialog = HandlerDialog(
@@ -1027,6 +955,7 @@ class QueueManager(QDialog):
         if dialog.get_save_chunks_in_folder():
             import re
             from pathlib import Path
+
             from abogen.subtitle_utils import sanitize_name_for_os
 
             book_metadata = getattr(dialog, "book_metadata", {}) or {}
@@ -1075,9 +1004,7 @@ class QueueManager(QDialog):
 
         return items
 
-    def _resolve_document_output_cache_dir(
-        self, file_path: str, dialog: HandlerDialog
-    ) -> str:
+    def _resolve_document_output_cache_dir(self, file_path: str, dialog: HandlerDialog) -> str:
         from abogen.utils import get_user_cache_path
 
         cache_dir = get_user_cache_path()
@@ -1147,14 +1074,10 @@ class QueueManager(QDialog):
             and getattr(first, "lang_code", None) == getattr(second, "lang_code", None)
             and getattr(first, "speed", None) == getattr(second, "speed", None)
             and getattr(first, "voice", None) == getattr(second, "voice", None)
-            and getattr(first, "save_option", None)
-            == getattr(second, "save_option", None)
-            and getattr(first, "output_folder", None)
-            == getattr(second, "output_folder", None)
-            and getattr(first, "subtitle_mode", None)
-            == getattr(second, "subtitle_mode", None)
-            and getattr(first, "output_format", None)
-            == getattr(second, "output_format", None)
+            and getattr(first, "save_option", None) == getattr(second, "save_option", None)
+            and getattr(first, "output_folder", None) == getattr(second, "output_folder", None)
+            and getattr(first, "subtitle_mode", None) == getattr(second, "subtitle_mode", None)
+            and getattr(first, "output_format", None) == getattr(second, "output_format", None)
             and getattr(first, "total_char_count", None)
             == getattr(second, "total_char_count", None)
             and getattr(first, "replace_single_newlines", True)
@@ -1163,8 +1086,7 @@ class QueueManager(QDialog):
             == getattr(second, "use_silent_gaps", False)
             and getattr(first, "subtitle_speed_method", "tts")
             == getattr(second, "subtitle_speed_method", "tts")
-            and getattr(first, "save_base_path", None)
-            == getattr(second, "save_base_path", None)
+            and getattr(first, "save_base_path", None) == getattr(second, "save_base_path", None)
             and getattr(first, "save_chapters_separately", None)
             == getattr(second, "save_chapters_separately", None)
             and getattr(first, "merge_chapters_at_end", None)
@@ -1175,9 +1097,7 @@ class QueueManager(QDialog):
             == getattr(second, "chapter_depth_limit", 99)
         )
 
-    def _resolve_duplicate_decision(
-        self, file_path: str, policy: dict[str, str | None]
-    ) -> str:
+    def _resolve_duplicate_decision(self, file_path: str, policy: dict[str, str | None]) -> str:
         if policy.get("remaining") == "skip":
             return "skip"
         if policy.get("remaining") == "add":
@@ -1193,9 +1113,7 @@ class QueueManager(QDialog):
         skip_all_btn = msg_box.addButton(
             "Skip all duplicates", QMessageBox.ButtonRole.DestructiveRole
         )
-        add_all_btn = msg_box.addButton(
-            "Add all duplicates", QMessageBox.ButtonRole.ActionRole
-        )
+        add_all_btn = msg_box.addButton("Add all duplicates", QMessageBox.ButtonRole.ActionRole)
         msg_box.exec()
         clicked = msg_box.clickedButton()
 
@@ -1337,12 +1255,8 @@ class QueueManager(QDialog):
 
             doc_exts = (".md", ".markdown", ".pdf", ".epub")
             is_document_input = (
-                isinstance(display_path, str)
-                and display_path.lower().endswith(doc_exts)
-            ) or (
-                isinstance(processing_path, str)
-                and processing_path.lower().endswith(doc_exts)
-            )
+                isinstance(display_path, str) and display_path.lower().endswith(doc_exts)
+            ) or (isinstance(processing_path, str) and processing_path.lower().endswith(doc_exts))
 
             # Add Open file action(s)
             def open_file_by_path(path_label: str):
@@ -1350,9 +1264,7 @@ class QueueManager(QDialog):
 
                 p = display_path if path_label == "display" else processing_path
                 if not p:
-                    QMessageBox.warning(
-                        self, "File Not Found", "Path is not available."
-                    )
+                    QMessageBox.warning(self, "File Not Found", "Path is not available.")
                     return
 
                 # Find the queue item and resolve the target path
@@ -1363,9 +1275,7 @@ class QueueManager(QDialog):
                         or q.file_name == display_path
                     ):
                         if path_label == "display":
-                            target_path = (
-                                getattr(q, "save_base_path", None) or q.file_name
-                            )
+                            target_path = getattr(q, "save_base_path", None) or q.file_name
                         else:
                             target_path = q.file_name
                         break
@@ -1374,9 +1284,7 @@ class QueueManager(QDialog):
                         or q.file_name == processing_path
                     ):
                         if path_label == "display":
-                            target_path = (
-                                getattr(q, "save_base_path", None) or q.file_name
-                            )
+                            target_path = getattr(q, "save_base_path", None) or q.file_name
                         else:
                             target_path = q.file_name
                         break
@@ -1386,24 +1294,18 @@ class QueueManager(QDialog):
                     target_path = p
 
                 if not os.path.exists(target_path):
-                    QMessageBox.warning(
-                        self, "File Not Found", "The file does not exist."
-                    )
+                    QMessageBox.warning(self, "File Not Found", "The file does not exist.")
                     return
                 QDesktopServices.openUrl(QUrl.fromLocalFile(target_path))
 
             if is_document_input:
                 # For documents, show two open options
                 open_processed_action = QAction("Open processed file", self)
-                open_processed_action.triggered.connect(
-                    lambda: open_file_by_path("processing")
-                )
+                open_processed_action.triggered.connect(lambda: open_file_by_path("processing"))
                 menu.addAction(open_processed_action)
 
                 open_input_action = QAction("Open input file", self)
-                open_input_action.triggered.connect(
-                    lambda: open_file_by_path("display")
-                )
+                open_input_action.triggered.connect(lambda: open_file_by_path("display"))
                 menu.addAction(open_input_action)
             else:
                 # For plain text files, show single open option
@@ -1419,9 +1321,7 @@ class QueueManager(QDialog):
                 # path_label should be either 'display' or 'processing'
                 p = display_path if path_label == "display" else processing_path
                 if not p:
-                    QMessageBox.warning(
-                        self, "File Not Found", "Path is not available."
-                    )
+                    QMessageBox.warning(self, "File Not Found", "Path is not available.")
                     return
                 # If the stored path is the display path (original) but the actual file may be
                 # stored on the queue object differently, try to resolve via the queue entry.
@@ -1432,9 +1332,7 @@ class QueueManager(QDialog):
                         or q.file_name == display_path
                     ):
                         if path_label == "display":
-                            target_path = (
-                                getattr(q, "save_base_path", None) or q.file_name
-                            )
+                            target_path = getattr(q, "save_base_path", None) or q.file_name
                         else:
                             target_path = q.file_name
                         break
@@ -1443,9 +1341,7 @@ class QueueManager(QDialog):
                         or q.file_name == processing_path
                     ):
                         if path_label == "display":
-                            target_path = (
-                                getattr(q, "save_base_path", None) or q.file_name
-                            )
+                            target_path = getattr(q, "save_base_path", None) or q.file_name
                         else:
                             target_path = q.file_name
                         break
@@ -1469,9 +1365,7 @@ class QueueManager(QDialog):
 
             if is_document_input:
                 processed_action = QAction("Go to processed file", self)
-                processed_action.triggered.connect(
-                    lambda: open_folder_for("processing")
-                )
+                processed_action.triggered.connect(lambda: open_folder_for("processing"))
                 menu.addAction(processed_action)
 
                 input_action = QAction("Go to input file", self)
@@ -1485,9 +1379,7 @@ class QueueManager(QDialog):
                     item = selected_items[0]
                     paths = item.data(Qt.ItemDataRole.UserRole)
                     if isinstance(paths, dict):
-                        file_path = paths.get(
-                            "display_path", paths.get("processing_path", "")
-                        )
+                        file_path = paths.get("display_path", paths.get("processing_path", ""))
                     else:
                         file_path = paths  # Fallback for old format
                     # Find the queue item
@@ -1496,9 +1388,7 @@ class QueueManager(QDialog):
                             getattr(q, "save_base_path", None) == file_path
                             or q.file_name == file_path
                         ):
-                            target_path = (
-                                getattr(q, "save_base_path", None) or q.file_name
-                            )
+                            target_path = getattr(q, "save_base_path", None) or q.file_name
                             if not os.path.exists(target_path):
                                 QMessageBox.warning(
                                     self, "File Not Found", "The file does not exist."

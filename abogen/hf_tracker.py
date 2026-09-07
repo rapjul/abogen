@@ -1,26 +1,32 @@
+from collections.abc import Callable
+from typing import Any
+
 import huggingface_hub
 from huggingface_hub import hf_hub_download
 
-log_callback = None
-show_warning_signal_emitter = None  # Renamed for clarity
+log_callback: Callable[[str], None] | None = None
+show_warning_signal_emitter: Any = None  # Renamed for clarity
 
 
-def set_log_callback(cb):
+def set_log_callback(cb: Callable[[str], None] | None) -> None:
+    """Set the callback for logging download progress."""
     global log_callback
     log_callback = cb
 
 
-def set_show_warning_signal_emitter(emitter):  # Renamed for clarity
+def set_show_warning_signal_emitter(emitter: Any) -> None:
+    """Set the signal emitter for showing download warnings."""
     global show_warning_signal_emitter
     show_warning_signal_emitter = emitter
 
 
-def tracked_hf_hub_download(*args, **kwargs):
+def tracked_hf_hub_download(*args: Any, **kwargs: Any) -> Any:
+    """Download a file from Hugging Face Hub with progress tracking and notification."""
     try:
         local_kwargs = dict(kwargs)
         local_kwargs["local_files_only"] = True
         return hf_hub_download(*args, **local_kwargs)
-    except Exception:
+    except (OSError, ValueError):
         repo_id = kwargs.get("repo_id", "<unknown repo>")
         filename = kwargs.get("filename", "<unknown file>")
         if filename.endswith(".pth"):

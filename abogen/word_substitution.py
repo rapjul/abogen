@@ -207,7 +207,7 @@ def convert_numerals_to_words(text):
             number = int(match.group(0))
             # Convert to words in English
             return num2words(number)
-        except Exception:
+        except (ValueError, TypeError, OverflowError, NotImplementedError):
             # If conversion fails, return original
             return match.group(0)
 
@@ -318,9 +318,7 @@ def convert_roman_numerals_to_numbers(text):
         roman_str = roman_str.upper()
         # Basic validation (prevents 'DIM', 'MIX' which are valid roman characters but often normal words,
         # though our preceding-word check largely mitigates this)
-        if not re.fullmatch(
-            r"M{0,4}(CM|CD|D?C{0,3})(XC|XL|L?X{0,3})(IX|IV|V?I{0,3})", roman_str
-        ):
+        if not re.fullmatch(r"M{0,4}(CM|CD|D?C{0,3})(XC|XL|L?X{0,3})(IX|IV|V?I{0,3})", roman_str):
             return None
 
         total = 0
@@ -492,9 +490,7 @@ def expand_common_abbreviations(text):
     for pattern, replacement in abbreviations.items():
         # Negative lookbehind to prevent replacing mid-word if boundary somehow fails
         # Use simple ignorecase RegEx replace
-        processed_text = re.sub(
-            pattern, replacement, processed_text, flags=re.IGNORECASE
-        )
+        processed_text = re.sub(pattern, replacement, processed_text, flags=re.IGNORECASE)
 
     case_sensitive_abbreviations = {
         # Directional / Compass

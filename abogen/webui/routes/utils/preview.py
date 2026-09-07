@@ -1,16 +1,17 @@
 import io
 import threading
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
+from collections.abc import Iterable, Mapping
+from typing import Any
+
 import numpy as np
 import soundfile as sf
 from flask import current_app, send_file
 from flask.typing import ResponseReturnValue
 
-
 SPLIT_PATTERN = r"\n+"
 SAMPLE_RATE = 24000
 
-_preview_pipelines: Dict[Tuple[str, str], Any] = {}
+_preview_pipelines: dict[tuple[str, str], Any] = {}
 _preview_pipeline_lock = threading.Lock()
 
 
@@ -45,7 +46,7 @@ def _select_device() -> str:
     return "cpu"
 
 
-def _resolve_pipeline(language: str, use_gpu: bool) -> Tuple[Any, bool]:
+def _resolve_pipeline(language: str, use_gpu: bool) -> tuple[Any, bool]:
     """Load a preview pipeline, falling back to CPU when acceleration fails.
 
     Args:
@@ -59,13 +60,13 @@ def _resolve_pipeline(language: str, use_gpu: bool) -> Tuple[Any, bool]:
     Raises:
         RuntimeError: If no preview pipeline can be loaded.
     """
-    devices: List[str] = ["cpu"]
+    devices: list[str] = ["cpu"]
     if use_gpu:
         preferred = _select_device()
         if preferred != "cpu":
             devices.insert(0, preferred)
 
-    last_error: Optional[Exception] = None
+    last_error: Exception | None = None
     for device in devices:
         try:
             return get_preview_pipeline(language, device), device != "cpu"
@@ -101,9 +102,7 @@ def get_preview_pipeline(language: str, device: str) -> Any:
         from abogen.utils import load_numpy_kpipeline
 
         _, KPipeline = load_numpy_kpipeline()
-        pipeline = KPipeline(
-            lang_code=language, repo_id="hexgrad/Kokoro-82M", device=device
-        )
+        pipeline = KPipeline(lang_code=language, repo_id="hexgrad/Kokoro-82M", device=device)
         _preview_pipelines[key] = pipeline
         return pipeline
 
@@ -117,9 +116,9 @@ def generate_preview_audio(
     tts_provider: str = "kokoro",
     supertonic_total_steps: int = 5,
     max_seconds: float = 8.0,
-    pronunciation_overrides: Optional[Iterable[Mapping[str, Any]]] = None,
-    manual_overrides: Optional[Iterable[Mapping[str, Any]]] = None,
-    speakers: Optional[Mapping[str, Any]] = None,
+    pronunciation_overrides: Iterable[Mapping[str, Any]] | None = None,
+    manual_overrides: Iterable[Mapping[str, Any]] | None = None,
+    speakers: Mapping[str, Any] | None = None,
 ) -> bytes:
     if not text.strip():
         raise ValueError("Preview text is required")
@@ -146,9 +145,7 @@ def generate_preview_audio(
             rules = runner._compile_pronunciation_rules(merged)
             source_text = runner._apply_pronunciation_rules(source_text, rules)
         except Exception:
-            current_app.logger.exception(
-                "Preview override application failed; using raw text"
-            )
+            current_app.logger.exception("Preview override application failed; using raw text")
             source_text = text
 
     normalized_text = source_text
@@ -194,7 +191,7 @@ def generate_preview_audio(
             split_pattern=SPLIT_PATTERN,
         )
 
-    audio_chunks: List[np.ndarray] = []
+    audio_chunks: list[np.ndarray] = []
     accumulated = 0
     max_samples = int(max(1.0, max_seconds) * SAMPLE_RATE)
 
@@ -233,26 +230,23 @@ def synthesize_preview(
     tts_provider: str = "kokoro",
     supertonic_total_steps: int = 5,
     max_seconds: float = 8.0,
-    pronunciation_overrides: Optional[Iterable[Mapping[str, Any]]] = None,
-    manual_overrides: Optional[Iterable[Mapping[str, Any]]] = None,
-    speakers: Optional[Mapping[str, Any]] = None,
+    pronunciation_overrides: Iterable[Mapping[str, Any]] | None = None,
+    manual_overrides: Iterable[Mapping[str, Any]] | None = None,
+    speakers: Mapping[str, Any] | None = None,
 ) -> ResponseReturnValue:
-    try:
-        audio_bytes = generate_preview_audio(
-            text=text,
-            voice_spec=voice_spec,
-            language=language,
-            speed=speed,
-            use_gpu=use_gpu,
-            tts_provider=tts_provider,
-            supertonic_total_steps=supertonic_total_steps,
-            max_seconds=max_seconds,
-            pronunciation_overrides=pronunciation_overrides,
-            manual_overrides=manual_overrides,
-            speakers=speakers,
-        )
-    except Exception as e:
-        raise e
+    audio_bytes = generate_preview_audio(
+        text=text,
+        voice_spec=voice_spec,
+        language=language,
+        speed=speed,
+        use_gpu=use_gpu,
+        tts_provider=tts_provider,
+        supertonic_total_steps=supertonic_total_steps,
+        max_seconds=max_seconds,
+        pronunciation_overrides=pronunciation_overrides,
+        manual_overrides=manual_overrides,
+        speakers=speakers,
+    )
 
     buffer = io.BytesIO(audio_bytes)
     response = send_file(

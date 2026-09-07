@@ -1,51 +1,53 @@
+import mimetypes
 import re
 import time
 import uuid
-from typing import Any, Dict, Iterable, List, Mapping, Optional, cast
-from flask import request, render_template, jsonify
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, cast
+
+from flask import jsonify, render_template, request
 from flask.typing import ResponseReturnValue
 
-from abogen.webui.service import PendingJob, JobStatus
+from abogen.chunking import ChunkLevel, build_chunks_for_chapters
+from abogen.constants import VOICES_INTERNAL
+from abogen.kokoro_text_normalization import normalize_roman_numeral_titles
+from abogen.speaker_configs import get_config
+from abogen.utils import calculate_text_length
+from abogen.voice_profiles import serialize_profiles
+from abogen.webui.routes.utils.common import split_profile_spec
+from abogen.webui.routes.utils.entity import sync_pronunciation_overrides
+from abogen.webui.routes.utils.epub import job_download_flags
 from abogen.webui.routes.utils.service import get_service
 from abogen.webui.routes.utils.settings import (
-    load_settings,
-    coerce_bool,
-    coerce_int,
     _CHUNK_LEVEL_VALUES,
     _DEFAULT_ANALYSIS_THRESHOLD,
     _NORMALIZATION_BOOLEAN_KEYS,
     _NORMALIZATION_STRING_KEYS,
     SAVE_MODE_LABELS,
     audiobookshelf_manual_available,
+    coerce_bool,
+    coerce_int,
+    load_settings,
 )
 from abogen.webui.routes.utils.voice import (
-    parse_voice_formula,
     formula_from_profile,
-    resolve_voice_setting,
-    resolve_voice_choice,
+    parse_voice_formula,
     prepare_speaker_metadata,
+    resolve_voice_choice,
+    resolve_voice_setting,
     template_options,
 )
-from abogen.webui.routes.utils.entity import sync_pronunciation_overrides
-from abogen.webui.routes.utils.epub import job_download_flags
-from abogen.webui.routes.utils.common import split_profile_spec
-from abogen.utils import calculate_text_length
-from abogen.voice_profiles import serialize_profiles
-from abogen.chunking import ChunkLevel, build_chunks_for_chapters
-from abogen.constants import VOICES_INTERNAL
-from abogen.speaker_configs import get_config
-from abogen.kokoro_text_normalization import normalize_roman_numeral_titles
-from dataclasses import dataclass
-from pathlib import Path
-import mimetypes
+from abogen.webui.service import JobStatus, PendingJob
 
 
 @dataclass
 class PendingBuildResult:
     pending: PendingJob
-    selected_speaker_config: Optional[str]
-    config_languages: List[str]
-    speaker_config_payload: Optional[Dict[str, Any]]
+    selected_speaker_config: str | None
+    config_languages: list[str]
+    speaker_config_payload: dict[str, Any] | None
 
 
 _WIZARD_STEP_ORDER = ["book", "chapters", "entities"]
@@ -67,7 +69,7 @@ _WIZARD_STEP_META = {
     },
 }
 
-_SUPPLEMENT_TITLE_PATTERNS: List[tuple[re.Pattern[str], float]] = [
+_SUPPLEMENT_TITLE_PATTERNS: list[tuple[re.Pattern[str], float]] = [
     (re.compile(r"\btitle\s+page\b"), 3.0),
     (re.compile(r"\bcopyright\b"), 2.4),
     (re.compile(r"\btable\s+of\s+contents\b"), 2.8),
@@ -89,14 +91,12 @@ _SUPPLEMENT_TITLE_PATTERNS: List[tuple[re.Pattern[str], float]] = [
     (re.compile(r"^map(s)?\s+of\s+\w+(\s+\w+){0,3}$"), 1.5),
     (re.compile(r"\blist\s+of\s+map(s)?\b"), 2.0),
     (
-        re.compile(
-            r"\b(world|realm|area|city|county|location|town|land|continent)\s+map(s)?\b"
-        ),
+        re.compile(r"\b(world|realm|area|city|county|location|town|land|continent)\s+map(s)?\b"),
         1.2,
     ),
 ]
 
-_CONTENT_TITLE_PATTERNS: List[re.Pattern[str]] = [
+_CONTENT_TITLE_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"\bchapter\b"),
     re.compile(r"\bbook\b"),
     re.compile(r"\bpart\b"),
@@ -108,7 +108,7 @@ _CONTENT_TITLE_PATTERNS: List[re.Pattern[str]] = [
     re.compile(r"\bstory\b"),
 ]
 
-_SUPPLEMENT_TEXT_KEYWORDS: List[tuple[str, float]] = [
+_SUPPLEMENT_TEXT_KEYWORDS: list[tuple[str, float]] = [
     ("copyright", 1.2),
     ("all rights reserved", 1.1),
     ("isbn", 0.9),
@@ -173,14 +173,12 @@ def should_preselect_chapter(
     return score < 1.9
 
 
-def ensure_at_least_one_chapter_enabled(chapters: List[Dict[str, Any]]) -> None:
+def ensure_at_least_one_chapter_enabled(chapters: list[dict[str, Any]]) -> None:
     if not chapters:
         return
     if any(chapter.get("enabled") for chapter in chapters):
         return
-    best_index = max(
-        range(len(chapters)), key=lambda idx: chapters[idx].get("characters", 0)
-    )
+    best_index = max(range(len(chapters)), key=lambda idx: chapters[idx].get("characters", 0))
     chapters[best_index]["enabled"] = True
 
 
@@ -188,9 +186,9 @@ def apply_prepare_form(
     pending: PendingJob, form: Mapping[str, Any]
 ) -> tuple[
     ChunkLevel,
-    List[Dict[str, Any]],
-    List[Dict[str, Any]],
-    List[str],
+    list[dict[str, Any]],
+    list[dict[str, Any]],
+    list[str],
     int,
     str,
     bool,
@@ -201,9 +199,7 @@ def apply_prepare_form(
     )
     if raw_chunk_level not in _CHUNK_LEVEL_VALUES:
         raw_chunk_level = (
-            pending.chunk_level
-            if pending.chunk_level in _CHUNK_LEVEL_VALUES
-            else "paragraph"
+            pending.chunk_level if pending.chunk_level in _CHUNK_LEVEL_VALUES else "paragraph"
         )
     pending.chunk_level = raw_chunk_level
     chunk_level_literal = cast(ChunkLevel, pending.chunk_level)
@@ -212,9 +208,7 @@ def apply_prepare_form(
 
     pending.generate_epub3 = coerce_bool(form.get("generate_epub3"), False)
 
-    threshold_default = getattr(
-        pending, "speaker_analysis_threshold", _DEFAULT_ANALYSIS_THRESHOLD
-    )
+    threshold_default = getattr(pending, "speaker_analysis_threshold", _DEFAULT_ANALYSIS_THRESHOLD)
     raw_threshold = form.get("speaker_analysis_threshold")
     if raw_threshold is not None:
         pending.speaker_analysis_threshold = coerce_int(
@@ -227,7 +221,7 @@ def apply_prepare_form(
         pending.speaker_analysis_threshold = threshold_default
 
     if not pending.speakers:
-        narrator: Dict[str, Any] = {
+        narrator: dict[str, Any] = {
             "id": "narrator",
             "label": "Narrator",
             "voice": pending.voice,
@@ -259,7 +253,7 @@ def apply_prepare_form(
 
     pending.applied_speaker_config = selected_config or None
 
-    errors: List[str] = []
+    errors: list[str] = []
 
     if isinstance(pending.speakers, dict):
         for speaker_id, payload in list(pending.speakers.items()):
@@ -304,7 +298,7 @@ def apply_prepare_form(
                     payload.pop("resolved_voice", None)
 
             lang_key = f"speaker-{speaker_id}-languages"
-            languages: List[str] = []
+            languages: list[str] = []
             getter = getattr(form, "getlist", None)
             if callable(getter):
                 values = cast(Iterable[str], getter(lang_key))
@@ -312,9 +306,7 @@ def apply_prepare_form(
             else:
                 raw_langs = form.get(lang_key)
                 if isinstance(raw_langs, str):
-                    languages = [
-                        item.strip() for item in raw_langs.split(",") if item.strip()
-                    ]
+                    languages = [item.strip() for item in raw_langs.split(",") if item.strip()]
             payload["config_languages"] = languages
 
     profiles = serialize_profiles()
@@ -329,7 +321,7 @@ def apply_prepare_form(
         else:
             pending.chapter_intro_delay = 0.0
 
-    intro_values: List[str] = []
+    intro_values: list[str] = []
     getter = getattr(form, "getlist", None)
     if callable(getter):
         raw_intro_values = getter("read_title_intro")
@@ -340,13 +332,11 @@ def apply_prepare_form(
         if raw_intro is not None:
             intro_values = [raw_intro]
     if intro_values:
-        pending.read_title_intro = coerce_bool(
-            intro_values[-1], pending.read_title_intro
-        )
+        pending.read_title_intro = coerce_bool(intro_values[-1], pending.read_title_intro)
     elif hasattr(form, "__contains__") and "read_title_intro" in form:
         pending.read_title_intro = False
 
-    outro_values: List[str] = []
+    outro_values: list[str] = []
     if callable(getter):
         raw_outro_values = getter("read_closing_outro")
         if raw_outro_values:
@@ -362,7 +352,7 @@ def apply_prepare_form(
     elif hasattr(form, "__contains__") and "read_closing_outro" in form:
         pending.read_closing_outro = False
 
-    caps_values: List[str] = []
+    caps_values: list[str] = []
     if callable(getter):
         raw_caps_values = getter("normalize_chapter_opening_caps")
         if raw_caps_values:
@@ -378,7 +368,7 @@ def apply_prepare_form(
     elif hasattr(form, "__contains__") and "normalize_chapter_opening_caps" in form:
         pending.normalize_chapter_opening_caps = False
 
-    overrides: List[Dict[str, Any]] = []
+    overrides: list[dict[str, Any]] = []
     selected_total = 0
 
     for index, chapter in enumerate(pending.chapters):
@@ -388,7 +378,7 @@ def apply_prepare_form(
         voice_selection = form.get(f"chapter-{index}-voice", "__default")
         formula_input = (form.get(f"chapter-{index}-formula") or "").strip()
 
-        entry: Dict[str, Any] = {
+        entry: dict[str, Any] = {
             "id": chapter.get("id") or f"{index:04d}",
             "index": index,
             "order": index,
@@ -482,21 +472,15 @@ def apply_book_step_form(
     if raw_language:
         pending.language = raw_language
 
-    subtitle_mode = (
-        form.get("subtitle_mode") or pending.subtitle_mode or "Disabled"
-    ).strip()
+    subtitle_mode = (form.get("subtitle_mode") or pending.subtitle_mode or "Disabled").strip()
     if subtitle_mode:
         pending.subtitle_mode = subtitle_mode
 
-    pending.generate_epub3 = coerce_bool(
-        form.get("generate_epub3"), bool(pending.generate_epub3)
-    )
+    pending.generate_epub3 = coerce_bool(form.get("generate_epub3"), bool(pending.generate_epub3))
 
     chunk_level_default = str(settings.get("chunk_level", "paragraph")).strip().lower()
     raw_chunk_level = (
-        (form.get("chunk_level") or pending.chunk_level or chunk_level_default)
-        .strip()
-        .lower()
+        (form.get("chunk_level") or pending.chunk_level or chunk_level_default).strip().lower()
     )
     if raw_chunk_level not in _CHUNK_LEVEL_VALUES:
         raw_chunk_level = (
@@ -530,7 +514,7 @@ def apply_book_step_form(
         if isinstance(pending.read_title_intro, bool)
         else bool(settings.get("read_title_intro", False))
     )
-    intro_values: List[str] = []
+    intro_values: list[str] = []
     getter = getattr(form, "getlist", None)
     if callable(getter):
         raw_intro_values = getter("read_title_intro")
@@ -552,7 +536,7 @@ def apply_book_step_form(
         if isinstance(getattr(pending, "read_closing_outro", None), bool)
         else bool(settings.get("read_closing_outro", True))
     )
-    outro_values: List[str] = []
+    outro_values: list[str] = []
     if callable(getter):
         raw_outro_values = getter("read_closing_outro")
         if raw_outro_values:
@@ -573,7 +557,7 @@ def apply_book_step_form(
         if isinstance(getattr(pending, "normalize_chapter_opening_caps", None), bool)
         else bool(settings.get("normalize_chapter_opening_caps", True))
     )
-    caps_values: List[str] = []
+    caps_values: list[str] = []
     getter = getattr(form, "getlist", None)
     if callable(getter):
         raw_caps_values = getter("normalize_chapter_opening_caps")
@@ -584,16 +568,14 @@ def apply_book_step_form(
         if raw_caps_flag is not None:
             caps_values = [raw_caps_flag]
     if caps_values:
-        pending.normalize_chapter_opening_caps = coerce_bool(
-            caps_values[-1], caps_default
-        )
+        pending.normalize_chapter_opening_caps = coerce_bool(caps_values[-1], caps_default)
     elif hasattr(form, "__contains__") and "normalize_chapter_opening_caps" in form:
         pending.normalize_chapter_opening_caps = False
     else:
         pending.normalize_chapter_opening_caps = caps_default
 
     def _extract_checkbox(name: str, default: bool) -> bool:
-        values: List[str] = []
+        values: list[str] = []
         getter = getattr(form, "getlist", None)
         if callable(getter):
             raw_values = getter(name)
@@ -610,7 +592,7 @@ def apply_book_step_form(
         return default
 
     overrides_existing = getattr(pending, "normalization_overrides", None)
-    overrides: Dict[str, Any] = dict(overrides_existing or {})
+    overrides: dict[str, Any] = dict(overrides_existing or {})
     for key in _NORMALIZATION_BOOLEAN_KEYS:
         default_toggle = overrides.get(key, bool(settings.get(key, True)))
         overrides[key] = _extract_checkbox(key, default_toggle)
@@ -647,14 +629,10 @@ def apply_book_step_form(
         or ""
     ).strip()
 
-    profiles_map = (
-        dict(profiles) if isinstance(profiles, Mapping) else dict(profiles or {})
-    )
+    profiles_map = dict(profiles) if isinstance(profiles, Mapping) else dict(profiles or {})
     base_spec, _selected_speaker_name = split_profile_spec(narrator_voice_raw)
 
-    profile_selection = (
-        form.get("voice_profile") or pending.voice_profile or "__standard"
-    ).strip()
+    profile_selection = (form.get("voice_profile") or pending.voice_profile or "__standard").strip()
     custom_formula_raw = (form.get("voice_formula") or "").strip()
     narrator_voice_raw = (
         base_spec or narrator_voice_raw or settings.get("default_voice") or ""
@@ -748,7 +726,7 @@ def apply_book_step_form(
 
 def persist_cover_image(
     extraction_result: Any, stored_path: Path
-) -> tuple[Optional[Path], Optional[str]]:
+) -> tuple[Path | None, str | None]:
     cover_bytes = getattr(extraction_result, "cover_image", None)
     if not cover_bytes:
         return None, None
@@ -778,7 +756,7 @@ def build_pending_job_from_extraction(
     form: Mapping[str, Any],
     settings: Mapping[str, Any],
     profiles: Mapping[str, Any],
-    metadata_overrides: Optional[Mapping[str, Any]] = None,
+    metadata_overrides: Mapping[str, Any] | None = None,
 ) -> PendingBuildResult:
     profiles_map = dict(profiles)
     cover_path, cover_mime = persist_cover_image(extraction, stored_path)
@@ -793,8 +771,7 @@ def build_pending_job_from_extraction(
     metadata_tags = dict(getattr(extraction, "metadata", {}) or {})
     if metadata_overrides:
         normalized_keys = {
-            str(existing_key).casefold(): str(existing_key)
-            for existing_key in metadata_tags.keys()
+            str(existing_key).casefold(): str(existing_key) for existing_key in metadata_tags
         }
         for key, value in metadata_overrides.items():
             if value is None:
@@ -817,16 +794,14 @@ def build_pending_job_from_extraction(
                 normalized_keys[lookup] = target_key
             metadata_tags[target_key] = value_text
 
-    total_chars = getattr(
-        extraction, "total_characters", None
-    ) or calculate_text_length(getattr(extraction, "combined_text", ""))
+    total_chars = getattr(extraction, "total_characters", None) or calculate_text_length(
+        getattr(extraction, "combined_text", "")
+    )
     chapters_source = getattr(extraction, "chapters", []) or []
     total_chapter_count = len(chapters_source)
-    chapters_payload: List[Dict[str, Any]] = []
+    chapters_payload: list[dict[str, Any]] = []
     for index, chapter in enumerate(chapters_source):
-        enabled = should_preselect_chapter(
-            chapter.title, chapter.text, index, total_chapter_count
-        )
+        enabled = should_preselect_chapter(chapter.title, chapter.text, index, total_chapter_count)
         chapters_payload.append(
             {
                 "id": f"{index:04d}",
@@ -853,11 +828,9 @@ def build_pending_job_from_extraction(
     ensure_at_least_one_chapter_enabled(chapters_payload)
 
     language = str(form.get("language") or "a").strip() or "a"
-    profiles_map = (
-        dict(profiles) if isinstance(profiles, Mapping) else dict(profiles or {})
-    )
+    profiles_map = dict(profiles) if isinstance(profiles, Mapping) else dict(profiles or {})
     default_voice_setting = settings.get("default_voice") or ""
-    resolved_default_voice, inferred_profile, inferred_language = resolve_voice_setting(
+    resolved_default_voice, inferred_profile, _inferred_language = resolve_voice_setting(
         default_voice_setting,
         profiles=profiles_map,
     )
@@ -868,9 +841,7 @@ def build_pending_job_from_extraction(
     if profile_selection in {"__standard", ""} and inferred_profile:
         profile_selection = inferred_profile
 
-    base_voice = (
-        base_voice_input or resolved_default_voice or str(default_voice_setting).strip()
-    )
+    base_voice = base_voice_input or resolved_default_voice or str(default_voice_setting).strip()
     if not base_voice and VOICES_INTERNAL:
         base_voice = VOICES_INTERNAL[0]
     selected_speaker_config = (form.get("speaker_config") or "").strip()
@@ -905,15 +876,11 @@ def build_pending_job_from_extraction(
     output_format = settings["output_format"]
     subtitle_format = settings["subtitle_format"]
     save_mode_key = settings["save_mode"]
-    save_mode = SAVE_MODE_LABELS.get(
-        save_mode_key, SAVE_MODE_LABELS["save_next_to_input"]
-    )
+    save_mode = SAVE_MODE_LABELS.get(save_mode_key, SAVE_MODE_LABELS["save_next_to_input"])
     replace_single_newlines = settings["replace_single_newlines"]
     use_gpu = settings["use_gpu"]
     save_chapters_separately = settings["save_chapters_separately"]
-    merge_chapters_at_end = (
-        settings["merge_chapters_at_end"] or not save_chapters_separately
-    )
+    merge_chapters_at_end = settings["merge_chapters_at_end"] or not save_chapters_separately
     save_as_project = settings["save_as_project"]
     separate_chapters_format = settings["separate_chapters_format"]
     silence_between_chapters = settings["silence_between_chapters"]
@@ -925,14 +892,10 @@ def build_pending_job_from_extraction(
     auto_prefix_chapter_titles = settings["auto_prefix_chapter_titles"]
 
     chunk_level_default = str(settings.get("chunk_level", "paragraph")).strip().lower()
-    raw_chunk_level = (
-        str(form.get("chunk_level") or chunk_level_default).strip().lower()
-    )
+    raw_chunk_level = str(form.get("chunk_level") or chunk_level_default).strip().lower()
     if raw_chunk_level not in _CHUNK_LEVEL_VALUES:
         raw_chunk_level = (
-            chunk_level_default
-            if chunk_level_default in _CHUNK_LEVEL_VALUES
-            else "paragraph"
+            chunk_level_default if chunk_level_default in _CHUNK_LEVEL_VALUES else "paragraph"
         )
     chunk_level_value = raw_chunk_level
     chunk_level_literal = cast(ChunkLevel, chunk_level_value)
@@ -942,15 +905,9 @@ def build_pending_job_from_extraction(
     generate_epub3_default = bool(settings.get("generate_epub3", False))
     generate_epub3 = coerce_bool(form.get("generate_epub3"), generate_epub3_default)
 
-    selected_chapter_sources = [
-        entry for entry in chapters_payload if entry.get("enabled")
-    ]
-    raw_chunks = build_chunks_for_chapters(
-        selected_chapter_sources, level=chunk_level_literal
-    )
-    analysis_chunks = build_chunks_for_chapters(
-        selected_chapter_sources, level="sentence"
-    )
+    selected_chapter_sources = [entry for entry in chapters_payload if entry.get("enabled")]
+    raw_chunks = build_chunks_for_chapters(selected_chapter_sources, level=chunk_level_literal)
+    analysis_chunks = build_chunks_for_chapters(selected_chapter_sources, level="sentence")
 
     analysis_threshold = coerce_int(
         settings.get("speaker_analysis_threshold"),
@@ -979,7 +936,7 @@ def build_pending_job_from_extraction(
     )
 
     def _extract_checkbox(name: str, default: bool) -> bool:
-        values: List[str] = []
+        values: list[str] = []
         getter = getattr(form, "getlist", None)
         if callable(getter):
             raw_values = getter(name)
@@ -1077,9 +1034,7 @@ def render_jobs_panel() -> str:
     )
 
 
-def normalize_wizard_step(
-    step: Optional[str], pending: Optional[PendingJob] = None
-) -> str:
+def normalize_wizard_step(step: str | None, pending: PendingJob | None = None) -> str:
     if pending is None:
         default_step = "book"
     else:
@@ -1114,11 +1069,11 @@ def wants_wizard_json() -> bool:
 
 
 def render_wizard_partial(
-    pending: Optional[PendingJob],
+    pending: PendingJob | None,
     step: str,
     *,
-    error: Optional[str] = None,
-    notice: Optional[str] = None,
+    error: str | None = None,
+    notice: str | None = None,
 ) -> str:
     templates = {
         "book": "partials/new_job_step_book.html",
@@ -1126,7 +1081,7 @@ def render_wizard_partial(
         "entities": "partials/new_job_step_entities.html",
     }
     template_name = templates[step]
-    context: Dict[str, Any] = {
+    context: dict[str, Any] = {
         "pending": pending,
         "readonly": False,
         "options": template_options(),
@@ -1138,13 +1093,13 @@ def render_wizard_partial(
 
 
 def wizard_step_payload(
-    pending: Optional[PendingJob],
+    pending: PendingJob | None,
     step: str,
     html: str,
     *,
-    error: Optional[str] = None,
-    notice: Optional[str] = None,
-) -> Dict[str, Any]:
+    error: str | None = None,
+    notice: str | None = None,
+) -> dict[str, Any]:
     meta = _WIZARD_STEP_META.get(step, {})
     try:
         active_index = _WIZARD_STEP_ORDER.index(step)
@@ -1157,18 +1112,14 @@ def wizard_step_payload(
             stored_index = -1
         max_recorded_index = max(active_index, stored_index)
         max_allowed = len(_WIZARD_STEP_ORDER) - 1
-        if max_recorded_index > max_allowed:
-            max_recorded_index = max_allowed
+        max_recorded_index = min(max_recorded_index, max_allowed)
         if stored_index != max_recorded_index:
             pending.wizard_max_step_index = max_recorded_index
             get_service().store_pending_job(pending)
     else:
         max_allowed = len(_WIZARD_STEP_ORDER) - 1
-        if max_recorded_index > max_allowed:
-            max_recorded_index = max_allowed
-    completed = [
-        slug for idx, slug in enumerate(_WIZARD_STEP_ORDER) if idx <= max_recorded_index
-    ]
+        max_recorded_index = min(max_recorded_index, max_allowed)
+    completed = [slug for idx, slug in enumerate(_WIZARD_STEP_ORDER) if idx <= max_recorded_index]
     return {
         "step": step,
         "step_index": int(meta.get("index", active_index + 1)),
@@ -1178,20 +1129,18 @@ def wizard_step_payload(
         "html": html,
         "completed_steps": completed,
         "pending_id": pending.id if pending else "",
-        "filename": pending.original_filename
-        if pending and pending.original_filename
-        else "",
+        "filename": pending.original_filename if pending and pending.original_filename else "",
         "error": error or "",
         "notice": notice or "",
     }
 
 
 def wizard_json_response(
-    pending: Optional[PendingJob],
+    pending: PendingJob | None,
     step: str,
     *,
-    error: Optional[str] = None,
-    notice: Optional[str] = None,
+    error: str | None = None,
+    notice: str | None = None,
     status: int = 200,
 ) -> ResponseReturnValue:
     html = render_wizard_partial(pending, step, error=error, notice=notice)

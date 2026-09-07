@@ -6,12 +6,13 @@ import re
 import threading
 import time
 from collections import Counter
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
+from typing import Any
 
 try:  # pragma: no cover - fallback when spaCy not available during tests
     import spacy  # type: ignore[import-not-found]
-except Exception:  # pragma: no cover - spaCy optional during runtime bootstrap
+except ImportError:  # pragma: no cover - spaCy optional during runtime bootstrap
     spacy = None
 
 _Language = Any  # type: ignore[misc,assignment]
@@ -97,18 +98,18 @@ _SUFFIX_PATTERN = re.compile(
 
 @dataclass(slots=True)
 class EntityRecord:
-    key: Tuple[str, str]
+    key: tuple[str, str]
     label: str
     kind: str
     category: str
     count: int = 0
-    samples: List[Dict[str, Any]] = field(default_factory=list)
+    samples: list[dict[str, Any]] = field(default_factory=list)
     chapter_indices: set[int] = field(default_factory=set)
     forms: Counter = field(default_factory=Counter)
-    first_position: Optional[Tuple[int, int]] = None
+    first_position: tuple[int, int] | None = None
 
     def register(
-        self, *, chapter_index: int, position: int, text: str, sentence: Optional[str]
+        self, *, chapter_index: int, position: int, text: str, sentence: str | None
     ) -> None:
         self.count += 1
         self.chapter_indices.add(chapter_index)
@@ -123,7 +124,7 @@ class EntityRecord:
             if payload not in self.samples:
                 self.samples.append(payload)
 
-    def as_dict(self, ordinal: int) -> Dict[str, Any]:
+    def as_dict(self, ordinal: int) -> dict[str, Any]:
         chapter_indices = sorted(self.chapter_indices)
         first_chapter = chapter_indices[0] if chapter_indices else None
         return {
@@ -142,17 +143,17 @@ class EntityRecord:
 
 @dataclass(slots=True)
 class EntityExtractionResult:
-    summary: Dict[str, Any]
+    summary: dict[str, Any]
     cache_key: str
     elapsed: float
-    errors: List[str]
+    errors: list[str]
 
 
 class EntityModelError(RuntimeError):
     pass
 
 
-_MODEL_CACHE: Dict[str, Any] = {}
+_MODEL_CACHE: dict[str, Any] = {}
 _MODEL_LOCK = threading.RLock()
 
 
@@ -168,9 +169,7 @@ def _resolve_model_name(language: str) -> str:
 
 def _load_model(language: str) -> Any:
     if spacy is None:
-        raise EntityModelError(
-            "spaCy is not available. Install spaCy to enable entity extraction."
-        )
+        raise EntityModelError("spaCy is not available. Install spaCy to enable entity extraction.")
 
     model_name = _resolve_model_name(language)
     cache_key = model_name.lower()
@@ -213,9 +212,7 @@ def _normalize_label(text: str) -> str:
     for index, part in enumerate(parts):
         if part.isupper():
             normalized_parts.append(part)
-        elif part[:1].isupper():
-            normalized_parts.append(part[:1].upper() + part[1:])
-        elif index == 0:
+        elif part[:1].isupper() or index == 0:
             normalized_parts.append(part[:1].upper() + part[1:])
         else:
             normalized_parts.append(part)
@@ -237,7 +234,7 @@ def _iter_named_entities(doc: Any) -> Iterable[Any]:  # type: ignore[override]
 
 
 def _extract_propn_tokens(doc: Any) -> Iterable[Any]:  # type: ignore[override]
-    seen: set[Tuple[int, int]] = set()
+    seen: set[tuple[int, int]] = set()
     for ent in getattr(doc, "ents", ()):  # guard multi-token spans
         seen.add((ent.start, ent.end))
     for token in doc:
@@ -256,9 +253,7 @@ def _extract_propn_tokens(doc: Any) -> Iterable[Any]:  # type: ignore[override]
         yield doc[token.i : token.i + 1]
 
 
-def _empty_result(
-    cache_key: str, error: Optional[str] = None
-) -> EntityExtractionResult:
+def _empty_result(cache_key: str, error: str | None = None) -> EntityExtractionResult:
     payload = {
         "people": [],
         "entities": [],
@@ -271,9 +266,7 @@ def _empty_result(
         "model": None,
     }
     errors = [error] if error else []
-    return EntityExtractionResult(
-        summary=payload, cache_key=cache_key, elapsed=0.0, errors=errors
-    )
+    return EntityExtractionResult(summary=payload, cache_key=cache_key, elapsed=0.0, errors=errors)
 
 
 def extract_entities(
@@ -284,7 +277,7 @@ def extract_entities(
     start = time.perf_counter()
     normalized_language = language or "en"
     combined_hasher = hashlib.sha1()
-    chapter_texts: List[Tuple[int, str]] = []
+    chapter_texts: list[tuple[int, str]] = []
     for idx, chapter in enumerate(chapters):
         text = chapter.get("text") if isinstance(chapter, Mapping) else None
         text_value = str(text or "")
@@ -308,19 +301,18 @@ def extract_entities(
     except EntityModelError as exc:
         return _empty_result(cache_key, str(exc))
 
-    records: Dict[Tuple[str, str], EntityRecord] = {}
-    tokens_for_index: Dict[str, Dict[str, Any]] = {}
+    records: dict[tuple[str, str], EntityRecord] = {}
+    tokens_for_index: dict[str, dict[str, Any]] = {}
     processed_tokens = 0
 
     for chapter_index, text in chapter_texts:
         trimmed = text.strip()
         if not trimmed:
             continue
-        if len(trimmed) + 1024 > nlp.max_length:
-            nlp.max_length = len(trimmed) + 1024
+        nlp.max_length = max(nlp.max_length, len(trimmed) + 1024)
         doc = nlp(trimmed)
 
-        def _register_span(span: Any, category_hint: Optional[str] = None) -> None:
+        def _register_span(span: Any, category_hint: str | None = None) -> None:
             nonlocal processed_tokens
             if category_hint is None and span.label_ in _EXCLUDED_NER_LABELS:
                 return
@@ -330,25 +322,18 @@ def extract_entities(
             key = _token_key(cleaned)
             if not key:
                 return
-            category = category_hint or (
-                "people" if span.label_ == "PERSON" else "entities"
-            )
+            category = category_hint or ("people" if span.label_ == "PERSON" else "entities")
             record_key = (category, key)
             record = records.get(record_key)
             if record is None:
                 record = EntityRecord(
                     key=record_key,
                     label=cleaned,
-                    kind=span.label_
-                    or ("PROPN" if category == "entities" else "PERSON"),
+                    kind=span.label_ or ("PROPN" if category == "entities" else "PERSON"),
                     category=category,
                 )
                 records[record_key] = record
-            sentence = (
-                span.sent.text
-                if hasattr(span, "sent") and span.sent is not None
-                else None
-            )
+            sentence = span.sent.text if hasattr(span, "sent") and span.sent is not None else None
             record.register(
                 chapter_index=chapter_index,
                 position=span.start,
@@ -379,9 +364,7 @@ def extract_entities(
 
     elapsed = time.perf_counter() - start
 
-    people_records = [
-        record for record in records.values() if record.category == "people"
-    ]
+    people_records = [record for record in records.values() if record.category == "people"]
     people_keys = {record.key[1] for record in people_records}
     entity_records = [
         record
@@ -394,12 +377,8 @@ def extract_entities(
     people_records.sort(key=lambda rec: (-rec.count, rec.label))
     entity_records.sort(key=lambda rec: (-rec.count, rec.label))
 
-    people_payload = [
-        record.as_dict(index + 1) for index, record in enumerate(people_records)
-    ]
-    entity_payload = [
-        record.as_dict(index + 1) for index, record in enumerate(entity_records)
-    ]
+    people_payload = [record.as_dict(index + 1) for index, record in enumerate(people_records)]
+    entity_payload = [record.as_dict(index + 1) for index, record in enumerate(entity_records)]
 
     index_payload = sorted(
         tokens_for_index.values(), key=lambda item: (-item["count"], item["token"])
@@ -423,27 +402,21 @@ def extract_entities(
         },
     }
 
-    return EntityExtractionResult(
-        summary=summary, cache_key=cache_key, elapsed=elapsed, errors=[]
-    )
+    return EntityExtractionResult(summary=summary, cache_key=cache_key, elapsed=elapsed, errors=[])
 
 
-def search_tokens(
-    index: Mapping[str, Any], query: str, *, limit: int = 15
-) -> List[Dict[str, Any]]:
+def search_tokens(index: Mapping[str, Any], query: str, *, limit: int = 15) -> list[dict[str, Any]]:
     tokens = index.get("tokens") if isinstance(index, Mapping) else None
     if not isinstance(tokens, list) or not query:
         return []
     normalized = query.strip().lower()
     if not normalized:
         return tokens[:limit]
-    results: List[Dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
     for entry in tokens:
         token_label = str(entry.get("token", ""))
         normalized_label = token_label.lower()
-        if normalized in normalized_label or normalized in str(
-            entry.get("normalized", "")
-        ):
+        if normalized in normalized_label or normalized in str(entry.get("normalized", "")):
             results.append(entry)
         if len(results) >= limit:
             break
@@ -452,21 +425,19 @@ def search_tokens(
 
 def merge_override(
     summary: Mapping[str, Any], overrides: Mapping[str, Mapping[str, Any]]
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     if not isinstance(summary, Mapping):
         return {"people": [], "entities": []}
-    merged_summary: Dict[str, Any] = dict(summary)
+    merged_summary: dict[str, Any] = dict(summary)
     for key in ("people", "entities"):
         items = summary.get(key)
         if not isinstance(items, list):
             continue
-        merged_items: List[Dict[str, Any]] = []
+        merged_items: list[dict[str, Any]] = []
         for entry in items:
             if not isinstance(entry, Mapping):
                 continue
-            normalized = _token_key(
-                str(entry.get("normalized") or entry.get("label") or "")
-            )
+            normalized = _token_key(str(entry.get("normalized") or entry.get("label") or ""))
             merged = dict(entry)
             if normalized and normalized in overrides:
                 merged_override = dict(overrides[normalized])

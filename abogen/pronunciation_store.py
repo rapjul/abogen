@@ -6,8 +6,9 @@ import sqlite3
 import threading
 import time
 import uuid
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any
 
 from .entity_analysis import normalize_token
 from .utils import get_internal_cache_path, get_user_settings_dir
@@ -82,11 +83,11 @@ def _migrate_legacy_sqlite(target_json_path: Path) -> None:
         # Rename old DB
         sqlite_path.rename(sqlite_path.with_suffix(".db.bak"))
 
-    except Exception:
+    except (sqlite3.Error, OSError, json.JSONDecodeError, KeyError):
         pass
 
 
-def _load_db() -> Dict[str, Any]:
+def _load_db() -> dict[str, Any]:
     path = _store_path()
     if not path.exists():
         _migrate_legacy_sqlite(path)
@@ -99,7 +100,7 @@ def _load_db() -> Dict[str, Any]:
         return {"version": _SCHEMA_VERSION, "overrides": {}}
 
 
-def _save_db(data: Dict[str, Any]) -> None:
+def _save_db(data: dict[str, Any]) -> None:
     path = _store_path()
     # Atomic write
     temp_path = path.with_suffix(".tmp")
@@ -108,7 +109,7 @@ def _save_db(data: Dict[str, Any]) -> None:
     shutil.move(str(temp_path), str(path))
 
 
-def load_overrides(language: str, tokens: Iterable[str]) -> Dict[str, Dict[str, Any]]:
+def load_overrides(language: str, tokens: Iterable[str]) -> dict[str, dict[str, Any]]:
     normalized_tokens = {normalize_token(token) for token in tokens if token}
     if not normalized_tokens:
         return {}
@@ -117,16 +118,14 @@ def load_overrides(language: str, tokens: Iterable[str]) -> Dict[str, Dict[str, 
         db = _load_db()
         lang_overrides = db.get("overrides", {}).get(language, {})
 
-        results: Dict[str, Dict[str, Any]] = {}
+        results: dict[str, dict[str, Any]] = {}
         for normalized in normalized_tokens:
             if normalized in lang_overrides:
                 results[normalized] = lang_overrides[normalized]
         return results
 
 
-def search_overrides(
-    language: str, query: str, *, limit: int = 15
-) -> List[Dict[str, Any]]:
+def search_overrides(language: str, query: str, *, limit: int = 15) -> list[dict[str, Any]]:
     if not query:
         return []
 
@@ -152,11 +151,11 @@ def save_override(
     *,
     language: str,
     token: str,
-    pronunciation: Optional[str] = None,
-    voice: Optional[str] = None,
-    notes: Optional[str] = None,
-    context: Optional[str] = None,
-) -> Dict[str, Any]:
+    pronunciation: str | None = None,
+    voice: str | None = None,
+    notes: str | None = None,
+    context: str | None = None,
+) -> dict[str, Any]:
     normalized = normalize_token(token)
     if not normalized:
         raise ValueError("Provide a token to override")
@@ -211,7 +210,7 @@ def delete_override(*, language: str, token: str) -> None:
             _save_db(db)
 
 
-def all_overrides(language: str) -> List[Dict[str, Any]]:
+def all_overrides(language: str) -> list[dict[str, Any]]:
     with _DB_LOCK:
         db = _load_db()
         lang_overrides = db.get("overrides", {}).get(language, {})
@@ -237,15 +236,13 @@ def increment_usage(*, language: str, token: str, amount: int = 1) -> None:
             _save_db(db)
 
 
-def get_override_stats(language: str) -> Dict[str, int]:
+def get_override_stats(language: str) -> dict[str, int]:
     with _DB_LOCK:
         db = _load_db()
         lang_overrides = db.get("overrides", {}).get(language, {})
 
         total = len(lang_overrides)
-        with_pronunciation = sum(
-            1 for x in lang_overrides.values() if x.get("pronunciation")
-        )
+        with_pronunciation = sum(1 for x in lang_overrides.values() if x.get("pronunciation"))
         with_voice = sum(1 for x in lang_overrides.values() if x.get("voice"))
 
         return {

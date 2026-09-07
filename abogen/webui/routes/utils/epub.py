@@ -2,15 +2,16 @@ import json
 import math
 import posixpath
 import zipfile
+from collections.abc import Iterable, Mapping
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Set, Tuple
+from typing import Any
 from xml.etree import ElementTree as ET
 
 from abogen.webui.service import Job, JobStatus
 
 
-def _coerce_path(value: Any) -> Optional[Path]:
+def _coerce_path(value: Any) -> Path | None:
     if isinstance(value, Path):
         return value
     if isinstance(value, str):
@@ -48,13 +49,11 @@ def normalize_epub_path(base_dir: str, href: str) -> str:
     if normalized in {"", "."}:
         return ""
     normalized = normalized.replace("\\", "/")
-    segments = [
-        segment for segment in normalized.split("/") if segment and segment != "."
-    ]
+    segments = [segment for segment in normalized.split("/") if segment and segment != "."]
     if not segments:
         return ""
-    deduped: List[str] = []
-    last_lower: Optional[str] = None
+    deduped: list[str] = []
+    last_lower: str | None = None
     for segment in segments:
         segment_lower = segment.lower()
         if last_lower == segment_lower:
@@ -76,7 +75,7 @@ def decode_text(payload: bytes) -> str:
     return payload.decode("utf-8", "ignore")
 
 
-def coerce_positive_time(value: Any) -> Optional[float]:
+def coerce_positive_time(value: Any) -> float | None:
     try:
         numeric = float(value)
     except (TypeError, ValueError):
@@ -86,7 +85,7 @@ def coerce_positive_time(value: Any) -> Optional[float]:
     return numeric
 
 
-def load_job_metadata(job: Job) -> Dict[str, Any]:
+def load_job_metadata(job: Job) -> dict[str, Any]:
     result = getattr(job, "result", None)
     artifacts = getattr(result, "artifacts", None)
     if not isinstance(artifacts, Mapping):
@@ -127,19 +126,15 @@ class _NavMapParser(HTMLParser):
         self._base_dir = base_dir
         self._in_nav = False
         self._nav_depth = 0
-        self._current_href: Optional[str] = None
-        self._buffer: List[str] = []
-        self.links: Dict[str, str] = {}
+        self._current_href: str | None = None
+        self._buffer: list[str] = []
+        self.links: dict[str, str] = {}
 
-    def handle_starttag(self, tag: str, attrs: List[Tuple[str, Optional[str]]]) -> None:
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         tag_lower = tag.lower()
         if tag_lower == "nav":
             attributes = dict(attrs)
-            nav_type = (
-                (attributes.get("epub:type") or attributes.get("type") or "")
-                .strip()
-                .lower()
-            )
+            nav_type = (attributes.get("epub:type") or attributes.get("type") or "").strip().lower()
             nav_role = (attributes.get("role") or "").strip().lower()
             type_tokens = {token.strip() for token in nav_type.split() if token}
             role_tokens = {token.strip() for token in nav_role.split() if token}
@@ -181,19 +176,19 @@ class _NavMapParser(HTMLParser):
             self._buffer.append(data)
 
 
-def parse_nav_document(payload: bytes, base_dir: str) -> Dict[str, str]:
+def parse_nav_document(payload: bytes, base_dir: str) -> dict[str, str]:
     parser = _NavMapParser(base_dir)
     parser.feed(decode_text(payload))
     parser.close()
     return parser.links
 
 
-def parse_ncx_document(payload: bytes, base_dir: str) -> Dict[str, str]:
+def parse_ncx_document(payload: bytes, base_dir: str) -> dict[str, str]:
     try:
         root = ET.fromstring(payload)
     except ET.ParseError:
         return {}
-    nav_map: Dict[str, str] = {}
+    nav_map: dict[str, str] = {}
     for nav_point in root.findall(".//{*}navPoint"):
         content = nav_point.find(".//{*}content")
         if content is None:
@@ -203,19 +198,15 @@ def parse_ncx_document(payload: bytes, base_dir: str) -> Dict[str, str]:
         if not normalized:
             continue
         label_el = nav_point.find(".//{*}text")
-        label = (
-            (label_el.text or "").strip()
-            if label_el is not None and label_el.text
-            else ""
-        )
+        label = (label_el.text or "").strip() if label_el is not None and label_el.text else ""
         if not label:
             label = posixpath.basename(normalized) or f"Section {len(nav_map) + 1}"
         nav_map.setdefault(normalized, label)
     return nav_map
 
 
-def extract_epub_chapters(epub_path: Path) -> List[Dict[str, str]]:
-    chapters: List[Dict[str, str]] = []
+def extract_epub_chapters(epub_path: Path) -> list[dict[str, str]]:
+    chapters: list[dict[str, str]] = []
     if not epub_path or not epub_path.exists():
         return chapters
     try:
@@ -232,7 +223,7 @@ def extract_epub_chapters(epub_path: Path) -> List[Dict[str, str]]:
             opf_bytes = archive.read(opf_path)
             opf_root = ET.fromstring(opf_bytes)
 
-            manifest: Dict[str, Dict[str, str]] = {}
+            manifest: dict[str, dict[str, str]] = {}
             for item in opf_root.findall(".//{*}manifest/{*}item"):
                 item_id = item.attrib.get("id")
                 href = item.attrib.get("href")
@@ -244,8 +235,8 @@ def extract_epub_chapters(epub_path: Path) -> List[Dict[str, str]]:
                     "media_type": item.attrib.get("media-type", ""),
                 }
 
-            spine_hrefs: List[str] = []
-            nav_id: Optional[str] = None
+            spine_hrefs: list[str] = []
+            nav_id: str | None = None
             spine = opf_root.find(".//{*}spine")
             if spine is not None:
                 nav_id = spine.attrib.get("toc")
@@ -260,7 +251,7 @@ def extract_epub_chapters(epub_path: Path) -> List[Dict[str, str]]:
                     if href and href not in spine_hrefs:
                         spine_hrefs.append(href)
 
-            nav_href: Optional[str] = None
+            nav_href: str | None = None
             for entry in manifest.values():
                 properties = entry.get("properties") or ""
                 if "nav" in {token.strip() for token in properties.split() if token}:
@@ -271,7 +262,7 @@ def extract_epub_chapters(epub_path: Path) -> List[Dict[str, str]]:
                 if toc_entry:
                     nav_href = toc_entry["href"]
 
-            nav_titles: Dict[str, str] = {}
+            nav_titles: dict[str, str] = {}
             if nav_href:
                 nav_base = posixpath.dirname(nav_href)
                 try:
@@ -311,9 +302,7 @@ def extract_epub_chapters(epub_path: Path) -> List[Dict[str, str]]:
                     normalized = href
                     if not normalized:
                         continue
-                    label = (
-                        title or posixpath.basename(normalized) or f"Chapter {index}"
-                    )
+                    label = title or posixpath.basename(normalized) or f"Chapter {index}"
                     chapters.append({"href": normalized, "title": label})
 
             return chapters
@@ -336,14 +325,14 @@ def read_epub_bytes(epub_path: Path, raw_href: str) -> bytes:
         return archive.read(normalized)
 
 
-def iter_job_result_paths(job: Job) -> List[Path]:
+def iter_job_result_paths(job: Job) -> list[Path]:
     result = getattr(job, "result", None)
     if result is None:
         return []
-    resolved_seen: Set[Path] = set()
-    collected: List[Path] = []
+    resolved_seen: set[Path] = set()
+    collected: list[Path] = []
 
-    def _remember(candidate: Optional[Path]) -> None:
+    def _remember(candidate: Path | None) -> None:
         if not candidate:
             return
         try:
@@ -370,12 +359,12 @@ def iter_job_result_paths(job: Job) -> List[Path]:
     return collected
 
 
-def iter_job_artifact_dirs(job: Job) -> List[Path]:
+def iter_job_artifact_dirs(job: Job) -> list[Path]:
     result = getattr(job, "result", None)
     if result is None:
         return []
     artifacts = getattr(result, "artifacts", None)
-    directories: List[Path] = []
+    directories: list[Path] = []
     if isinstance(artifacts, Mapping):
         for value in artifacts.values():
             candidate = _coerce_path(value)
@@ -384,8 +373,8 @@ def iter_job_artifact_dirs(job: Job) -> List[Path]:
     return directories
 
 
-def normalize_suffixes(suffixes: Iterable[str]) -> List[str]:
-    normalized: List[str] = []
+def normalize_suffixes(suffixes: Iterable[str]) -> list[str]:
+    normalized: list[str] = []
     for suffix in suffixes:
         if not suffix:
             continue
@@ -398,7 +387,7 @@ def normalize_suffixes(suffixes: Iterable[str]) -> List[str]:
     return normalized
 
 
-def find_job_file(job: Job, suffixes: Iterable[str]) -> Optional[Path]:
+def find_job_file(job: Job, suffixes: Iterable[str]) -> Path | None:
     ordered_suffixes = normalize_suffixes(suffixes)
     if not ordered_suffixes:
         return None
@@ -412,9 +401,7 @@ def find_job_file(job: Job, suffixes: Iterable[str]) -> Optional[Path]:
         pattern = f"*{suffix}"
         for directory in directories:
             try:
-                match = next(
-                    (path for path in directory.rglob(pattern) if path.is_file()), None
-                )
+                match = next((path for path in directory.rglob(pattern) if path.is_file()), None)
             except OSError:
                 match = None
             if match:
@@ -422,21 +409,19 @@ def find_job_file(job: Job, suffixes: Iterable[str]) -> Optional[Path]:
     return None
 
 
-def locate_job_epub(job: Job) -> Optional[Path]:
+def locate_job_epub(job: Job) -> Path | None:
     path = find_job_file(job, [".epub"])
     if path:
         return path
     return None
 
 
-def locate_job_m4b(job: Job) -> Optional[Path]:
+def locate_job_m4b(job: Job) -> Path | None:
     return find_job_file(job, [".m4b"])
 
 
-def locate_job_audio(
-    job: Job, preferred_suffixes: Optional[Iterable[str]] = None
-) -> Optional[Path]:
-    suffix_order: List[str] = []
+def locate_job_audio(job: Job, preferred_suffixes: Iterable[str] | None = None) -> Path | None:
+    suffix_order: list[str] = []
     if preferred_suffixes:
         suffix_order.extend(preferred_suffixes)
     suffix_order.extend([".m4b", ".mp3", ".flac", ".opus", ".ogg", ".m4a", ".wav"])
@@ -447,7 +432,7 @@ def locate_job_audio(
     return files[0] if files else None
 
 
-def job_download_flags(job: Job) -> Dict[str, bool]:
+def job_download_flags(job: Job) -> dict[str, bool]:
     if job.status != JobStatus.COMPLETED:
         return {"audio": False, "m4b": False, "epub3": False}
     return {

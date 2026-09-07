@@ -5,11 +5,13 @@ import re
 import shutil
 import uuid
 import zipfile
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
+from re import Pattern
 from tempfile import TemporaryDirectory
-from typing import Any, Dict, Iterable, List, Optional, Pattern, Sequence, Tuple
+from typing import Any
 
 from abogen.text_extractor import ExtractionResult
 
@@ -18,13 +20,13 @@ from abogen.text_extractor import ExtractionResult
 class ChunkOverlay:
     id: str
     text: str
-    original_text: Optional[str]
-    start: Optional[float]
-    end: Optional[float]
+    original_text: str | None
+    start: float | None
+    end: float | None
     speaker_id: str
-    voice: Optional[str]
-    level: Optional[str] = None
-    group_id: Optional[str] = None
+    voice: str | None
+    level: str | None = None
+    group_id: str | None = None
 
 
 @dataclass(slots=True)
@@ -33,9 +35,9 @@ class ChapterDocument:
     title: str
     xhtml_name: str
     smil_name: str
-    chunks: List[ChunkOverlay]
-    start: Optional[float]
-    end: Optional[float]
+    chunks: list[ChunkOverlay]
+    start: float | None
+    end: float | None
 
 
 class EPUB3PackageBuilder:
@@ -47,14 +49,14 @@ class EPUB3PackageBuilder:
         output_path: Path,
         book_id: str,
         extraction: ExtractionResult,
-        metadata_tags: Dict[str, Any],
-        chapter_markers: Sequence[Dict[str, Any]],
-        chunk_markers: Sequence[Dict[str, Any]],
-        chunks: Iterable[Dict[str, Any]],
+        metadata_tags: dict[str, Any],
+        chapter_markers: Sequence[dict[str, Any]],
+        chunk_markers: Sequence[dict[str, Any]],
+        chunks: Iterable[dict[str, Any]],
         audio_path: Path,
         speaker_mode: str = "single",
-        cover_image_path: Optional[Path] = None,
-        cover_image_mime: Optional[str] = None,
+        cover_image_path: Path | None = None,
+        cover_image_mime: str | None = None,
     ) -> None:
         self.output_path = output_path
         self.book_id = book_id or str(uuid.uuid4())
@@ -70,17 +72,13 @@ class EPUB3PackageBuilder:
         )
         self.cover_image_mime = cover_image_mime
 
-        self._combined_metadata = _combine_metadata(
-            extraction.metadata, self.metadata_tags
-        )
+        self._combined_metadata = _combine_metadata(extraction.metadata, self.metadata_tags)
         self._title = self._combined_metadata.get("title") or self._fallback_title()
         self._authors = _split_authors(self._combined_metadata)
         self._language = self._determine_language()
         self._publisher = self._combined_metadata.get("publisher") or ""
         self._description = self._combined_metadata.get("comment")
-        self._duration = _calculate_total_duration(
-            self.chunk_markers, self.chapter_markers
-        )
+        self._duration = _calculate_total_duration(self.chunk_markers, self.chapter_markers)
         self._modified = _utc_now_iso()
 
     def build(self) -> Path:
@@ -111,9 +109,7 @@ class EPUB3PackageBuilder:
             shutil.copy2(self.audio_path, embedded_audio)
 
             if self.cover_image_path:
-                shutil.copy2(
-                    self.cover_image_path, image_dir / self.cover_image_path.name
-                )
+                shutil.copy2(self.cover_image_path, image_dir / self.cover_image_path.name)
 
             stylesheet_path = stylesheet_dir / "style.css"
             stylesheet_path.write_text(_DEFAULT_STYLESHEET, encoding="utf-8")
@@ -162,7 +158,7 @@ class EPUB3PackageBuilder:
         return self.output_path
 
     # ------------------------------------------------------------------
-    def _build_chapter_documents(self) -> List[ChapterDocument]:
+    def _build_chapter_documents(self) -> list[ChapterDocument]:
         chunk_lookup = _build_chunk_lookup(self.chunks)
         markers_by_chapter = _group_markers_by_chapter(self.chunk_markers)
         chapter_meta = {
@@ -170,7 +166,7 @@ class EPUB3PackageBuilder:
             for idx, entry in enumerate(self.chapter_markers)
         }
 
-        documents: List[ChapterDocument] = []
+        documents: list[ChapterDocument] = []
         for chapter_index, chapter in enumerate(self.extraction.chapters):
             markers = markers_by_chapter.get(chapter_index, [])
             if not markers and chunk_lookup.by_chapter.get(chapter_index):
@@ -229,10 +225,10 @@ class EPUB3PackageBuilder:
     def _build_overlays_for_chapter(
         self,
         chapter_index: int,
-        markers: Sequence[Dict[str, Any]],
-        chunk_lookup: "ChunkLookup",
-    ) -> List[ChunkOverlay]:
-        overlays: List[ChunkOverlay] = []
+        markers: Sequence[dict[str, Any]],
+        chunk_lookup: ChunkLookup,
+    ) -> list[ChunkOverlay]:
+        overlays: list[ChunkOverlay] = []
         used_ids: set[str] = set()
 
         chapter_chunks = list(chunk_lookup.by_chapter.get(chapter_index, []))
@@ -246,11 +242,7 @@ class EPUB3PackageBuilder:
             else:
                 candidate_index = _safe_int(marker.get("chunk_index"))
                 chunk_entry = _find_chunk_by_index(chapter_chunks, candidate_index)
-                if (
-                    chunk_entry is None
-                    and chapter_chunks
-                    and position < len(chapter_chunks)
-                ):
+                if chunk_entry is None and chapter_chunks and position < len(chapter_chunks):
                     chunk_entry = chapter_chunks[position]
 
             level = None
@@ -261,9 +253,7 @@ class EPUB3PackageBuilder:
             else:
                 text = str(chunk_entry.get("text") or "")
                 speaker_id = str(
-                    chunk_entry.get("speaker_id")
-                    or marker.get("speaker_id")
-                    or "narrator"
+                    chunk_entry.get("speaker_id") or marker.get("speaker_id") or "narrator"
                 )
                 voice = (
                     chunk_entry.get("voice")
@@ -287,17 +277,13 @@ class EPUB3PackageBuilder:
 
             original_text = None
             if chunk_entry is not None:
-                original_text = chunk_entry.get("original_text") or chunk_entry.get(
-                    "display_text"
-                )
+                original_text = chunk_entry.get("original_text") or chunk_entry.get("display_text")
 
             overlays.append(
                 ChunkOverlay(
                     id=normalized_id,
                     text=text or self.extraction.chapters[chapter_index].text,
-                    original_text=str(original_text)
-                    if original_text is not None
-                    else None,
+                    original_text=str(original_text) if original_text is not None else None,
                     start=_safe_float(marker.get("start")),
                     end=_safe_float(marker.get("end")),
                     speaker_id=speaker_id,
@@ -321,19 +307,14 @@ class EPUB3PackageBuilder:
         title = html.escape(chapter.title)
         grouped_chunks = _group_chunks_for_render(chapter.chunks)
         chunk_html = "\n".join(
-            _render_chunk_group_html(group_id, items)
-            for group_id, items in grouped_chunks
+            _render_chunk_group_html(group_id, items) for group_id, items in grouped_chunks
         )
         if not chunk_html:
             chunk_html = "<p></p>"
         original_block = ""
         if chapter.chunks:
             original_text = "".join(
-                (
-                    chunk.original_text
-                    if chunk.original_text is not None
-                    else (chunk.text or "")
-                )
+                (chunk.original_text if chunk.original_text is not None else (chunk.text or ""))
                 for chunk in chapter.chunks
             )
             if original_text:
@@ -372,16 +353,10 @@ class EPUB3PackageBuilder:
         par_lines = []
         for chunk in chapter.chunks:
             par_lines.append(
-                '      <par id="par-{chunk_id}">\n'
-                '        <text src="text/{xhtml}#{chunk_id}"/>\n'
-                '        <audio src="{audio}" clipBegin="{start}" clipEnd="{end}"/>\n'
-                "      </par>".format(
-                    chunk_id=html.escape(chunk.id),
-                    xhtml=html.escape(chapter.xhtml_name),
-                    audio=html.escape(audio_href),
-                    start=_format_smil_time(chunk.start),
-                    end=_format_smil_time(chunk.end),
-                )
+                f'      <par id="par-{html.escape(chunk.id)}">\n'
+                f'        <text src="text/{html.escape(chapter.xhtml_name)}#{html.escape(chunk.id)}"/>\n'
+                f'        <audio src="{html.escape(audio_href)}" clipBegin="{_format_smil_time(chunk.start)}" clipEnd="{_format_smil_time(chunk.end)}"/>\n'
+                "      </par>"
             )
 
         return (
@@ -411,10 +386,7 @@ class EPUB3PackageBuilder:
         for chapter in chapters:
             href = f"text/{chapter.xhtml_name}"
             items.append(
-                '        <li><a href="{href}">{title}</a></li>'.format(
-                    href=html.escape(href),
-                    title=html.escape(chapter.title),
-                )
+                f'        <li><a href="{html.escape(href)}">{html.escape(chapter.title)}</a></li>'
             )
 
         return (
@@ -455,27 +427,16 @@ class EPUB3PackageBuilder:
             item_id = f"chap{chapter.index + 1:04d}"
             overlay_id = f"mo-{chapter.index + 1:04d}"
             manifest_items.append(
-                '    <item id="{item_id}" href="text/{href}" media-type="application/xhtml+xml" media-overlay="{overlay_id}"/>'.format(
-                    item_id=item_id,
-                    href=html.escape(chapter.xhtml_name),
-                    overlay_id=overlay_id,
-                )
+                f'    <item id="{item_id}" href="text/{html.escape(chapter.xhtml_name)}" media-type="application/xhtml+xml" media-overlay="{overlay_id}"/>'
             )
             manifest_items.append(
-                '    <item id="{overlay_id}" href="smil/{smil}" media-type="application/smil+xml"/>'.format(
-                    overlay_id=overlay_id,
-                    smil=html.escape(chapter.smil_name),
-                )
+                f'    <item id="{overlay_id}" href="smil/{html.escape(chapter.smil_name)}" media-type="application/smil+xml"/>'
             )
             spine_refs.append(f'    <itemref idref="{item_id}"/>')
 
         audio_item_id = "primary-audio"
         manifest_items.append(
-            '    <item id="{item_id}" href="audio/{href}" media-type="{mime}"/>'.format(
-                item_id=audio_item_id,
-                href=html.escape(audio_filename),
-                mime=_detect_audio_mime(audio_filename),
-            )
+            f'    <item id="{audio_item_id}" href="audio/{html.escape(audio_filename)}" media-type="{_detect_audio_mime(audio_filename)}"/>'
         )
 
         manifest_items.append(
@@ -491,12 +452,7 @@ class EPUB3PackageBuilder:
         if has_cover and self.cover_image_path:
             cover_id = "cover-image"
             manifest_items.append(
-                '    <item id="{item_id}" href="images/{href}" media-type="{mime}" properties="cover-image"/>'.format(
-                    item_id=cover_id,
-                    href=html.escape(self.cover_image_path.name),
-                    mime=self.cover_image_mime
-                    or _detect_image_mime(self.cover_image_path.suffix),
-                )
+                f'    <item id="{cover_id}" href="images/{html.escape(self.cover_image_path.name)}" media-type="{self.cover_image_mime or _detect_image_mime(self.cover_image_path.suffix)}" properties="cover-image"/>'
             )
 
         metadata_elements = _render_metadata_xml(
@@ -527,9 +483,7 @@ class EPUB3PackageBuilder:
         ).format(
             metadata="\n".join(metadata_elements),
             manifest="\n".join(manifest_items),
-            spine="\n".join(spine_refs)
-            if spine_refs
-            else '    <itemref idref="chap0001"/>',
+            spine="\n".join(spine_refs) if spine_refs else '    <itemref idref="chap0001"/>',
         )
 
     def _fallback_title(self) -> str:
@@ -551,14 +505,14 @@ def build_epub3_package(
     output_path: Path,
     book_id: str,
     extraction: ExtractionResult,
-    metadata_tags: Dict[str, Any],
-    chapter_markers: Sequence[Dict[str, Any]],
-    chunk_markers: Sequence[Dict[str, Any]],
-    chunks: Iterable[Dict[str, Any]],
+    metadata_tags: dict[str, Any],
+    chapter_markers: Sequence[dict[str, Any]],
+    chunk_markers: Sequence[dict[str, Any]],
+    chunks: Iterable[dict[str, Any]],
     audio_path: Path,
     speaker_mode: str = "single",
-    cover_image_path: Optional[Path] = None,
-    cover_image_mime: Optional[str] = None,
+    cover_image_path: Path | None = None,
+    cover_image_mime: str | None = None,
 ) -> Path:
     builder = EPUB3PackageBuilder(
         output_path=output_path,
@@ -582,12 +536,12 @@ def build_epub3_package(
 
 @dataclass
 class ChunkLookup:
-    by_id: Dict[str, Dict[str, Any]]
-    by_chapter: Dict[int, List[Dict[str, Any]]]
+    by_id: dict[str, dict[str, Any]]
+    by_chapter: dict[int, list[dict[str, Any]]]
 
 
-def _normalize_metadata(metadata: Optional[Dict[str, Any]]) -> Dict[str, str]:
-    normalized: Dict[str, str] = {}
+def _normalize_metadata(metadata: dict[str, Any] | None) -> dict[str, str]:
+    normalized: dict[str, str] = {}
     for key, value in (metadata or {}).items():
         if value is None:
             continue
@@ -595,8 +549,8 @@ def _normalize_metadata(metadata: Optional[Dict[str, Any]]) -> Dict[str, str]:
     return normalized
 
 
-def _combine_metadata(*sources: Dict[str, Any]) -> Dict[str, str]:
-    combined: Dict[str, str] = {}
+def _combine_metadata(*sources: dict[str, Any]) -> dict[str, str]:
+    combined: dict[str, str] = {}
     for source in sources:
         for key, value in (source or {}).items():
             if value is None:
@@ -605,22 +559,20 @@ def _combine_metadata(*sources: Dict[str, Any]) -> Dict[str, str]:
     return combined
 
 
-def _split_authors(metadata: Dict[str, str]) -> List[str]:
+def _split_authors(metadata: dict[str, str]) -> list[str]:
     candidates = []
     for key in ("artist", "author", "authors", "album_artist", "creator"):
         value = metadata.get(key)
         if value:
-            candidates.extend(
-                part.strip() for part in value.replace(";", ",").split(",")
-            )
+            candidates.extend(part.strip() for part in value.replace(";", ",").split(","))
     return [author for author in candidates if author]
 
 
 def _calculate_total_duration(
-    chunk_markers: Sequence[Dict[str, Any]],
-    chapter_markers: Sequence[Dict[str, Any]],
-) -> Optional[float]:
-    candidates: List[float] = []
+    chunk_markers: Sequence[dict[str, Any]],
+    chapter_markers: Sequence[dict[str, Any]],
+) -> float | None:
+    candidates: list[float] = []
     for marker in chunk_markers or []:
         end_value = _safe_float(marker.get("end"))
         if end_value is not None:
@@ -655,9 +607,9 @@ def _write_container_xml(root: Path) -> None:
     )
 
 
-def _build_chunk_lookup(chunks: Iterable[Dict[str, Any]]) -> ChunkLookup:
-    by_id: Dict[str, Dict[str, Any]] = {}
-    by_chapter: Dict[int, List[Dict[str, Any]]] = {}
+def _build_chunk_lookup(chunks: Iterable[dict[str, Any]]) -> ChunkLookup:
+    by_id: dict[str, dict[str, Any]] = {}
+    by_chapter: dict[int, list[dict[str, Any]]] = {}
     for entry in chunks or []:
         if not isinstance(entry, dict):
             continue
@@ -670,9 +622,9 @@ def _build_chunk_lookup(chunks: Iterable[Dict[str, Any]]) -> ChunkLookup:
 
 
 def _group_markers_by_chapter(
-    markers: Iterable[Dict[str, Any]],
-) -> Dict[int, List[Dict[str, Any]]]:
-    grouped: Dict[int, List[Dict[str, Any]]] = {}
+    markers: Iterable[dict[str, Any]],
+) -> dict[int, list[dict[str, Any]]]:
+    grouped: dict[int, list[dict[str, Any]]] = {}
     for entry in markers or []:
         if not isinstance(entry, dict):
             continue
@@ -689,9 +641,9 @@ def _group_markers_by_chapter(
 
 
 def _find_chunk_by_index(
-    chapter_chunks: Sequence[Dict[str, Any]],
-    chunk_index: Optional[int],
-) -> Optional[Dict[str, Any]]:
+    chapter_chunks: Sequence[dict[str, Any]],
+    chunk_index: int | None,
+) -> dict[str, Any] | None:
     if chunk_index is None:
         return None
     for entry in chapter_chunks:
@@ -700,7 +652,7 @@ def _find_chunk_by_index(
     return None
 
 
-def _normalize_chunk_id(chunk_id: Optional[Any]) -> Optional[str]:
+def _normalize_chunk_id(chunk_id: Any | None) -> str | None:
     if chunk_id is None:
         return None
     text = str(chunk_id).strip()
@@ -710,7 +662,7 @@ def _normalize_chunk_id(chunk_id: Optional[Any]) -> Optional[str]:
     return safe[:120]
 
 
-def _derive_group_id(chunk_id: Optional[Any], level: Optional[Any]) -> Optional[str]:
+def _derive_group_id(chunk_id: Any | None, level: Any | None) -> str | None:
     if chunk_id is None:
         return None
     text = str(chunk_id).strip()
@@ -725,10 +677,10 @@ def _derive_group_id(chunk_id: Optional[Any], level: Optional[Any]) -> Optional[
 
 def _group_chunks_for_render(
     chunks: Sequence[ChunkOverlay],
-) -> List[Tuple[Optional[str], List[ChunkOverlay]]]:
-    groups: List[Tuple[Optional[str], List[ChunkOverlay]]] = []
-    current_key: Optional[str] = None
-    current_items: List[ChunkOverlay] = []
+) -> list[tuple[str | None, list[ChunkOverlay]]]:
+    groups: list[tuple[str | None, list[ChunkOverlay]]] = []
+    current_key: str | None = None
+    current_items: list[ChunkOverlay] = []
 
     for chunk in chunks:
         key = chunk.group_id or chunk.id
@@ -747,9 +699,7 @@ def _group_chunks_for_render(
 
 def _render_chunk_inline(chunk: ChunkOverlay) -> str:
     escaped_id = html.escape(chunk.id)
-    speaker_attr = (
-        f' data-speaker="{html.escape(chunk.speaker_id)}"' if chunk.speaker_id else ""
-    )
+    speaker_attr = f' data-speaker="{html.escape(chunk.speaker_id)}"' if chunk.speaker_id else ""
     voice_attr = f' data-voice="{html.escape(chunk.voice)}"' if chunk.voice else ""
     level_attr = f' data-level="{html.escape(chunk.level)}"' if chunk.level else ""
     raw_text = chunk.text or ""
@@ -763,9 +713,7 @@ def _render_chunk_inline(chunk: ChunkOverlay) -> str:
     )
 
 
-def _render_chunk_group_html(
-    group_id: Optional[str], chunks: Sequence[ChunkOverlay]
-) -> str:
+def _render_chunk_group_html(group_id: str | None, chunks: Sequence[ChunkOverlay]) -> str:
     if not chunks:
         return ""
     group_attr = f' data-group="{html.escape(group_id)}"' if group_id else ""
@@ -775,10 +723,10 @@ def _render_chunk_group_html(
     return f'      <p class="chunk-group"{group_attr}>{inline_html}</p>'
 
 
-def _format_smil_time(value: Optional[float]) -> str:
+def _format_smil_time(value: float | None) -> str:
     if value is None or value < 0:
         value = 0.0
-    total_ms = int(round(value * 1000))
+    total_ms = round(value * 1000)
     hours, remainder = divmod(total_ms, 3600_000)
     minutes, remainder = divmod(remainder, 60_000)
     seconds, milliseconds = divmod(remainder, 1000)
@@ -792,7 +740,7 @@ def _safe_int(value: Any, default: int = 0) -> int:
         return default
 
 
-def _safe_float(value: Any) -> Optional[float]:
+def _safe_float(value: Any) -> float | None:
     if value is None:
         return None
     try:
@@ -801,9 +749,7 @@ def _safe_float(value: Any) -> Optional[float]:
         return None
 
 
-def _restore_original_chunk_text(
-    chapter_text: str, overlays: List[ChunkOverlay]
-) -> None:
+def _restore_original_chunk_text(chapter_text: str, overlays: list[ChunkOverlay]) -> None:
     if not chapter_text or not overlays:
         return
 
@@ -838,9 +784,7 @@ def _prepare_display_text(value: str) -> str:
     return cleaned if cleaned else ""
 
 
-def _search_original_span(
-    source: str, normalized: str, start: int
-) -> Optional[Tuple[int, int]]:
+def _search_original_span(source: str, normalized: str, start: int) -> tuple[int, int] | None:
     if not normalized:
         return None
     pattern = _build_chunk_pattern(normalized)
@@ -850,7 +794,7 @@ def _search_original_span(
     return match.start(1), match.end(1)
 
 
-_CHUNK_REGEX_CACHE: Dict[str, Pattern[str]] = {}
+_CHUNK_REGEX_CACHE: dict[str, Pattern[str]] = {}
 
 
 def _build_chunk_pattern(text: str) -> Pattern[str]:
@@ -870,12 +814,12 @@ def _render_metadata_xml(
     language: str,
     book_id: str,
     *,
-    duration: Optional[float],
-    publisher: Optional[str],
-    description: Optional[str],
-    speaker_mode: Optional[str],
-    modified: Optional[str],
-) -> List[str]:
+    duration: float | None,
+    publisher: str | None,
+    description: str | None,
+    speaker_mode: str | None,
+    modified: str | None,
+) -> list[str]:
     elements = [
         f'    <dc:identifier id="book-id">{html.escape(book_id)}</dc:identifier>',
         f"    <dc:title>{html.escape(title)}</dc:title>",
@@ -889,9 +833,7 @@ def _render_metadata_xml(
         elements.append(f"    <dc:publisher>{html.escape(publisher)}</dc:publisher>")
 
     if description:
-        elements.append(
-            f"    <dc:description>{html.escape(description)}</dc:description>"
-        )
+        elements.append(f"    <dc:description>{html.escape(description)}</dc:description>")
 
     if duration is not None:
         elements.append(
@@ -900,15 +842,11 @@ def _render_metadata_xml(
 
     if speaker_mode:
         elements.append(
-            '    <meta property="abogen:speakerMode">{}</meta>'.format(
-                html.escape(str(speaker_mode))
-            )
+            f'    <meta property="abogen:speakerMode">{html.escape(str(speaker_mode))}</meta>'
         )
 
     if modified:
-        elements.append(
-            f'    <meta property="dcterms:modified">{html.escape(modified)}</meta>'
-        )
+        elements.append(f'    <meta property="dcterms:modified">{html.escape(modified)}</meta>')
     return elements
 
 
@@ -951,7 +889,7 @@ def _detect_image_mime(suffix: str) -> str:
 
 
 def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 _DEFAULT_STYLESHEET = """

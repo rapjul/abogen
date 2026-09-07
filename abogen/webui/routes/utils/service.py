@@ -1,5 +1,7 @@
 from typing import cast
-from flask import current_app, abort
+
+from flask import abort, current_app
+
 from abogen.webui.service import ConversionService, PendingJob
 
 

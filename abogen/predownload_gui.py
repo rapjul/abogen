@@ -8,7 +8,6 @@ and handles optional dependencies gracefully.
 
 import importlib
 import importlib.util
-from typing import Dict, List, Optional, Tuple
 
 from PyQt6.QtCore import QThread, pyqtSignal
 from PyQt6.QtWidgets import (
@@ -27,7 +26,7 @@ from abogen.spacy_utils import SPACY_MODELS
 
 
 # Helpers
-def _unique_sorted_models() -> List[str]:
+def _unique_sorted_models() -> list[str]:
     """Return a sorted list of unique spaCy model package names."""
     return sorted(set(SPACY_MODELS.values()))
 
@@ -127,16 +126,12 @@ class PreDownloadWorker(QThread):
                     f"{idx}/{len(voice_list)}: {voice} already present",
                 )
                 continue
-            self.progress.emit(
-                "voice", "downloading", f"{idx}/{len(voice_list)}: {voice}..."
-            )
+            self.progress.emit("voice", "downloading", f"{idx}/{len(voice_list)}: {voice}...")
             try:
                 hf_hub_download(repo_id=self._repo_id, filename=filename)
                 self.progress.emit("voice", "downloaded", f"{voice} downloaded")
             except Exception as exc:
-                self.progress.emit(
-                    "voice", "warning", f"could not download {voice}: {exc}"
-                )
+                self.progress.emit("voice", "warning", f"could not download {voice}: {exc}")
                 self._voices_success = False
 
     # Kokoro model
@@ -156,18 +151,14 @@ class PreDownloadWorker(QThread):
                 return
             category = "config" if fname == "config.json" else "model"
             if try_to_load_from_cache(repo_id=self._repo_id, filename=fname):
-                self.progress.emit(
-                    category, "installed", f"file {fname} already present"
-                )
+                self.progress.emit(category, "installed", f"file {fname} already present")
                 continue
             self.progress.emit(category, "downloading", f"file {fname}...")
             try:
                 hf_hub_download(repo_id=self._repo_id, filename=fname)
                 self.progress.emit(category, "downloaded", f"file {fname} downloaded")
             except Exception as exc:
-                self.progress.emit(
-                    category, "warning", f"could not download file {fname}: {exc}"
-                )
+                self.progress.emit(category, "warning", f"could not download file {fname}: {exc}")
                 self._model_success = False
 
     # spaCy models
@@ -181,16 +172,14 @@ class PreDownloadWorker(QThread):
         # re-checking everything; otherwise use the full unique list.
         parent = self.parent()
         parent_dialog = parent if isinstance(parent, PreDownloadDialog) else None
-        models_to_process: List[str] = _unique_sorted_models()
+        models_to_process: list[str] = _unique_sorted_models()
         try:
             if (
                 parent_dialog is not None
                 and hasattr(parent_dialog, "_spacy_models_missing")
                 and parent_dialog._spacy_models_missing
             ):
-                models_to_process = list(
-                    dict.fromkeys(parent_dialog._spacy_models_missing)
-                )
+                models_to_process = list(dict.fromkeys(parent_dialog._spacy_models_missing))
         except Exception:
             pass
 
@@ -198,9 +187,7 @@ class PreDownloadWorker(QThread):
         try:
             from spacy.cli.download import download as _spacy_download
         except Exception:
-            self.progress.emit(
-                "spacy", "warning", "spaCy not available, skipping spaCy models..."
-            )
+            self.progress.emit("spacy", "warning", "spaCy not available, skipping spaCy models...")
             self._spacy_success = False
             return
 
@@ -224,9 +211,7 @@ class PreDownloadWorker(QThread):
                 _spacy_download(model_name)
                 self.progress.emit("spacy", "downloaded", f"{model_name} downloaded")
             except Exception as exc:
-                self.progress.emit(
-                    "spacy", "warning", f"could not download {model_name}: {exc}"
-                )
+                self.progress.emit("spacy", "warning", f"could not download {model_name}: {exc}")
                 self._spacy_success = False
 
 
@@ -242,14 +227,14 @@ class PreDownloadDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Pre-download Models and Voices")
         self.setMinimumWidth(500)
-        self.worker: Optional[PreDownloadWorker] = None
+        self.worker: PreDownloadWorker | None = None
         self.has_missing = False
-        self._spacy_models_checked: List[tuple] = []
-        self._spacy_models_missing: List[str] = []
+        self._spacy_models_checked: list[tuple] = []
+        self._spacy_models_missing: list[str] = []
         self._status_worker = None
 
         # Map keywords to (label, prefix) - labels filled after UI creation
-        self.status_map: Dict[str, Tuple[Optional[QLabel], str]] = {
+        self.status_map: dict[str, tuple[QLabel | None, str]] = {
             "voice": (None, self.VOICE_PREFIX),
             "spacy": (None, self.SPACY_PREFIX),
             "model": (None, self.MODEL_PREFIX),
@@ -314,9 +299,7 @@ class PreDownloadDialog(QDialog):
 
         layout.addLayout(status_layout)
 
-        layout.addItem(
-            QSpacerItem(0, 20, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
-        )
+        layout.addItem(QSpacerItem(0, 20, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed))
 
         # Buttons
         button_row = QHBoxLayout()
@@ -362,7 +345,7 @@ class PreDownloadDialog(QDialog):
 
             # Check spaCy models by package name to detect site-package installs
             unique = _unique_sorted_models()
-            missing: List[str] = []
+            missing: list[str] = []
             for name in unique:
                 self.spacy_model_checking.emit(name)
                 ok = _is_package_installed(name)
@@ -412,15 +395,13 @@ class PreDownloadDialog(QDialog):
         else:
             self.spacy_status.setText(f"{self.SPACY_PREFIX}{checked} checked...")
 
-    def _update_voices_status(self, ok: bool, missing: List[str]) -> None:
+    def _update_voices_status(self, ok: bool, missing: list[str]) -> None:
         if ok:
             self._set_status("voice", "✓ Downloaded", COLORS["GREEN"])
         else:
             self.has_missing = True
             if missing:
-                self._set_status(
-                    "voice", f"✗ Missing {len(missing)} voices", COLORS["RED"]
-                )
+                self._set_status("voice", f"✗ Missing {len(missing)} voices", COLORS["RED"])
             else:
                 self._set_status("voice", "✗ Not downloaded", COLORS["RED"])
 
@@ -438,15 +419,13 @@ class PreDownloadDialog(QDialog):
             self.has_missing = True
             self._set_status("config", "✗ Not downloaded", COLORS["RED"])
 
-    def _update_spacy_status(self, ok: bool, missing: List[str]) -> None:
+    def _update_spacy_status(self, ok: bool, missing: list[str]) -> None:
         if ok:
             self._set_status("spacy", "✓ Downloaded", COLORS["GREEN"])
         else:
             self.has_missing = True
             if missing:
-                self._set_status(
-                    "spacy", f"✗ Missing {len(missing)} model(s)", COLORS["RED"]
-                )
+                self._set_status("spacy", f"✗ Missing {len(missing)} model(s)", COLORS["RED"])
             else:
                 self._set_status("spacy", "✗ Not downloaded", COLORS["RED"])
         self.download_btn.setEnabled(self.has_missing)
@@ -459,7 +438,7 @@ class PreDownloadDialog(QDialog):
         lbl.setStyleSheet(f"color: {color};")
 
     # Helper checks
-    def _check_kokoro_voices(self) -> Tuple[bool, List[str]]:
+    def _check_kokoro_voices(self) -> tuple[bool, list[str]]:
         """Return (ok, missing_list) for Kokoro voices check."""
         missing = []
         try:
@@ -480,9 +459,7 @@ class PreDownloadDialog(QDialog):
             from huggingface_hub import try_to_load_from_cache
 
             return (
-                try_to_load_from_cache(
-                    repo_id="hexgrad/Kokoro-82M", filename="kokoro-v1_0.pth"
-                )
+                try_to_load_from_cache(repo_id="hexgrad/Kokoro-82M", filename="kokoro-v1_0.pth")
                 is not None
             )
         except Exception:
@@ -493,9 +470,7 @@ class PreDownloadDialog(QDialog):
             from huggingface_hub import try_to_load_from_cache
 
             return (
-                try_to_load_from_cache(
-                    repo_id="hexgrad/Kokoro-82M", filename="config.json"
-                )
+                try_to_load_from_cache(repo_id="hexgrad/Kokoro-82M", filename="config.json")
                 is not None
             )
         except Exception:
@@ -545,9 +520,7 @@ class PreDownloadDialog(QDialog):
                     lbl.setStyleSheet(f"color: {COLORS['ORANGE']};")
                 elif status in ("installed", "downloaded"):
                     lbl.setStyleSheet(f"color: {COLORS['GREEN']};")
-                elif status == "warning":
-                    lbl.setStyleSheet(f"color: {COLORS['RED']};")
-                elif status == "error":
+                elif status == "warning" or status == "error":
                     lbl.setStyleSheet(f"color: {COLORS['RED']};")
                 return
 

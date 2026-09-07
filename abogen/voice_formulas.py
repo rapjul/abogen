@@ -1,27 +1,26 @@
+from __future__ import annotations
+
 import re
-from typing import List, Tuple
+from typing import Any
 
 from abogen.constants import VOICES_INTERNAL
 
 
-# Calls parsing and loads the voice to gpu or cpu
-def get_new_voice(pipeline, formula, use_gpu):
+def get_new_voice(pipeline: Any, formula: str, use_gpu: bool = False) -> Any:
+    """Parse voice formula and load the resulting voice tensor."""
     try:
         weighted_voice = parse_voice_formula(pipeline, formula)
-        # device = "cuda" if use_gpu else "cpu"
-        # Setting the device "cuda" gives "Error occurred: split_with_sizes(): argument 'split_sizes' (position 2)"
-        # error when the device is gpu. So disabling this for now.
         device = "cpu"
         return weighted_voice.to(device)
-    except Exception as e:
-        raise ValueError(f"Failed to create voice: {str(e)}")
+    except (RuntimeError, ValueError, KeyError, AttributeError) as e:
+        raise ValueError(f"Failed to create voice: {e!s}") from e
 
 
-def parse_formula_terms(formula: str) -> List[Tuple[str, float]]:
+def parse_formula_terms(formula: str) -> list[tuple[str, float]]:
     if not formula or not formula.strip():
         raise ValueError("Empty voice formula")
 
-    terms: List[Tuple[str, float]] = []
+    terms: list[tuple[str, float]] = []
     for segment in formula.split("+"):
         part = segment.strip()
         if not part:
@@ -77,5 +76,5 @@ def calculate_sum_from_formula(formula):
     return total_sum
 
 
-def extract_voice_ids(formula: str) -> List[str]:
+def extract_voice_ids(formula: str) -> list[str]:
     return [voice for voice, _ in parse_formula_terms(formula)]

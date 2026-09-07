@@ -1,20 +1,30 @@
 import logging
 import uuid
 from pathlib import Path
-from typing import Optional
 
 from flask import (
     Blueprint,
+    current_app,
+    jsonify,
     redirect,
     render_template,
     request,
     url_for,
-    jsonify,
-    current_app,
 )
 from werkzeug.utils import secure_filename
 
-from abogen.webui.service import JobStatus
+from abogen.text_extractor import extract_from_path
+from abogen.voice_profiles import serialize_profiles
+from abogen.webui.routes.utils.form import (
+    apply_book_step_form,
+    apply_prepare_form,
+    build_pending_job_from_extraction,
+    normalize_wizard_step,
+    render_jobs_panel,
+    render_wizard_partial,
+    wants_wizard_json,
+    wizard_json_response,
+)
 from abogen.webui.routes.utils.service import (
     get_service,
     remove_pending_job,
@@ -22,18 +32,7 @@ from abogen.webui.routes.utils.service import (
 )
 from abogen.webui.routes.utils.settings import load_settings
 from abogen.webui.routes.utils.voice import template_options
-from abogen.webui.routes.utils.form import (
-    normalize_wizard_step,
-    wants_wizard_json,
-    render_wizard_partial,
-    wizard_json_response,
-    build_pending_job_from_extraction,
-    apply_book_step_form,
-    apply_prepare_form,
-    render_jobs_panel,
-)
-from abogen.text_extractor import extract_from_path
-from abogen.voice_profiles import serialize_profiles
+from abogen.webui.service import JobStatus
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +49,7 @@ def datetimeformat(value: float, fmt: str = "%Y-%m-%d %H:%M:%S") -> str:
 
 
 @main_bp.app_template_filter("durationformat")
-def durationformat(value: Optional[float]) -> str:
+def durationformat(value: float | None) -> str:
     if value is None:
         return ""
     seconds = int(value)
@@ -76,9 +75,7 @@ def index():
         # Map index to step name roughly
         steps = ["book", "chapters", "entities"]
         step_name = steps[min(step_index, len(steps) - 1)]
-        return redirect(
-            url_for("main.wizard_step", step=step_name, pending_id=pending.id)
-        )
+        return redirect(url_for("main.wizard_step", step=step_name, pending_id=pending.id))
 
     jobs = get_service().list_jobs()
     stats = {
@@ -114,9 +111,7 @@ def wizard_step(step: str):
 
     normalized_step = normalize_wizard_step(step, pending)
     if normalized_step != step:
-        return redirect(
-            url_for("main.wizard_step", step=normalized_step, pending_id=pending_id)
-        )
+        return redirect(url_for("main.wizard_step", step=normalized_step, pending_id=pending_id))
 
     if wants_wizard_json():
         return wizard_json_response(pending, normalized_step)
@@ -145,23 +140,17 @@ def wizard_upload():
     # Case 1: Updating existing job without new file
     if pending and (not file or not file.filename):
         try:
-            apply_book_step_form(
-                pending, request.form, settings=settings, profiles=profiles
-            )
+            apply_book_step_form(pending, request.form, settings=settings, profiles=profiles)
             get_service().store_pending_job(pending)
 
             if wants_wizard_json():
                 return wizard_json_response(pending, "chapters")
-            return redirect(
-                url_for("main.wizard_step", step="chapters", pending_id=pending.id)
-            )
+            return redirect(url_for("main.wizard_step", step="chapters", pending_id=pending.id))
         except Exception as e:
             logger.exception("Error updating job settings")
-            error_msg = f"Failed to update settings: {str(e)}"
+            error_msg = f"Failed to update settings: {e!s}"
             if wants_wizard_json():
-                return wizard_json_response(
-                    pending, "book", error=error_msg, status=500
-                )
+                return wizard_json_response(pending, "book", error=error_msg, status=500)
             return render_template(
                 "index.html",
                 options=template_options(),
@@ -175,9 +164,7 @@ def wizard_upload():
     # Case 2: New file upload (or replacing file on existing job)
     if not file or not file.filename:
         if wants_wizard_json():
-            return wizard_json_response(
-                None, "book", error="No file selected", status=400
-            )
+            return wizard_json_response(None, "book", error="No file selected", status=400)
         return redirect(url_for("main.wizard_step", step="book"))
 
     filename = secure_filename(file.filename)
@@ -207,9 +194,7 @@ def wizard_upload():
         if wants_wizard_json():
             return wizard_json_response(result.pending, "chapters")
 
-        return redirect(
-            url_for("main.wizard_step", step="chapters", pending_id=result.pending.id)
-        )
+        return redirect(url_for("main.wizard_step", step="chapters", pending_id=result.pending.id))
 
     except Exception as e:
         logger.exception("Error processing upload")
@@ -219,7 +204,7 @@ def wizard_upload():
             except OSError:
                 pass
 
-        error_msg = f"Failed to process file: {str(e)}"
+        error_msg = f"Failed to process file: {e!s}"
         if wants_wizard_json():
             return wizard_json_response(None, "book", error=error_msg, status=500)
 
@@ -241,9 +226,7 @@ def wizard_text():
 
     if not text:
         if wants_wizard_json():
-            return wizard_json_response(
-                None, "book", error="No text provided", status=400
-            )
+            return wizard_json_response(None, "book", error="No text provided", status=400)
         return redirect(url_for("main.wizard_step", step="book"))
 
     temp_dir = Path(current_app.config.get("UPLOAD_FOLDER", "uploads"))
@@ -273,9 +256,7 @@ def wizard_text():
         if wants_wizard_json():
             return wizard_json_response(result.pending, "chapters")
 
-        return redirect(
-            url_for("main.wizard_step", step="chapters", pending_id=result.pending.id)
-        )
+        return redirect(url_for("main.wizard_step", step="chapters", pending_id=result.pending.id))
 
     except Exception as e:
         logger.exception("Error processing text")
@@ -285,7 +266,7 @@ def wizard_text():
             except OSError:
                 pass
 
-        error_msg = f"Failed to process text: {str(e)}"
+        error_msg = f"Failed to process text: {e!s}"
         if wants_wizard_json():
             return wizard_json_response(None, "book", error=error_msg, status=500)
 
@@ -305,17 +286,13 @@ def wizard_update():
     pending_id = request.values.get("pending_id")
     if not pending_id:
         if wants_wizard_json():
-            return wizard_json_response(
-                None, "book", error="Missing job ID", status=400
-            )
+            return wizard_json_response(None, "book", error="Missing job ID", status=400)
         return redirect(url_for("main.wizard_step", step="book"))
 
     pending = get_service().get_pending_job(pending_id)
     if not pending:
         if wants_wizard_json():
-            return wizard_json_response(
-                None, "book", error="Job expired or not found", status=404
-            )
+            return wizard_json_response(None, "book", error="Job expired or not found", status=404)
         return redirect(url_for("main.wizard_step", step="book"))
 
     current_step = request.form.get("step", "book")
@@ -326,22 +303,20 @@ def wizard_update():
 
     try:
         if current_step == "book":
-            apply_book_step_form(
-                pending, request.form, settings=settings, profiles=profiles
-            )
+            apply_book_step_form(pending, request.form, settings=settings, profiles=profiles)
             target_step = next_step or "chapters"
 
         elif current_step == "chapters":
             # This step involves re-analyzing chunks if needed
             (
-                chunk_level,
-                overrides,
-                enabled_overrides,
+                _chunk_level,
+                _overrides,
+                _enabled_overrides,
                 errors,
-                selected_total,
-                selected_config,
-                apply_config_requested,
-                persist_config_requested,
+                _selected_total,
+                _selected_config,
+                _apply_config_requested,
+                _persist_config_requested,
             ) = apply_prepare_form(pending, request.form)
 
             if errors:
@@ -376,17 +351,13 @@ def wizard_update():
         if wants_wizard_json():
             return wizard_json_response(pending, target_step)
 
-        return redirect(
-            url_for("main.wizard_step", step=target_step, pending_id=pending.id)
-        )
+        return redirect(url_for("main.wizard_step", step=target_step, pending_id=pending.id))
 
     except Exception as e:
         logger.exception(f"Error updating wizard step {current_step}")
-        error_msg = f"Update failed: {str(e)}"
+        error_msg = f"Update failed: {e!s}"
         if wants_wizard_json():
-            return wizard_json_response(
-                pending, current_step, error=error_msg, status=500
-            )
+            return wizard_json_response(pending, current_step, error=error_msg, status=500)
 
         return render_template(
             "index.html",
@@ -395,9 +366,7 @@ def wizard_update():
             jobs_panel=render_jobs_panel(),
             wizard_mode=True,
             wizard_step=current_step,
-            wizard_partial=render_wizard_partial(
-                pending, current_step, error=error_msg
-            ),
+            wizard_partial=render_wizard_partial(pending, current_step, error=error_msg),
         )
 
 

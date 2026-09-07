@@ -12,7 +12,7 @@ from collections import deque
 from functools import lru_cache
 from pathlib import Path
 from threading import Thread
-from typing import Any, Dict, Optional
+from typing import Any
 from uuid import uuid4
 
 from dotenv import find_dotenv, load_dotenv
@@ -43,7 +43,7 @@ _load_environment()
 
 warnings.filterwarnings("ignore")
 
-_config_load_warning: Optional[str] = None
+_config_load_warning: str | None = None
 
 
 def detect_encoding(file_path):
@@ -65,7 +65,7 @@ def detect_encoding(file_path):
             continue
         try:
             result = detectors.detect(raw_data)["encoding"]
-        except Exception:
+        except (TypeError, KeyError, ValueError, UnicodeDecodeError):
             continue
         if result is not None:
             detected_encoding = result
@@ -93,14 +93,12 @@ def get_resource_path(package, resource):
         resource_path_str = str(resource_path)
         if os.path.exists(resource_path_str):
             return resource_path_str
-    except (ImportError, FileNotFoundError, TypeError):
+    except (ImportError, FileNotFoundError, TypeError, ValueError):
         pass
 
     # Always try to resolve as a relative path from this file
     parts = package.split(".")
-    rel_path = os.path.join(
-        os.path.dirname(os.path.abspath(__file__)), *parts[1:], resource
-    )
+    rel_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), *parts[1:], resource)
     if os.path.exists(rel_path):
         return rel_path
 
@@ -108,12 +106,10 @@ def get_resource_path(package, resource):
     try:
         # Extract the subdirectory from package name (e.g., 'assets' from 'abogen.assets')
         subdir = package.split(".")[-1] if "." in package else package
-        local_path = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), subdir, resource
-        )
+        local_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), subdir, resource)
         if os.path.exists(local_path):
             return local_path
-    except Exception:
+    except (TypeError, OSError):
         pass
 
     return None
@@ -127,7 +123,7 @@ def get_version():
             raise FileNotFoundError("VERSION resource missing")
         with open(version_path, "r") as f:
             return f.read().strip()
-    except Exception:
+    except (OSError, UnicodeDecodeError):
         return "Unknown"
 
 
@@ -165,9 +161,7 @@ def get_user_settings_dir():
         if os.path.exists(legacy_dir):
             return ensure_directory(legacy_dir)
 
-    config_dir = user_config_dir(
-        "abogen", appauthor=False, roaming=True, ensure_exists=True
-    )
+    config_dir = user_config_dir("abogen", appauthor=False, roaming=True, ensure_exists=True)
     return ensure_directory(config_dir)
 
 
@@ -193,7 +187,7 @@ def get_user_cache_root():
         if last_error is not None:
             raise last_error
 
-    def _configure_cache_env(root: Optional[str]) -> None:
+    def _configure_cache_env(root: str | None) -> None:
         temp_root = None
         if root:
             try:
@@ -233,7 +227,7 @@ def get_user_cache_root():
 
         os.environ.setdefault("ABOGEN_INTERNAL_CACHE_ROOT", cache_base)
 
-    cache_root: Optional[str] = None
+    cache_root: str | None = None
 
     override = os.environ.get("ABOGEN_TEMP_DIR")
     if override:
@@ -271,9 +265,7 @@ def get_user_cache_root():
 
 
 def get_internal_cache_root():
-    root = os.environ.get("ABOGEN_INTERNAL_CACHE_ROOT") or os.environ.get(
-        "XDG_CACHE_HOME"
-    )
+    root = os.environ.get("ABOGEN_INTERNAL_CACHE_ROOT") or os.environ.get("XDG_CACHE_HOME")
     if root:
         return ensure_directory(root)
     home_dir = os.environ.get("HOME") or os.path.join("/tmp", "abogen-home")
@@ -337,7 +329,7 @@ def reveal_in_file_manager(path: str) -> bool:
         try:
             subprocess.run(["xdg-open", folder], check=False)
             return True
-        except Exception:
+        except (OSError, subprocess.SubprocessError):
             # Last-resort: try Qt to open the folder
             try:
                 from PyQt6.QtCore import QUrl
@@ -345,17 +337,15 @@ def reveal_in_file_manager(path: str) -> bool:
 
                 QDesktopServices.openUrl(QUrl.fromLocalFile(folder))
                 return True
-            except Exception:
+            except (ImportError, RuntimeError, OSError):
                 return False
-    except Exception:
+    except (OSError, RuntimeError):
         return False
 
 
 @lru_cache(maxsize=1)
 def get_user_output_root():
-    override = os.environ.get("ABOGEN_OUTPUT_DIR") or os.environ.get(
-        "ABOGEN_OUTPUT_ROOT"
-    )
+    override = os.environ.get("ABOGEN_OUTPUT_DIR") or os.environ.get("ABOGEN_OUTPUT_ROOT")
     if override:
         return ensure_directory(override)
     return ensure_directory(os.path.join(get_user_cache_root(), "outputs"))
@@ -368,7 +358,7 @@ def get_user_output_path(folder=None):
     return base
 
 
-_sleep_procs: Dict[str, Optional[subprocess.Popen[str]]] = {
+_sleep_procs: dict[str, subprocess.Popen[str] | None] = {
     "Darwin": None,
     "Linux": None,
 }  # Store sleep prevention processes
@@ -480,14 +470,17 @@ def clean_text(text, *args, **kwargs):
             processed_paragraphs.append(p)
             continue
 
-        if not re.search(r'[.!?:;]["\'' "’" "”)]*$", p_stripped):
-            # Ensure it ends with word char (possibly followed by quotes) before adding period
-            if re.search(r'\w["\'' "’" "”)]*$", p_stripped):
-                m = re.search(r'(["\'' "’" "”)]+)$", p_stripped)
-                if m:
-                    p = p_stripped[: -len(m.group(1))] + "." + m.group(1)
-                else:
-                    p = p_stripped + "."
+        quote_chars = r"""["'’”)\]]"""
+
+        # Ensure it ends with word char (possibly followed by quotes) before adding period
+        if not re.search(rf"[.!?:;]{quote_chars}*$", p_stripped) and re.search(
+            rf"\w{quote_chars}*$", p_stripped
+        ):
+            m = re.search(rf"({quote_chars}+)$", p_stripped)
+            if m:
+                p = p_stripped[: -len(m.group(1))] + "." + m.group(1)
+            else:
+                p = p_stripped + "."
         processed_paragraphs.append(p)
     text = "\n\n".join(processed_paragraphs)
 
@@ -582,7 +575,7 @@ def create_process(cmd, stdin=None, text=True, capture_output=False):
     def _get_output_tail() -> str:
         return "".join(output_tail)
 
-    setattr(proc, "_abogen_get_output_tail", _get_output_tail)
+    proc._abogen_get_output_tail = _get_output_tail
 
     # Stream output to console in real-time if not capturing
     if proc.stdout and not capture_output:
@@ -610,7 +603,7 @@ def create_process(cmd, stdin=None, text=True, capture_output=False):
                         _append_output_tail(decoded_chunk)
                         sys.stdout.write(decoded_chunk)
                         sys.stdout.flush()
-                    except Exception:
+                    except (OSError, UnicodeError):
                         pass
             stream.close()
 
@@ -663,14 +656,13 @@ def load_json_with_backup(path: Path) -> tuple[Any, bool]:
     """
     try:
         return _read_json_file(path), False
-    except Exception as primary_error:
+    except (OSError, json.JSONDecodeError) as primary_error:
         backup_path = _json_backup_path(path)
         try:
             return _read_json_file(backup_path), True
-        except Exception as backup_error:
+        except (OSError, json.JSONDecodeError) as backup_error:
             raise RuntimeError(
-                f"Could not read {path.name} or its backup: "
-                f"{primary_error}; backup: {backup_error}"
+                f"Could not read {path.name} or its backup: {primary_error}; backup: {backup_error}"
             ) from primary_error
 
 
@@ -700,7 +692,7 @@ def atomic_write_json(
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary_path = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
     backup_path = _json_backup_path(path)
-    backup_temporary_path: Optional[Path] = None
+    backup_temporary_path: Path | None = None
 
     try:
         with temporary_path.open("w", encoding="utf-8") as handle:
@@ -711,10 +703,8 @@ def atomic_write_json(
         if keep_backup and path.exists():
             try:
                 _read_json_file(path)
-            except Exception:
-                logger.warning(
-                    "Not replacing JSON backup because %s is not valid JSON", path
-                )
+            except (OSError, json.JSONDecodeError):
+                logger.warning("Not replacing JSON backup because %s is not valid JSON", path)
             else:
                 backup_temporary_path = backup_path.with_name(
                     f".{backup_path.name}.{uuid4().hex}.tmp"
@@ -725,9 +715,7 @@ def atomic_write_json(
 
         temporary_path.replace(path)
         if keep_backup and not backup_path.exists():
-            backup_temporary_path = backup_path.with_name(
-                f".{backup_path.name}.{uuid4().hex}.tmp"
-            )
+            backup_temporary_path = backup_path.with_name(f".{backup_path.name}.{uuid4().hex}.tmp")
             shutil.copy2(path, backup_temporary_path)
             backup_temporary_path.replace(backup_path)
             backup_temporary_path = None
@@ -738,7 +726,7 @@ def atomic_write_json(
             backup_temporary_path.unlink()
 
 
-def consume_config_load_warning() -> Optional[str]:
+def consume_config_load_warning() -> str | None:
     """Return and clear the most recent configuration recovery warning.
 
     Returns:
@@ -750,7 +738,7 @@ def consume_config_load_warning() -> Optional[str]:
     return warning
 
 
-def load_config() -> Dict[str, Any]:
+def load_config() -> dict[str, Any]:
     """Load application settings and recover from a backup when necessary.
 
     Returns:
@@ -773,14 +761,14 @@ def load_config() -> Dict[str, Any]:
             logger.warning(_config_load_warning)
             try:
                 atomic_write_json(config_path, config)
-            except Exception as recovery_error:
+            except (OSError, TypeError, ValueError) as recovery_error:
                 logger.error(
                     "Recovered settings could not be written back to %s: %s",
                     config_path,
                     recovery_error,
                 )
         return config
-    except Exception as error:
+    except (OSError, RuntimeError, TypeError, ValueError) as error:
         _config_load_warning = (
             "Abogen could not read config.json or its backup and started with "
             "default settings. Your damaged files were left in place."
@@ -789,7 +777,7 @@ def load_config() -> Dict[str, Any]:
         return {}
 
 
-def save_config(config: Dict[str, Any]) -> bool:
+def save_config(config: dict[str, Any]) -> bool:
     """Atomically save application settings with a last-known-good backup.
 
     Args:
@@ -801,7 +789,7 @@ def save_config(config: Dict[str, Any]) -> bool:
     try:
         atomic_write_json(Path(get_user_config_path()), config)
         return True
-    except Exception as error:
+    except (OSError, TypeError, ValueError) as error:
         logger.error("Failed to save application settings: %s", error)
         return False
 
@@ -844,15 +832,11 @@ def get_gpu_acceleration(enabled):
         # Gather CUDA diagnostic info if not available
         try:
             cuda_devices = torch.cuda.device_count()
-            cuda_error = (
-                torch.cuda.get_device_name(0)
-                if cuda_devices > 0
-                else "No devices found"
-            )
-        except Exception as e:
+            cuda_error = torch.cuda.get_device_name(0) if cuda_devices > 0 else "No devices found"
+        except (RuntimeError, OSError) as e:
             cuda_error = str(e)
         return f"CUDA GPU is not available. Using CPU. ({cuda_error})", False
-    except Exception as e:
+    except (ImportError, RuntimeError, OSError) as e:
         return f"Error checking GPU: {e}", False
 
 
@@ -895,9 +879,7 @@ def prevent_sleep_start():
             )
         else:
             # Non-systemd distro or systemd tools not installed: skip inhibition rather than crash
-            print(
-                "systemd-inhibit not found: skipping sleep inhibition on this Linux system."
-            )
+            print("systemd-inhibit not found: skipping sleep inhibition on this Linux system.")
 
 
 def prevent_sleep_end():
@@ -913,7 +895,7 @@ def prevent_sleep_end():
                 proc.terminate()
                 proc.wait(timeout=10)  # Wait for the process to terminate
                 print("Sleep inhibition released.")
-            except Exception as e:
+            except (OSError, subprocess.SubprocessError) as e:
                 print(f"Error releasing sleep inhibition: {e}")
             finally:
                 _sleep_procs[system] = None

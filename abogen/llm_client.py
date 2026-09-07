@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any
 from urllib import error, parse, request
 
 
@@ -29,8 +30,8 @@ class LLMToolCall:
 
 @dataclass(frozen=True)
 class LLMCompletion:
-    content: Optional[str]
-    tool_calls: Tuple[LLMToolCall, ...]
+    content: str | None
+    tool_calls: tuple[LLMToolCall, ...]
 
 
 _DEFAULT_HEADERS = {
@@ -52,14 +53,12 @@ def _build_url(base_url: str, path: str) -> str:
     normalized = _normalized_base_url(base_url)
     trimmed_path = path.lstrip("/")
     parsed = parse.urlparse(normalized)
-    if parsed.path.rstrip("/").lower().endswith("/v1") and trimmed_path.startswith(
-        "v1/"
-    ):
+    if parsed.path.rstrip("/").lower().endswith("/v1") and trimmed_path.startswith("v1/"):
         trimmed_path = trimmed_path[len("v1/") :]
     return parse.urljoin(normalized, trimmed_path)
 
 
-def _build_headers(api_key: str) -> Dict[str, str]:
+def _build_headers(api_key: str) -> dict[str, str]:
     headers = dict(_DEFAULT_HEADERS)
     token = (api_key or "").strip()
     if token and token.lower() != "ollama":
@@ -71,17 +70,15 @@ def _perform_request(
     method: str,
     url: str,
     *,
-    headers: Optional[Mapping[str, str]] = None,
-    payload: Optional[Mapping[str, Any]] = None,
+    headers: Mapping[str, str] | None = None,
+    payload: Mapping[str, Any] | None = None,
     timeout: float = 30.0,
 ) -> Any:
-    data_bytes: Optional[bytes] = None
+    data_bytes: bytes | None = None
     if payload is not None:
         data_bytes = json.dumps(payload).encode("utf-8")
     request_headers = dict(headers or {})
-    req = request.Request(
-        url, data=data_bytes, headers=request_headers, method=method.upper()
-    )
+    req = request.Request(url, data=data_bytes, headers=request_headers, method=method.upper())
     try:
         with request.urlopen(req, timeout=timeout) as response:
             body = response.read()
@@ -101,20 +98,18 @@ def _perform_request(
         raise LLMClientError("LLM response was not valid JSON") from exc
 
 
-def list_models(configuration: LLMConfiguration) -> List[Dict[str, str]]:
+def list_models(configuration: LLMConfiguration) -> list[dict[str, str]]:
     if not configuration.is_configured() and not configuration.base_url.strip():
         raise LLMClientError("LLM configuration is incomplete")
     url = _build_url(configuration.base_url, "v1/models")
     headers = _build_headers(configuration.api_key)
-    payload = _perform_request(
-        "GET", url, headers=headers, timeout=configuration.timeout
-    )
+    payload = _perform_request("GET", url, headers=headers, timeout=configuration.timeout)
     if not isinstance(payload, Mapping):
         raise LLMClientError("Unexpected response when listing models")
     data = payload.get("data")
     if not isinstance(data, list):
         return []
-    models: List[Dict[str, str]] = []
+    models: list[dict[str, str]] = []
     for entry in data:
         if not isinstance(entry, Mapping):
             continue
@@ -132,17 +127,17 @@ def generate_completion(
     system_message: str,
     user_message: str,
     temperature: float = 0.2,
-    max_tokens: Optional[int] = None,
-    tools: Optional[Sequence[Mapping[str, Any]]] = None,
-    tool_choice: Optional[Mapping[str, Any]] = None,
-    response_format: Optional[Mapping[str, Any]] = None,
+    max_tokens: int | None = None,
+    tools: Sequence[Mapping[str, Any]] | None = None,
+    tool_choice: Mapping[str, Any] | None = None,
+    response_format: Mapping[str, Any] | None = None,
 ) -> LLMCompletion:
     if not configuration.is_configured():
         raise LLMClientError("LLM configuration is incomplete")
 
     url = _build_url(configuration.base_url, "v1/chat/completions")
     headers = _build_headers(configuration.api_key)
-    payload: Dict[str, Any] = {
+    payload: dict[str, Any] = {
         "model": configuration.model,
         "messages": [
             {"role": "system", "content": system_message},
@@ -171,8 +166,8 @@ def generate_completion(
     if not isinstance(first, Mapping):
         raise LLMClientError("LLM response choice was invalid")
     message = first.get("message")
-    content: Optional[str] = None
-    tool_calls: List[LLMToolCall] = []
+    content: str | None = None
+    tool_calls: list[LLMToolCall] = []
     if isinstance(message, Mapping):
         content = message.get("content")
         if isinstance(content, str):

@@ -13,8 +13,10 @@ from __future__ import annotations
 
 import enum
 import logging
+import os
 import platform
 import re
+import subprocess
 import sys
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -142,22 +144,16 @@ def _get_system_memory_gb() -> int:
     """
     try:
         if sys.platform == "darwin":
-            import subprocess
-
-            output = subprocess.check_output(
-                ["sysctl", "-n", "hw.memsize"], text=True
-            ).strip()
+            output = subprocess.check_output(["sysctl", "-n", "hw.memsize"], text=True).strip()
             if output.isdigit():
                 return max(1, int(output) // (1024**3))
-    except Exception:
+    except (subprocess.SubprocessError, OSError, ValueError):
         pass
     try:
-        import os
-
         page_size: int = os.sysconf("SC_PAGE_SIZE")
         phys_pages: int = os.sysconf("SC_PHYS_PAGES")
         return max(1, (page_size * phys_pages) // (1024**3))
-    except Exception:
+    except (OSError, AttributeError, ValueError):
         return 16
 
 
@@ -167,7 +163,7 @@ def recommended_quantization() -> MLXQuantization:
     Heuristic:
     * ≥32 GiB → BF16 (full quality; plenty of headroom).
     * 16–31 GiB → 8-bit (saves ~40 MiB model RAM with negligible quality loss).
-    * <16 GiB → 4-bit (prioritise fitting in memory).
+    * <16 GiB → 4-bit (prioritize fitting in memory).
 
     Returns:
         The recommended :class:`MLXQuantization` member.
@@ -253,15 +249,13 @@ class MLXKokoroPipeline:
             # for Hugging Face repos. Converting to Path at runtime causes FileNotFoundError.
             # Cast through `object` to satisfy type checker overlap validation without
             # altering the runtime string.
-            loaded_model: object = load_model(
-                cast(Path, cast(object, quantization.model_path))
-            )
+            loaded_model: object = load_model(cast(Path, cast(object, quantization.model_path)))
             self._model = cast(_TTSModel, cast(object, loaded_model))
 
         self._lang_code = lang_code
         self._quantization = quantization
         logger.info(
-            "MLX Kokoro pipeline initialised: lang=%s, quant=%s, model=%s (reused=%s)",
+            "MLX Kokoro pipeline initialized: lang=%s, quant=%s, model=%s (reused=%s)",
             lang_code,
             quantization.name,
             quantization.model_path,
@@ -315,13 +309,9 @@ class MLXKokoroPipeline:
         if split_pattern:
             try:
                 # Use regex splitting; filter out empty segments
-                text_segments = [
-                    t.strip() for t in re.split(split_pattern, text) if t.strip()
-                ]
-            except Exception as e:
-                logger.warning(
-                    "Failed to split text with pattern %r: %s", split_pattern, e
-                )
+                text_segments = [t.strip() for t in re.split(split_pattern, text) if t.strip()]
+            except re.error as e:
+                logger.warning("Failed to split text with pattern %r: %s", split_pattern, e)
                 text_segments = [text.strip()] if text.strip() else []
         else:
             text_segments = [text.strip()] if text.strip() else []
@@ -404,20 +394,21 @@ def resample_audio_mlx(
             from mlx_audio.resample import resample_audio_array  # type: ignore
 
             return resample_audio_array(audio, src_rate, dst_rate)
-        except Exception as exc:
+        except (ImportError, RuntimeError, ValueError) as exc:
             logger.debug("mlx_audio polyphase resample failed, using fallback: %s", exc)
 
     # Cross-platform fallback: try scipy.signal.resample_poly, else linear interpolation
     try:
         import math
+
         from scipy import signal  # type: ignore
 
         gcd = math.gcd(src_rate, dst_rate)
         up = dst_rate // gcd
         down = src_rate // gcd
         return signal.resample_poly(audio, up, down).astype(np.float32, copy=False)
-    except Exception:
-        target_length = int(round(len(audio) * float(dst_rate) / float(src_rate)))
+    except (ImportError, ValueError, TypeError, ZeroDivisionError):
+        target_length = round(len(audio) * float(dst_rate) / float(src_rate))
         orig_indices = np.linspace(0, 1, len(audio))
         target_indices = np.linspace(0, 1, target_length)
         return np.interp(target_indices, orig_indices, audio).astype(np.float32)
@@ -461,10 +452,8 @@ def load_audio_mlx(
                 sample_rate=target_sample_rate,
             )
             return np.asarray(samples, dtype=np.float32), sr
-        except Exception as exc:
-            logger.debug(
-                "mlx_audio.audio_io.read failed, falling back to soundfile: %s", exc
-            )
+        except (ImportError, RuntimeError, OSError, ValueError) as exc:
+            logger.debug("mlx_audio.audio_io.read failed, falling back to soundfile: %s", exc)
 
     # Standard fallback via soundfile
     import soundfile as sf  # type: ignore

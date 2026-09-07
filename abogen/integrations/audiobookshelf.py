@@ -5,10 +5,11 @@ import logging
 import math
 import mimetypes
 import re
+from collections.abc import Iterable, Mapping, Sequence
 from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Any
 
 import httpx
 
@@ -23,9 +24,9 @@ class AudiobookshelfUploadError(RuntimeError):
 class AudiobookshelfConfig:
     base_url: str
     api_token: str
-    library_id: Optional[str] = None
-    collection_id: Optional[str] = None
-    folder_id: Optional[str] = None
+    library_id: str | None = None
+    collection_id: str | None = None
+    folder_id: str | None = None
     verify_ssl: bool = True
     send_cover: bool = True
     send_chapters: bool = True
@@ -55,9 +56,9 @@ class AudiobookshelfClient:
         normalized = config.normalized_base_url() or ""
         self._base_url = normalized.rstrip("/") or normalized
         self._client_base_url = f"{self._base_url}/"
-        self._folder_cache: Optional[Tuple[str, str, str]] = None
+        self._folder_cache: tuple[str, str, str] | None = None
 
-    def get_libraries(self) -> List[Dict[str, Any]]:
+    def get_libraries(self) -> list[dict[str, Any]]:
         """Fetch all libraries from the Audiobookshelf server."""
         route = self._api_path("libraries")
         try:
@@ -68,9 +69,7 @@ class AudiobookshelfClient:
                 # data['libraries'] is a list of library objects
                 return data.get("libraries", [])
         except httpx.HTTPError as exc:
-            raise AudiobookshelfUploadError(
-                f"Failed to fetch libraries: {exc}"
-            ) from exc
+            raise AudiobookshelfUploadError(f"Failed to fetch libraries: {exc}") from exc
 
     def _api_path(self, suffix: str = "") -> str:
         """Join the API prefix with the provided suffix without losing proxies."""
@@ -81,11 +80,11 @@ class AudiobookshelfClient:
         self,
         audio_path: Path,
         *,
-        metadata: Dict[str, Any],
-        cover_path: Optional[Path] = None,
-        chapters: Optional[Iterable[Dict[str, Any]]] = None,
-        subtitles: Optional[Iterable[Path]] = None,
-    ) -> Dict[str, Any]:
+        metadata: dict[str, Any],
+        cover_path: Path | None = None,
+        chapters: Iterable[dict[str, Any]] | None = None,
+        subtitles: Iterable[Path] | None = None,
+    ) -> dict[str, Any]:
         if not audio_path.exists():
             raise AudiobookshelfUploadError(f"Audio path does not exist: {audio_path}")
 
@@ -108,9 +107,7 @@ class AudiobookshelfClient:
                 message = f"Audiobookshelf upload failed with status {status}"
             raise AudiobookshelfUploadError(message) from exc
         except httpx.HTTPError as exc:
-            raise AudiobookshelfUploadError(
-                f"Audiobookshelf upload failed: {exc}"
-            ) from exc
+            raise AudiobookshelfUploadError(f"Audiobookshelf upload failed: {exc}") from exc
 
         return {}
 
@@ -129,9 +126,9 @@ class AudiobookshelfClient:
     def _build_upload_fields(
         self,
         audio_path: Path,
-        metadata: Dict[str, Any],
-        chapters: Optional[Iterable[Dict[str, Any]]],
-    ) -> Dict[str, str]:
+        metadata: dict[str, Any],
+        chapters: Iterable[dict[str, Any]] | None,
+    ) -> dict[str, str]:
         folder_id, _, _ = self._ensure_folder()
         title = self._extract_title(metadata, audio_path)
         author = self._extract_author(metadata)
@@ -139,7 +136,7 @@ class AudiobookshelfClient:
         series_sequence = self._extract_series_sequence(metadata)
         library_id = (self._config.library_id or "").strip()
 
-        fields: Dict[str, str] = {
+        fields: dict[str, str] = {
             "library": library_id,
             "folder": folder_id,
             "title": title,
@@ -153,7 +150,7 @@ class AudiobookshelfClient:
         if self._config.collection_id:
             fields["collectionId"] = self._config.collection_id
 
-        metadata_payload: Dict[str, Any] = metadata or {}
+        metadata_payload: dict[str, Any] = metadata or {}
         if chapters and self._config.send_chapters:
             metadata_payload = dict(metadata_payload)
             metadata_payload["chapters"] = list(chapters)
@@ -181,10 +178,10 @@ class AudiobookshelfClient:
     def _build_file_entries(
         self,
         audio_path: Path,
-        cover_path: Optional[Path],
-        subtitles: Optional[Iterable[Path]],
-    ) -> List[Tuple[str, Path]]:
-        entries: List[Tuple[str, Path]] = [("file0", audio_path)]
+        cover_path: Path | None,
+        subtitles: Iterable[Path] | None,
+    ) -> list[tuple[str, Path]]:
+        entries: list[tuple[str, Path]] = [("file0", audio_path)]
         index = 1
 
         if cover_path and self._config.send_cover and cover_path.exists():
@@ -201,10 +198,10 @@ class AudiobookshelfClient:
 
     def _open_file_handles(
         self,
-        entries: Sequence[Tuple[str, Path]],
+        entries: Sequence[tuple[str, Path]],
         stack: ExitStack,
-    ) -> List[Tuple[str, Tuple[str, Any, str]]]:
-        files: List[Tuple[str, Tuple[str, Any, str]]] = []
+    ) -> list[tuple[str, tuple[str, Any, str]]]:
+        files: list[tuple[str, tuple[str, Any, str]]] = []
         for field_name, path in entries:
             mime_type, _ = mimetypes.guess_type(path.name)
             mime_type = mime_type or "application/octet-stream"
@@ -216,8 +213,8 @@ class AudiobookshelfClient:
         self,
         title: str,
         *,
-        folder_id: Optional[str] = None,
-    ) -> List[Mapping[str, Any]]:
+        folder_id: str | None = None,
+    ) -> list[Mapping[str, Any]]:
         normalized_title = self._normalize_title_value(title)
         if not normalized_title:
             return []
@@ -233,7 +230,7 @@ class AudiobookshelfClient:
         if not requests:
             return []
 
-        matches: List[Mapping[str, Any]] = []
+        matches: list[Mapping[str, Any]] = []
 
         try:
             with self._open_client() as client:
@@ -241,9 +238,7 @@ class AudiobookshelfClient:
                     try:
                         response = client.get(route, params=params)
                     except httpx.HTTPError as exc:
-                        logger.debug(
-                            "Audiobookshelf lookup failed for %s: %s", route, exc
-                        )
+                        logger.debug("Audiobookshelf lookup failed for %s: %s", route, exc)
                         continue
 
                     if response.status_code == 404:
@@ -257,9 +252,7 @@ class AudiobookshelfClient:
                             raise AudiobookshelfUploadError(
                                 "Audiobookshelf authentication failed while checking for existing items."
                             ) from exc
-                        logger.debug(
-                            "Audiobookshelf lookup error %s for %s", status, route
-                        )
+                        logger.debug("Audiobookshelf lookup error %s for %s", status, route)
                         continue
 
                     try:
@@ -290,7 +283,7 @@ class AudiobookshelfClient:
         return matches
 
     def delete_items(self, items: Iterable[Mapping[str, Any] | str]) -> None:
-        to_delete: List[str] = []
+        to_delete: list[str] = []
         for entry in items:
             if isinstance(entry, Mapping):
                 item_id = self._extract_item_id(entry)
@@ -309,8 +302,8 @@ class AudiobookshelfClient:
     def _candidate_search_requests(
         self,
         title: str,
-        folder_id: Optional[str],
-    ) -> List[Tuple[str, Dict[str, Any]]]:
+        folder_id: str | None,
+    ) -> list[tuple[str, dict[str, Any]]]:
         query = (title or "").strip()
         if not query:
             return []
@@ -318,10 +311,10 @@ class AudiobookshelfClient:
         library_id = self._config.library_id
         folder_token = (folder_id or self._config.folder_id or "").strip()
 
-        requests: List[Tuple[str, Dict[str, Any]]] = []
+        requests: list[tuple[str, dict[str, Any]]] = []
         seen_routes: set[str] = set()
 
-        def _append(route: str, params: Dict[str, Any]) -> None:
+        def _append(route: str, params: dict[str, Any]) -> None:
             if route in seen_routes:
                 return
             seen_routes.add(route)
@@ -369,14 +362,14 @@ class AudiobookshelfClient:
 
         logger.debug("Audiobookshelf item %s could not be confirmed deleted", item_id)
 
-    def resolve_folder(self) -> Tuple[str, str, str]:
+    def resolve_folder(self) -> tuple[str, str, str]:
         """Return the resolved folder (id, name, library name)."""
         return self._ensure_folder()
 
-    def list_folders(self) -> List[Dict[str, str]]:
+    def list_folders(self) -> list[dict[str, str]]:
         """Return all folders for the configured library."""
         library_name, folders = self._load_library_metadata()
-        results: List[Dict[str, str]] = []
+        results: list[dict[str, str]] = []
         for folder in folders:
             folder_id = str(folder.get("id") or "").strip()
             if not folder_id:
@@ -398,7 +391,7 @@ class AudiobookshelfClient:
         )
         return results
 
-    def _ensure_folder(self) -> Tuple[str, str, str]:
+    def _ensure_folder(self) -> tuple[str, str, str]:
         if self._folder_cache:
             return self._folder_cache
 
@@ -464,20 +457,16 @@ class AudiobookshelfClient:
             "Enter the folder name exactly as it appears in Audiobookshelf, a trailing path segment, or paste the folder ID."
         )
 
-    def _load_library_metadata(self) -> Tuple[str, List[Mapping[str, Any]]]:
+    def _load_library_metadata(self) -> tuple[str, list[Mapping[str, Any]]]:
         try:
             with self._open_client() as client:
-                response = client.get(
-                    self._api_path(f"libraries/{self._config.library_id}")
-                )
+                response = client.get(self._api_path(f"libraries/{self._config.library_id}"))
                 response.raise_for_status()
                 payload = response.json()
         except httpx.HTTPStatusError as exc:
             status = exc.response.status_code
             if status == 404:
-                message = (
-                    f"Audiobookshelf library '{self._config.library_id}' not found."
-                )
+                message = f"Audiobookshelf library '{self._config.library_id}' not found."
             else:
                 detail = (exc.response.text or "").strip()
                 if detail:
@@ -500,16 +489,14 @@ class AudiobookshelfClient:
         if not isinstance(payload, Mapping):
             return self._config.library_id, []
 
-        library_name = str(
-            payload.get("name") or payload.get("label") or self._config.library_id
-        )
+        library_name = str(payload.get("name") or payload.get("label") or self._config.library_id)
         raw_folders = payload.get("libraryFolders") or payload.get("folders") or []
         folders = [entry for entry in raw_folders if isinstance(entry, Mapping)]
         return library_name, folders
 
     @staticmethod
-    def _folder_path_candidates(folder: Mapping[str, Any]) -> List[str]:
-        candidates: List[str] = []
+    def _folder_path_candidates(folder: Mapping[str, Any]) -> list[str]:
+        candidates: list[str] = []
         for key in ("fullPath", "fullpath", "path", "folderPath", "virtualPath"):
             value = folder.get(key)
             if isinstance(value, str) and value.strip():
@@ -547,7 +534,7 @@ class AudiobookshelfClient:
         return token.lower()
 
     @staticmethod
-    def _normalize_title_value(value: Optional[str]) -> str:
+    def _normalize_title_value(value: str | None) -> str:
         if not isinstance(value, str):
             return ""
         normalized = re.sub(r"\s+", " ", value).strip()
@@ -567,7 +554,7 @@ class AudiobookshelfClient:
         return ""
 
     @staticmethod
-    def _normalize_folder_id(item: Mapping[str, Any]) -> Optional[str]:
+    def _normalize_folder_id(item: Mapping[str, Any]) -> str | None:
         if not isinstance(item, Mapping):
             return None
         for key in ("folderId", "libraryFolderId", "folder_id", "folder"):
@@ -582,7 +569,7 @@ class AudiobookshelfClient:
         return None
 
     @staticmethod
-    def _extract_item_id(item: Mapping[str, Any]) -> Optional[str]:
+    def _extract_item_id(item: Mapping[str, Any]) -> str | None:
         if not isinstance(item, Mapping):
             return None
         for key in ("id", "libraryItemId", "itemId"):
@@ -597,8 +584,8 @@ class AudiobookshelfClient:
         return None
 
     @staticmethod
-    def _extract_candidate_items(payload: Any) -> List[Mapping[str, Any]]:
-        items: List[Mapping[str, Any]] = []
+    def _extract_candidate_items(payload: Any) -> list[Mapping[str, Any]]:
+        items: list[Mapping[str, Any]] = []
         seen_ids: set[str] = set()
         visited: set[int] = set()
 
@@ -643,9 +630,7 @@ class AudiobookshelfClient:
             return candidate
         if isinstance(authors, Iterable) and not isinstance(authors, (str, Mapping)):
             names = [
-                str(entry).strip()
-                for entry in authors
-                if isinstance(entry, str) and entry.strip()
+                str(entry).strip() for entry in authors if isinstance(entry, str) and entry.strip()
             ]
             if names:
                 # ABS expects a comma-separated string for multiple authors.
@@ -654,9 +639,7 @@ class AudiobookshelfClient:
 
     @staticmethod
     def _extract_series(metadata: Mapping[str, Any]) -> str:
-        series_name = (
-            metadata.get("seriesName") if isinstance(metadata, Mapping) else None
-        )
+        series_name = metadata.get("seriesName") if isinstance(metadata, Mapping) else None
         if isinstance(series_name, str) and series_name.strip():
             return series_name.strip()
         return ""
@@ -680,9 +663,7 @@ class AudiobookshelfClient:
         for key in preferred_keys:
             if key not in metadata:
                 continue
-            normalized = AudiobookshelfClient._normalize_series_sequence(
-                metadata.get(key)
-            )
+            normalized = AudiobookshelfClient._normalize_series_sequence(metadata.get(key))
             if normalized:
                 return normalized
         return ""

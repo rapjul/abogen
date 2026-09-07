@@ -4,11 +4,11 @@ import logging
 import os
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 
 try:  # pragma: no cover - optional dependency
     import spacy
-except Exception:  # pragma: no cover - spaCy unavailable at runtime
+except ImportError:  # pragma: no cover - spaCy unavailable at runtime
     spacy = None
 
 # Lazy spaCy type hints to avoid a hard dependency at import time.
@@ -28,7 +28,7 @@ class ContractionResolution:
     lemma: str
 
     @property
-    def span(self) -> Tuple[int, int]:
+    def span(self) -> tuple[int, int]:
         return self.start, self.end
 
 
@@ -36,22 +36,22 @@ _DEFAULT_MODEL = os.environ.get("ABOGEN_SPACY_MODEL", "en_core_web_sm")
 
 
 @lru_cache(maxsize=1)
-def _load_spacy_model(model: str = _DEFAULT_MODEL) -> Optional[Language]:
+def _load_spacy_model(model: str = _DEFAULT_MODEL) -> Language | None:
     if spacy is None:
         logger.debug("spaCy is not installed; skipping contraction disambiguation")
         return None
 
     try:
         nlp = spacy.load(model)
-    except Exception as exc:  # pragma: no cover - depends on environment
+    except (OSError, ImportError) as exc:  # pragma: no cover - depends on environment
         logger.warning("Failed to load spaCy model '%s': %s", model, exc)
         return None
     return nlp
 
 
 def resolve_ambiguous_contractions(
-    text: str, *, model: Optional[str] = None
-) -> Dict[Tuple[int, int], ContractionResolution]:
+    text: str, *, model: str | None = None
+) -> dict[tuple[int, int], ContractionResolution]:
     """Use spaCy to disambiguate ambiguous contractions in *text*.
 
     Returns a mapping from (start, end) spans to their resolved expansion.
@@ -65,7 +65,7 @@ def resolve_ambiguous_contractions(
         return {}
 
     doc = nlp(text)
-    resolutions: Dict[Tuple[int, int], ContractionResolution] = {}
+    resolutions: dict[tuple[int, int], ContractionResolution] = {}
     for token in doc:
         if token.text == "'s":
             resolution = _resolve_apostrophe_s(token)
@@ -84,7 +84,7 @@ def resolve_ambiguous_contractions(
 
 def _resolution(
     prev: Token, token: Token, expansion_word: str, category: str, lemma_hint: str
-) -> Optional[ContractionResolution]:
+) -> ContractionResolution | None:
     if token is None or prev is None:
         return None
 
@@ -123,7 +123,7 @@ def _assemble_expansion(base_text: str, surface_text: str, expansion_word: str) 
     return f"{base_text} {adjusted}".strip()
 
 
-def _resolve_apostrophe_s(token: Token) -> Optional[ContractionResolution]:
+def _resolve_apostrophe_s(token: Token) -> ContractionResolution | None:
     prev = token.nbor(-1) if token.i > 0 else None
     if prev is None:
         return None
@@ -161,7 +161,7 @@ def _resolve_apostrophe_s(token: Token) -> Optional[ContractionResolution]:
     return _resolution(prev, token, "is", "contraction_aux_be", lemma or "be")
 
 
-def _resolve_apostrophe_d(token: Token) -> Optional[ContractionResolution]:
+def _resolve_apostrophe_d(token: Token) -> ContractionResolution | None:
     prev = token.nbor(-1) if token.i > 0 else None
     if prev is None:
         return None
@@ -189,14 +189,10 @@ def _resolve_apostrophe_d(token: Token) -> Optional[ContractionResolution]:
         next_lemma = ""
 
     if next_tag == "VB":
-        return _resolution(
-            prev, token, "would", "contraction_modal_would", lemma or "will"
-        )
+        return _resolution(prev, token, "would", "contraction_modal_would", lemma or "will")
 
     if token.tag_ == "MD" or lemma in {"will", "would", "shall"}:
-        return _resolution(
-            prev, token, "would", "contraction_modal_would", lemma or "will"
-        )
+        return _resolution(prev, token, "would", "contraction_modal_would", lemma or "will")
 
     if next_lemma in {"been", "gone", "had", "better"} or next_tag in {"VBN", "VBD"}:
         return _resolution(prev, token, "had", "contraction_aux_have", "have")
@@ -207,7 +203,7 @@ def _resolve_apostrophe_d(token: Token) -> Optional[ContractionResolution]:
     return _resolution(prev, token, "would", "contraction_modal_would", lemma or "will")
 
 
-def _next_content_token(token: Token) -> Optional[Token]:
+def _next_content_token(token: Token) -> Token | None:
     doc = token.doc
     for candidate in doc[token.i + 1 :]:
         if candidate.is_space:
@@ -226,18 +222,14 @@ def _favors_have(token: Token) -> bool:
         return False
     if next_content.tag_ in {"VBN"}:
         return True
-    if next_content.lemma_.lower() in {"been", "gone", "had"}:
-        return True
-    return False
+    return next_content.lemma_.lower() in {"been", "gone", "had"}
 
 
 def _favors_be(token: Token) -> bool:
     next_content = _next_content_token(token)
     if next_content is None:
         return True
-    if next_content.tag_ in {"VBG", "JJ", "RB", "DT", "IN"}:
-        return True
-    return False
+    return next_content.tag_ in {"VBG", "JJ", "RB", "DT", "IN"}
 
 
 def _context_prefers_had(token: Token) -> bool:
@@ -259,6 +251,4 @@ def _context_prefers_had(token: Token) -> bool:
         return True
     if next_lemma in {"been", "gone", "had"}:
         return True
-    if next_lemma == "better":
-        return True
-    return False
+    return next_lemma == "better"

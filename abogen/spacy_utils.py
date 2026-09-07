@@ -52,7 +52,7 @@ def get_spacy_model(lang_code, log_callback=None):
             color = "red" if is_error else "grey"
             try:
                 log_callback((msg, color))
-            except Exception:
+            except (TypeError, ValueError, RuntimeError, AttributeError):
                 # Fallback to printing if callback misbehaves
                 print(msg)
         else:
@@ -109,13 +109,13 @@ def get_spacy_model(lang_code, log_callback=None):
             _nlp_cache[lang_code] = nlp
             log(f"spaCy model '{model_name}' downloaded and loaded")
             return nlp
-        except Exception as e:
+        except (OSError, RuntimeError, ImportError) as e:
             log(
                 f"\nspaCy: Failed to download model '{model_name}': {e}...",
                 is_error=True,
             )
             return None
-    except Exception as e:
+    except (RuntimeError, ImportError) as e:
         log(f"\nspaCy: Error loading model '{model_name}': {e}...", is_error=True)
         return None
 
@@ -142,7 +142,7 @@ def segment_sentences(text, lang_code, log_callback=None):
         if text_len and hasattr(nlp, "max_length") and text_len > nlp.max_length:
             # increase a bit beyond the text length to be safe
             nlp.max_length = text_len + 1000
-    except Exception:
+    except (AttributeError, TypeError, ValueError):
         pass
 
     # Process text and extract sentences
@@ -157,5 +157,4 @@ def is_spacy_available():
 
 def clear_cache():
     """Clear the model cache to free memory."""
-    global _nlp_cache
     _nlp_cache.clear()

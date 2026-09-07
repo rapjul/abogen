@@ -6,19 +6,12 @@ import logging
 import os
 import re
 import unicodedata
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from fractions import Fraction
 from typing import (
     TYPE_CHECKING,
     Any,
-    Callable,
-    Dict,
-    Iterable,
-    List,
-    Mapping,
-    Optional,
-    Sequence,
-    Tuple,
 )
 
 from abogen.spacy_contraction_resolver import (
@@ -29,12 +22,7 @@ logger = logging.getLogger(__name__)
 
 try:  # pragma: no cover - optional dependency guard
     from num2words import num2words
-except ImportError:
-    num2words = None
-    logger.warning(
-        "num2words library not found. Number normalization will be disabled."
-    )
-except Exception as e:  # pragma: no cover - graceful degradation
+except (ImportError, RuntimeError) as e:
     num2words = None
     logger.error(f"Failed to import num2words: {e}")
 
@@ -45,7 +33,7 @@ if TYPE_CHECKING:  # pragma: no cover - type checking only
 
 # ---------- Contraction Category Defaults ----------
 
-CONTRACTION_CATEGORY_DEFAULTS: Dict[str, bool] = {
+CONTRACTION_CATEGORY_DEFAULTS: dict[str, bool] = {
     "contraction_aux_be": True,
     "contraction_aux_have": True,
     "contraction_modal_will": True,
@@ -77,16 +65,14 @@ class ApostropheConfig:
     fantasy_marker: str = "‹FAP›"  # Marker inserted if fantasy_mode == mark
     sibilant_iz_marker: str = "‹IZ›"  # Marker for /ɪz/ insertion
     joiner: str = ""  # Replacement used when collapsing internal apostrophes
-    lowercase_for_matching: bool = (
-        True  # Normalize to lower for rule matching (not output)
-    )
+    lowercase_for_matching: bool = True  # Normalize to lower for rule matching (not output)
     protect_cultural_names: bool = True  # Always keep O'Brien, D'Angelo, etc.
     convert_numbers: bool = True  # Convert grouped numbers such as 12,500 to words
     convert_currency: bool = True  # Convert currency symbols to words
     remove_footnotes: bool = True  # Remove footnote indicators
     number_lang: str = "en"  # num2words language code
     year_pronunciation_mode: str = "american"  # off|american (extend if needed)
-    contraction_categories: Dict[str, bool] = field(
+    contraction_categories: dict[str, bool] = field(
         default_factory=lambda: dict(CONTRACTION_CATEGORY_DEFAULTS)
     )
 
@@ -97,7 +83,7 @@ class ApostropheConfig:
 # ---------- Dictionaries / Patterns ----------
 
 # Common contraction expansions (type + expansion words)
-CONTRACTION_LEXICON: Dict[str, Tuple[str, Tuple[str, ...]]] = {
+CONTRACTION_LEXICON: dict[str, tuple[str, tuple[str, ...]]] = {
     "let's": ("contraction_let_us", ("let", "us")),
     "can't": ("contraction_negation_not", ("can", "not")),
     "won't": ("contraction_negation_not", ("will", "not")),
@@ -119,13 +105,13 @@ CONTRACTION_LEXICON: Dict[str, Tuple[str, Tuple[str, ...]]] = {
     "shan't": ("contraction_negation_not", ("shall", "not")),
 }
 
-SUFFIX_CONTRACTION_RULES: Tuple[Tuple[str, str, str], ...] = (
+SUFFIX_CONTRACTION_RULES: tuple[tuple[str, str, str], ...] = (
     ("'ll", "will", "contraction_modal_will"),
     ("'re", "are", "contraction_aux_be"),
     ("'ve", "have", "contraction_aux_have"),
 )
 
-SUFFIX_CONTRACTION_BASES: Dict[str, Tuple[str, ...]] = {
+SUFFIX_CONTRACTION_BASES: dict[str, tuple[str, ...]] = {
     "'m": ("i",),
 }
 
@@ -152,15 +138,11 @@ _CURRENCY_RE = re.compile(
     re.IGNORECASE,
 )
 
-_URL_RE = re.compile(
-    r"(https?://)?(www\.)?(?P<domain>[a-zA-Z0-9-]+(\.[a-zA-Z0-9-]+)+)(/[^\s]*)?"
-)
+_URL_RE = re.compile(r"(https?://)?(www\.)?(?P<domain>[a-zA-Z0-9-]+(\.[a-zA-Z0-9-]+)+)(/[^\s]*)?")
 _FOOTNOTE_RE = re.compile(r"([a-zA-Z]+)(\d+)")
 _BRACKET_FOOTNOTE_RE = re.compile(r"\[\d+\]")
 
-_ISO_DATE_RE = re.compile(
-    r"\b(?P<year>\d{4})[/-](?P<month>\d{1,2})[/-](?P<day>\d{1,2})\b"
-)
+_ISO_DATE_RE = re.compile(r"\b(?P<year>\d{4})[/-](?P<month>\d{1,2})[/-](?P<day>\d{1,2})\b")
 _MDY_DATE_RE = re.compile(
     r"\b(?P<month>Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?\s+"
     r"(?P<day>\d{1,2})(?:st|nd|rd|th)?\s*,\s*(?P<year>\d{4})\b",
@@ -213,7 +195,7 @@ def _is_us_locale() -> bool:
         loc = locale.getlocale(locale.LC_TIME)
         if loc and loc[0] and "en_US" in loc[0]:
             return True
-    except Exception:
+    except (locale.Error, ValueError):
         pass
     return False
 
@@ -360,14 +342,14 @@ _DIGIT_WORDS = (
 )
 
 
-def _int_to_words(value: int, language: str) -> Optional[str]:
+def _int_to_words(value: int, language: str) -> str | None:
     """Convert integer to spelled-out words using configured language."""
     if num2words is None:
         return None
 
     try:
         words = num2words(abs(value), lang=language)
-    except Exception:  # pragma: no cover - unsupported locale
+    except (NotImplementedError, ValueError):  # pragma: no cover - unsupported locale
         return None
 
     if value < 0:
@@ -375,11 +357,14 @@ def _int_to_words(value: int, language: str) -> Optional[str]:
     return words
 
 
-def _int_to_ordinal_words(value: int, language: str) -> Optional[str]:
+def _int_to_ordinal_words(value: int, language: str) -> str | None:
     if num2words is not None:
         try:
             return num2words(value, lang=language, ordinal=True)
-        except Exception:  # pragma: no cover - unsupported locale
+        except (
+            NotImplementedError,
+            ValueError,
+        ):  # pragma: no cover - unsupported locale
             return None
 
     if language.lower().startswith("en"):
@@ -433,9 +418,7 @@ def _pluralize_fraction_word(base: str) -> str:
     return base + "s"
 
 
-def _fraction_denominator_word(
-    denominator: int, numerator: int, language: str
-) -> Optional[str]:
+def _fraction_denominator_word(denominator: int, numerator: int, language: str) -> str | None:
     """Return spoken form for fraction denominator respecting plurality."""
     if denominator == 0:
         return None
@@ -456,9 +439,7 @@ def _fraction_denominator_word(
     return _pluralize_fraction_word(base)
 
 
-def _format_fraction_words(
-    numerator: int, denominator: int, language: str
-) -> Optional[str]:
+def _format_fraction_words(numerator: int, denominator: int, language: str) -> str | None:
     """Return spoken representation of a simple fraction."""
     if denominator == 0:
         return None
@@ -535,7 +516,7 @@ def _replace_fraction(match: re.Match[str], language: str) -> str:
     return spoken
 
 
-def _coerce_int_token(token: str) -> Optional[int]:
+def _coerce_int_token(token: str) -> int | None:
     if token is None:
         return None
     cleaned = token.replace(",", "").strip()
@@ -651,15 +632,11 @@ SUFFIX_ABBREVIATIONS = {
 }
 
 _TITLE_PATTERN = re.compile(
-    r"\b(?P<abbr>"
-    + "|".join(sorted(TITLE_ABBREVIATIONS.keys(), key=len, reverse=True))
-    + r")\.",
+    r"\b(?P<abbr>" + "|".join(sorted(TITLE_ABBREVIATIONS.keys(), key=len, reverse=True)) + r")\.",
     re.IGNORECASE,
 )
 _SUFFIX_PATTERN = re.compile(
-    r"\b(?P<abbr>"
-    + "|".join(sorted(SUFFIX_ABBREVIATIONS.keys(), key=len, reverse=True))
-    + r")\.",
+    r"\b(?P<abbr>" + "|".join(sorted(SUFFIX_ABBREVIATIONS.keys(), key=len, reverse=True)) + r")\.",
     re.IGNORECASE,
 )
 
@@ -673,16 +650,13 @@ def normalize_unicode_apostrophes(text: str) -> str:
     return text
 
 
-def tokenize(text: str) -> List[str]:
+def tokenize(text: str) -> list[str]:
     # Simple tokenization preserving punctuation tokens
     return WORD_TOKEN_RE.findall(text)
 
 
-def tokenize_with_spans(text: str) -> List[Tuple[str, int, int]]:
-    return [
-        (match.group(0), match.start(), match.end())
-        for match in WORD_TOKEN_RE.finditer(text)
-    ]
+def tokenize_with_spans(text: str) -> list[tuple[str, int, int]]:
+    return [(match.group(0), match.start(), match.end()) for match in WORD_TOKEN_RE.finditer(text)]
 
 
 def _cleanup_spacing(text: str) -> str:
@@ -750,9 +724,7 @@ _ROMAN_COMPOSE_ORDER = [
     (1, "I"),
 ]
 
-_ROMAN_PREFIX_RE = re.compile(
-    r"^(?P<roman>[IVXLCDM]+)(?P<sep>[\s\.:,;\-–—]*)", re.IGNORECASE
-)
+_ROMAN_PREFIX_RE = re.compile(r"^(?P<roman>[IVXLCDM]+)(?P<sep>[\s\.:,;\-–—]*)", re.IGNORECASE)
 
 _ROMAN_TOKEN_RE = re.compile(r"^[IVXLCDM]+$")
 _ROMAN_CARDINAL_CONTEXTS = {
@@ -861,7 +833,7 @@ _ROMAN_CONTEXT_COMPOUND_RE = re.compile(
 )
 
 
-def _roman_to_int(token: str) -> Optional[int]:
+def _roman_to_int(token: str) -> int | None:
     if not token:
         return None
     total = 0
@@ -884,7 +856,7 @@ def _roman_to_int(token: str) -> Optional[int]:
 
 
 def _int_to_roman(value: int) -> str:
-    parts: List[str] = []
+    parts: list[str] = []
     remaining = value
     for amount, symbol in _ROMAN_COMPOSE_ORDER:
         while remaining >= amount:
@@ -907,9 +879,7 @@ def _token_is_cardinal_context(token: str) -> bool:
     return token.lower() in _ROMAN_CARDINAL_CONTEXTS
 
 
-def _has_cardinal_leading_context(
-    tokens: Sequence[Tuple[str, int, int]], index: int
-) -> bool:
+def _has_cardinal_leading_context(tokens: Sequence[tuple[str, int, int]], index: int) -> bool:
     j = index - 1
     while j >= 0:
         token, *_ = tokens[j]
@@ -933,7 +903,7 @@ def _has_cardinal_leading_context(
 
 
 def _should_render_ordinal(
-    tokens: Sequence[Tuple[str, int, int]],
+    tokens: Sequence[tuple[str, int, int]],
     index: int,
     value: int,
 ) -> bool:
@@ -986,7 +956,7 @@ def _normalize_roman_numerals(text: str, language: str) -> str:
     if not tokens:
         return text
 
-    parts: List[str] = []
+    parts: list[str] = []
     cursor = 0
 
     for index, (token, start, end) in enumerate(tokens):
@@ -1018,10 +988,10 @@ def _normalize_roman_numerals(text: str, language: str) -> str:
                 if numeric_value is not None:
                     convert = False
                     if len(token) >= 2:
-                        if token.isupper():
-                            convert = True
-                        elif numeric_value <= 200 and _has_cardinal_leading_context(
-                            tokens, index
+                        if (
+                            token.isupper()
+                            or numeric_value <= 200
+                            and _has_cardinal_leading_context(tokens, index)
                         ):
                             convert = True
                     elif len(token) == 1:
@@ -1097,12 +1067,7 @@ def _should_preserve_caps_word(word: str) -> bool:
     upper_base = base.upper()
     if upper_base in _ACRONYM_ALLOWLIST:
         return True
-    if (
-        all(ch in _ROMAN_NUMERAL_LETTERS for ch in letters.upper())
-        and len(letters) <= 7
-    ):
-        return True
-    return False
+    return bool(all(ch in _ROMAN_NUMERAL_LETTERS for ch in letters.upper()) and len(letters) <= 7)
 
 
 def _should_normalize_caps_segment(segment: str) -> bool:
@@ -1113,23 +1078,21 @@ def _should_normalize_caps_segment(segment: str) -> bool:
         return False
     if len(letters) <= 1:
         return False
-    if not any(ch.isspace() for ch in segment) and len(letters) <= 4:
-        return False
-    return True
+    return not (not any(ch.isspace() for ch in segment) and len(letters) <= 4)
 
 
 def _normalize_caps_segment(segment: str) -> str:
     if not segment:
         return segment
 
-    preserve: Dict[str, str] = {}
+    preserve: dict[str, str] = {}
     for match in _CAPS_WORD_PATTERN.finditer(segment):
         word = match.group(0)
         if _should_preserve_caps_word(word):
             preserve[word.lower()] = word
 
     lowered = segment.lower()
-    result_chars: List[str] = []
+    result_chars: list[str] = []
     capitalize_next = True
     for char in lowered:
         if capitalize_next and char.isalpha():
@@ -1139,9 +1102,7 @@ def _normalize_caps_segment(segment: str) -> str:
             result_chars.append(char)
             if char.isalpha():
                 capitalize_next = False
-        if char in ".!?":
-            capitalize_next = True
-        elif char in "\n":
+        if char in ".!?" or char in "\n":
             capitalize_next = True
 
     def _restore(match: re.Match[str]) -> str:
@@ -1152,7 +1113,7 @@ def _normalize_caps_segment(segment: str) -> str:
         lower = token.lower()
         if lower == "i":
             return "I"
-        if lower.startswith("i'") or lower.startswith("i\u2019"):
+        if lower.startswith(("i'", "i’")):
             return "I" + token[1:]
         return token
 
@@ -1163,7 +1124,7 @@ def _normalize_all_caps_quotes(text: str) -> str:
     if not text:
         return text
 
-    builder: List[str] = []
+    builder: list[str] = []
     index = 0
     length = len(text)
 
@@ -1202,12 +1163,12 @@ def normalize_roman_numeral_titles(
     titles: Sequence[str],
     *,
     threshold: float = 0.5,
-) -> List[str]:
+) -> list[str]:
     if not titles:
         return []
 
-    normalized: List[str] = []
-    matches: List[Tuple[int, str, int, str, str]] = []
+    normalized: list[str] = []
+    matches: list[tuple[int, str, int, str, str]] = []
     non_empty = 0
 
     for index, raw in enumerate(titles):
@@ -1312,7 +1273,7 @@ def ensure_terminal_punctuation(text: str) -> str:
         return normalized_body + "." + trailing_body_ws + closers + trailing_ws
 
     parts = _LINE_SPLIT_RE.split(text)
-    amended: List[str] = []
+    amended: list[str] = []
     for part in parts:
         if not part:
             continue
@@ -1355,7 +1316,7 @@ def _apply_contraction_policy(
     category: str,
     cfg: ApostropheConfig,
     expand: Callable[[], str],
-    collapse: Optional[str] = None,
+    collapse: str | None = None,
 ) -> str:
     mode = cfg.contraction_mode
     if mode == "collapse":
@@ -1367,9 +1328,7 @@ def _apply_contraction_policy(
     return expand()
 
 
-def _assemble_contraction_expansion(
-    base_text: str, surface_text: str, expansion_word: str
-) -> str:
+def _assemble_contraction_expansion(base_text: str, surface_text: str, expansion_word: str) -> str:
     if not expansion_word:
         return base_text
 
@@ -1383,7 +1342,7 @@ def _assemble_contraction_expansion(
     return f"{base_text} {adjusted}".strip()
 
 
-def _classify_ambiguous_d(token: str, cfg: ApostropheConfig) -> Tuple[str, str]:
+def _classify_ambiguous_d(token: str, cfg: ApostropheConfig) -> tuple[str, str]:
     base = token[:-2]
     collapse_value = base + "d"
 
@@ -1419,7 +1378,7 @@ def _classify_ambiguous_d(token: str, cfg: ApostropheConfig) -> Tuple[str, str]:
     return candidates[0][0], token
 
 
-def _classify_ambiguous_s(token: str, cfg: ApostropheConfig) -> Tuple[str, str]:
+def _classify_ambiguous_s(token: str, cfg: ApostropheConfig) -> tuple[str, str]:
     base = token[:-2]
 
     if cfg.contraction_mode == "collapse":
@@ -1441,7 +1400,7 @@ def _classify_ambiguous_s(token: str, cfg: ApostropheConfig) -> Tuple[str, str]:
     return candidates[0][0], token
 
 
-def classify_token(token: str, cfg: ApostropheConfig) -> Tuple[str, str]:
+def classify_token(token: str, cfg: ApostropheConfig) -> tuple[str, str]:
     """
     Classify apostrophe usage and propose normalized form.
     Returns (category, normalized_token_or_same).
@@ -1505,9 +1464,7 @@ def classify_token(token: str, cfg: ApostropheConfig) -> Tuple[str, str]:
         return category, normalized
 
     # 6. Suffix contractions ('m handled separately)
-    if low.endswith("'m") and low[:-2] in SUFFIX_CONTRACTION_BASES.get(
-        "'m", ()
-    ):  # pronoun I'm
+    if low.endswith("'m") and low[:-2] in SUFFIX_CONTRACTION_BASES.get("'m", ()):  # pronoun I'm
 
         def _expand_m() -> str:
             base = token[:-2]
@@ -1596,7 +1553,7 @@ def classify_token(token: str, cfg: ApostropheConfig) -> Tuple[str, str]:
 
 def normalize_apostrophes(
     text: str, cfg: ApostropheConfig | None = None
-) -> Tuple[str, List[Tuple[str, str, str]]]:
+) -> tuple[str, list[tuple[str, str, str]]]:
     """
     Normalize apostrophes per config.
     Returns normalized text AND a list of (original_token, category, normalized_token)
@@ -1611,8 +1568,7 @@ def normalize_apostrophes(
 
     use_contextual_s = cfg.contraction_mode == "expand"
     use_contextual_d = (
-        cfg.contraction_mode == "expand"
-        and cfg.ambiguous_past_modal_mode == "contextual"
+        cfg.contraction_mode == "expand" and cfg.ambiguous_past_modal_mode == "contextual"
     )
 
     need_contextual = False
@@ -1625,19 +1581,15 @@ def normalize_apostrophes(
                 need_contextual = True
                 break
 
-    contextual_resolutions = (
-        resolve_ambiguous_contractions(text) if need_contextual else {}
-    )
+    contextual_resolutions = resolve_ambiguous_contractions(text) if need_contextual else {}
 
-    results: List[Tuple[str, str, str]] = []
-    normalized_tokens: List[str] = []
+    results: list[tuple[str, str, str]] = []
+    normalized_tokens: list[str] = []
 
     for tok, start, end in token_entries:
         category, norm = classify_token(tok, cfg)
 
-        resolution = (
-            contextual_resolutions.get((start, end)) if contextual_resolutions else None
-        )
+        resolution = contextual_resolutions.get((start, end)) if contextual_resolutions else None
         if resolution is not None and cfg.contraction_mode == "expand":
             if cfg.is_contraction_enabled(resolution.category):
                 category = resolution.category
@@ -1669,7 +1621,7 @@ def _normalize_grouped_numbers(text: str, cfg: ApostropheConfig) -> str:
 
     year_mode = _year_mode()
 
-    def _format_year_tail(value: int, *, allow_oh: bool = True) -> Optional[str]:
+    def _format_year_tail(value: int, *, allow_oh: bool = True) -> str | None:
         if value == 0:
             return ""
         if value < 10:
@@ -1681,7 +1633,7 @@ def _normalize_grouped_numbers(text: str, cfg: ApostropheConfig) -> str:
             return None
         return words
 
-    def _format_year_like(token: str, value: int) -> Optional[str]:
+    def _format_year_like(token: str, value: int) -> str | None:
         if year_mode == "off" or num2words is None:
             return None
         if len(token) != 4 or not token.isdigit():
@@ -1690,7 +1642,7 @@ def _normalize_grouped_numbers(text: str, cfg: ApostropheConfig) -> str:
             return None
         style = year_mode
 
-        def _words(value_to_convert: int) -> Optional[str]:
+        def _words(value_to_convert: int) -> str | None:
             words = _int_to_words(value_to_convert, language)
             return words
 
@@ -1812,7 +1764,7 @@ def _normalize_grouped_numbers(text: str, cfg: ApostropheConfig) -> str:
     def _replace_decimal(match: re.Match[str]) -> str:
         token = match.group("number")
         fraction_part = match.group("fraction")
-        start, end = match.span()
+        _start, end = match.span()
         source = match.string
 
         if end < len(source) and source[end] == ".":
@@ -1846,7 +1798,7 @@ def _normalize_grouped_numbers(text: str, cfg: ApostropheConfig) -> str:
             fallback_core = core.replace(".", " point ")
             return f"minus {fallback_core}" if is_negative else fallback_core
 
-        digit_words: List[str] = []
+        digit_words: list[str] = []
         for digit in trimmed_fraction:
             if not digit.isdigit():
                 return token
@@ -1897,7 +1849,7 @@ def _normalize_grouped_numbers(text: str, cfg: ApostropheConfig) -> str:
 
         # Handle $0.99 -> ninety-nine cents (avoid "zero dollars and...").
         if amount_str.startswith("0") and amount < 1.0:
-            dollars_part, dot, fraction = amount_str.partition(".")
+            _dollars_part, dot, fraction = amount_str.partition(".")
             if dot and fraction:
                 cents_str = (fraction + "00")[:2]
                 try:
@@ -1905,9 +1857,7 @@ def _normalize_grouped_numbers(text: str, cfg: ApostropheConfig) -> str:
                 except ValueError:
                     cents_value = 0
                 if cents_value > 0:
-                    cents_words = _int_to_words(cents_value, language) or str(
-                        cents_value
-                    )
+                    cents_words = _int_to_words(cents_value, language) or str(cents_value)
                     subunit = {
                         "$": "cent",
                         "€": "cent",
@@ -1935,15 +1885,13 @@ def _normalize_grouped_numbers(text: str, cfg: ApostropheConfig) -> str:
         try:
             # Always use float to avoid num2words treating int as cents (if that's what it does)
             # or to ensure consistent behavior.
-            words = num2words(
-                amount, to="currency", currency=currency_code, lang=language
-            )
+            words = num2words(amount, to="currency", currency=currency_code, lang=language)
 
             # Remove "zero cents" if present
             # Patterns: ", zero cents", " and zero cents"
             words = words.replace(", zero cents", "").replace(" and zero cents", "")
             return words
-        except Exception:
+        except (NotImplementedError, ValueError, TypeError):
             return match.group(0)
 
     def _replace_url(match: re.Match[str]) -> str:
@@ -1970,8 +1918,7 @@ def _normalize_grouped_numbers(text: str, cfg: ApostropheConfig) -> str:
             except ValueError:
                 pass
 
-        if domain.startswith("www."):
-            domain = domain[4:]
+        domain = domain.removeprefix("www.")
         spoken = domain.replace(".", " dot ")
         return spoken
 
@@ -1991,15 +1938,11 @@ def _normalize_grouped_numbers(text: str, cfg: ApostropheConfig) -> str:
         normalized = _CURRENCY_RE.sub(_replace_currency, normalized)
 
     if cfg.convert_numbers:
-        normalized = _NUMBER_RANGE_RE.sub(
-            lambda m: _replace_number_range(m, language), normalized
-        )
+        normalized = _NUMBER_RANGE_RE.sub(lambda m: _replace_number_range(m, language), normalized)
         normalized = _NUMBER_SPACE_RANGE_RE.sub(
             lambda m: _replace_space_separated_range(m, language), normalized
         )
-        normalized = _FRACTION_RE.sub(
-            lambda m: _replace_fraction(m, language), normalized
-        )
+        normalized = _FRACTION_RE.sub(lambda m: _replace_fraction(m, language), normalized)
         normalized = _DECIMAL_NUMBER_RE.sub(_replace_decimal, normalized)
         normalized = _NUMBER_WITH_GROUP_RE.sub(_replace_grouped, normalized)
         normalized = _PLAIN_NUMBER_RE.sub(_replace_plain, normalized)
@@ -2135,10 +2078,8 @@ def _render_mustache(template: str, context: Mapping[str, str]) -> str:
 _SENTENCE_CAPTURE_RE = re.compile(r"[^.!?]+[.!?]+|[^.!?]+$", re.MULTILINE)
 
 
-def _split_sentences_for_llm(text: str) -> List[str]:
-    sentences = [
-        segment.strip() for segment in _SENTENCE_CAPTURE_RE.findall(text or "")
-    ]
+def _split_sentences_for_llm(text: str) -> list[str]:
+    sentences = [segment.strip() for segment in _SENTENCE_CAPTURE_RE.findall(text or "")]
     return [segment for segment in sentences if segment]
 
 
@@ -2163,7 +2104,7 @@ def _normalize_with_llm(
     if not lines:
         return text
 
-    normalized_lines: List[str] = []
+    normalized_lines: list[str] = []
     for raw_line in lines:
         newline = ""
         if raw_line.endswith(("\r", "\n")):
@@ -2187,7 +2128,7 @@ def _normalize_with_llm(
             continue
 
         paragraph_context = core
-        rewritten_sentences: List[str] = []
+        rewritten_sentences: list[str] = []
         for sentence in sentences:
             prompt_context = {
                 "text": sentence,
@@ -2202,9 +2143,7 @@ def _normalize_with_llm(
                 tools=[_LLM_REGEX_TOOL],
                 tool_choice=_LLM_REGEX_TOOL_CHOICE,
             )
-            rewritten_sentences.append(
-                _apply_llm_regex_replacements(sentence, completion)
-            )
+            rewritten_sentences.append(_apply_llm_regex_replacements(sentence, completion))
 
         normalized_core = " ".join(filter(None, rewritten_sentences)) or core
 
@@ -2215,7 +2154,7 @@ def _normalize_with_llm(
     return result if result else text
 
 
-def _apply_llm_regex_replacements(sentence: str, completion: "LLMCompletion") -> str:
+def _apply_llm_regex_replacements(sentence: str, completion: LLMCompletion) -> str:
     replacements = _extract_llm_replacements(completion)
     if not replacements:
         return sentence
@@ -2226,7 +2165,7 @@ def _apply_llm_regex_replacements(sentence: str, completion: "LLMCompletion") ->
     return updated
 
 
-def _extract_llm_replacements(completion: "LLMCompletion") -> List[Dict[str, Any]]:
+def _extract_llm_replacements(completion: LLMCompletion) -> list[dict[str, Any]]:
     if completion is None:
         return []
 
@@ -2247,7 +2186,7 @@ def _extract_llm_replacements(completion: "LLMCompletion") -> List[Dict[str, Any
     return []
 
 
-def _safe_load_json(raw: Optional[str]) -> Any:
+def _safe_load_json(raw: str | None) -> Any:
     if not raw:
         return None
     try:
@@ -2256,7 +2195,7 @@ def _safe_load_json(raw: Optional[str]) -> Any:
         return None
 
 
-def _coerce_replacement_list(raw: Any) -> List[Dict[str, Any]]:
+def _coerce_replacement_list(raw: Any) -> list[dict[str, Any]]:
     if isinstance(raw, Mapping):
         candidates = raw.get("replacements")
     else:
@@ -2265,7 +2204,7 @@ def _coerce_replacement_list(raw: Any) -> List[Dict[str, Any]]:
     if not isinstance(candidates, list):
         return []
 
-    replacements: List[Dict[str, Any]] = []
+    replacements: list[dict[str, Any]] = []
     for item in candidates:
         if not isinstance(item, Mapping):
             continue
@@ -2273,7 +2212,7 @@ def _coerce_replacement_list(raw: Any) -> List[Dict[str, Any]]:
         if not pattern:
             continue
         replacement = str(item.get("replacement") or "")
-        entry: Dict[str, Any] = {"pattern": pattern, "replacement": replacement}
+        entry: dict[str, Any] = {"pattern": pattern, "replacement": replacement}
 
         flags = _normalize_flag_field(item.get("flags"))
         if flags:
@@ -2288,7 +2227,7 @@ def _coerce_replacement_list(raw: Any) -> List[Dict[str, Any]]:
     return replacements
 
 
-def _normalize_flag_field(raw: Any) -> List[str]:
+def _normalize_flag_field(raw: Any) -> list[str]:
     if not raw:
         return []
 
@@ -2299,15 +2238,11 @@ def _normalize_flag_field(raw: Any) -> List[str]:
     else:
         return []
 
-    normalized: List[str] = []
+    normalized: list[str] = []
     seen: set[str] = set()
     for value in raw_iterable:
         candidate = str(value or "").strip().upper()
-        if (
-            not candidate
-            or candidate not in _LLM_ALLOWED_REGEX_FLAGS
-            or candidate in seen
-        ):
+        if not candidate or candidate not in _LLM_ALLOWED_REGEX_FLAGS or candidate in seen:
             continue
         seen.add(candidate)
         normalized.append(candidate)
@@ -2324,9 +2259,7 @@ def _apply_single_regex_replacement(text: str, spec: Mapping[str, Any]) -> str:
     flag_names = spec.get("flags")
     if isinstance(flag_names, str):
         flag_iterable: Iterable[Any] = [flag_names]
-    elif isinstance(flag_names, Iterable) and not isinstance(
-        flag_names, (bytes, str, Mapping)
-    ):
+    elif isinstance(flag_names, Iterable) and not isinstance(flag_names, (bytes, str, Mapping)):
         flag_iterable = flag_names
     else:
         flag_iterable = []
@@ -2347,12 +2280,11 @@ def _apply_single_regex_replacement(text: str, spec: Mapping[str, Any]) -> str:
 def normalize_for_pipeline(
     text: str,
     *,
-    config: Optional[ApostropheConfig] = None,
-    settings: Optional[Mapping[str, Any]] = None,
+    config: ApostropheConfig | None = None,
+    settings: Mapping[str, Any] | None = None,
 ) -> str:
     """Normalize text for the synthesis pipeline with runtime settings."""
 
-    from abogen.llm_client import LLMClientError
     from abogen.normalization_settings import (
         build_apostrophe_config,
         get_runtime_settings,
@@ -2384,25 +2316,12 @@ def normalize_for_pipeline(
 
     if mode == "off":
         normalized = normalize_unicode_apostrophes(normalized)
-        if (
-            cfg.convert_numbers
-            or cfg.convert_currency
-            or getattr(cfg, "remove_footnotes", False)
-        ):
+        if cfg.convert_numbers or cfg.convert_currency or getattr(cfg, "remove_footnotes", False):
             normalized = _normalize_grouped_numbers(normalized, cfg)
         normalized = _cleanup_spacing(normalized)
     elif mode == "llm":
-        try:
-            normalized = _normalize_with_llm(
-                normalized, settings=runtime_settings, config=cfg
-            )
-        except LLMClientError:
-            raise
-        if (
-            cfg.convert_numbers
-            or cfg.convert_currency
-            or getattr(cfg, "remove_footnotes", False)
-        ):
+        normalized = _normalize_with_llm(normalized, settings=runtime_settings, config=cfg)
+        if cfg.convert_numbers or cfg.convert_currency or getattr(cfg, "remove_footnotes", False):
             normalized = _normalize_grouped_numbers(normalized, cfg)
         normalized = _cleanup_spacing(normalized)
     else:

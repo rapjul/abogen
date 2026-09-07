@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import os
 import threading
-from typing import Callable, Dict, Iterable, Optional, Set, Tuple
+from collections.abc import Callable, Iterable
 
 try:  # pragma: no cover - optional dependency guard
     from huggingface_hub import hf_hub_download  # type: ignore
     from huggingface_hub.utils import LocalEntryNotFoundError  # type: ignore
-except Exception:  # pragma: no cover - import fallback
+except ImportError:  # pragma: no cover - import fallback
     hf_hub_download = None  # type: ignore[assignment]
     LocalEntryNotFoundError = None  # type: ignore[assignment]
 
@@ -20,15 +20,15 @@ if LocalEntryNotFoundError is None:  # pragma: no cover - fallback for tests
 from abogen.constants import VOICES_INTERNAL
 
 _CACHE_LOCK = threading.Lock()
-_CACHED_VOICES: Set[str] = set()
+_CACHED_VOICES: set[str] = set()
 _BOOTSTRAP_LOCK = threading.Lock()
 _BOOTSTRAPPED = False
 
 
-def _normalize_targets(voices: Optional[Iterable[str]]) -> Set[str]:
+def _normalize_targets(voices: Iterable[str] | None) -> set[str]:
     if not voices:
         return set(VOICES_INTERNAL)
-    normalized: Set[str] = set()
+    normalized: set[str] = set()
     for voice in voices:
         if not voice:
             continue
@@ -41,12 +41,12 @@ def _normalize_targets(voices: Optional[Iterable[str]]) -> Set[str]:
 
 
 def ensure_voice_assets(
-    voices: Optional[Iterable[str]] = None,
+    voices: Iterable[str] | None = None,
     *,
     repo_id: str = "hexgrad/Kokoro-82M",
-    cache_dir: Optional[str] = None,
-    on_progress: Optional[Callable[[str], None]] = None,
-) -> Tuple[Set[str], Dict[str, str]]:
+    cache_dir: str | None = None,
+    on_progress: Callable[[str], None] | None = None,
+) -> tuple[set[str], dict[str, str]]:
     """Ensure Kokoro voice weight files are present locally.
 
     Returns a tuple of (downloaded voices, errors) where errors maps the
@@ -68,8 +68,8 @@ def ensure_voice_assets(
     with _CACHE_LOCK:
         missing = [voice for voice in targets if voice not in _CACHED_VOICES]
 
-    downloaded: Set[str] = set()
-    errors: Dict[str, str] = {}
+    downloaded: set[str] = set()
+    errors: dict[str, str] = {}
 
     for voice_id in missing:
         if on_progress:
@@ -80,7 +80,11 @@ def ensure_voice_assets(
                 repo_id=repo_id,
                 cache_dir=effective_cache_dir,
             )
-        except Exception as exc:  # pragma: no cover - network variance
+        except (
+            OSError,
+            RuntimeError,
+            ValueError,
+        ) as exc:  # pragma: no cover - network variance
             errors[voice_id] = str(exc)
             continue
 
@@ -93,12 +97,12 @@ def ensure_voice_assets(
 
 
 def bootstrap_voice_cache(
-    voices: Optional[Iterable[str]] = None,
+    voices: Iterable[str] | None = None,
     *,
     repo_id: str = "hexgrad/Kokoro-82M",
-    cache_dir: Optional[str] = None,
-    on_progress: Optional[Callable[[str], None]] = None,
-) -> Tuple[Set[str], Dict[str, str]]:
+    cache_dir: str | None = None,
+    on_progress: Callable[[str], None] | None = None,
+) -> tuple[set[str], dict[str, str]]:
     """Ensure voices are cached once per process.
 
     Subsequent calls are no-ops and return empty structures.
@@ -122,7 +126,7 @@ def _ensure_single_voice_asset(
     voice_id: str,
     *,
     repo_id: str,
-    cache_dir: Optional[str],
+    cache_dir: str | None,
 ) -> bool:
     if hf_hub_download is None:
         raise RuntimeError("huggingface_hub is required to cache voices")

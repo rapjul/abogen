@@ -165,9 +165,7 @@ class FlowLayout(QLayout):
 
 
 class VoiceMixer(QWidget):
-    def __init__(
-        self, voice_name, language_code, initial_status=False, initial_weight=0.0
-    ):
+    def __init__(self, voice_name, language_code, initial_status=False, initial_weight=0.0):
         super().__init__()
         self.voice_name = voice_name
         self.setFixedWidth(VOICE_MIXER_WIDTH)
@@ -189,14 +187,10 @@ class VoiceMixer(QWidget):
         # Icons layout (flag and gender)
         icons_layout = QHBoxLayout()
         icons_layout.setSpacing(3)
-        icons_layout.setAlignment(
-            Qt.AlignmentFlag.AlignCenter
-        )  # Center the icons horizontally
+        icons_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)  # Center the icons horizontally
 
         # Flag icon
-        flag_icon_path = get_resource_path(
-            "abogen.assets.flags", f"{language_code}.png"
-        )
+        flag_icon_path = get_resource_path("abogen.assets.flags", f"{language_code}.png")
         gender_icon_path = get_resource_path(
             "abogen.assets", "female.png" if is_female else "male.png"
         )
@@ -244,12 +238,8 @@ class VoiceMixer(QWidget):
         self.slider = QSlider(Qt.Orientation.Vertical)
         self.slider.setRange(0, 100)
         self.slider.setValue(int(initial_weight * 100))
-        self.slider.setToolTip(
-            "Adjust this voice weight quickly (0 to 100 maps to 0.00 to 1.00)."
-        )
-        self.slider.setSizePolicy(
-            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding
-        )
+        self.slider.setToolTip("Adjust this voice weight quickly (0 to 100 maps to 0.00 to 1.00).")
+        self.slider.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
         self.slider.setFixedWidth(SLIDER_WIDTH)
 
         # Apply slider styling after widget is added to window (see showEvent)
@@ -270,9 +260,7 @@ class VoiceMixer(QWidget):
         slider_layout.addWidget(label_top)
 
         slider_center_layout = QHBoxLayout()
-        slider_center_layout.addWidget(
-            self.slider, alignment=Qt.AlignmentFlag.AlignHCenter
-        )
+        slider_center_layout.addWidget(self.slider, alignment=Qt.AlignmentFlag.AlignHCenter)
         slider_center_layout.setContentsMargins(0, 0, 0, 0)
 
         slider_center_widget = QWidget()
@@ -369,9 +357,7 @@ class HoverLabel(QLabel):
         # Create delete button
         self.delete_button = QPushButton("×", self)
         self.delete_button.setFixedSize(16, 16)
-        self.delete_button.setToolTip(
-            "Remove this voice from the weighted summary list."
-        )
+        self.delete_button.setToolTip("Remove this voice from the weighted summary list.")
         self.delete_button.setStyleSheet(
             f"""
             QPushButton {{
@@ -391,9 +377,7 @@ class HoverLabel(QLabel):
         )
         # Make sure the entire button is clickable, not just the text
         self.delete_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.delete_button.setAttribute(
-            Qt.WidgetAttribute.WA_TransparentForMouseEvents, False
-        )
+        self.delete_button.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
         self.delete_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.delete_button.hide()
 
@@ -417,9 +401,7 @@ class VoiceFormulaDialog(QDialog):
         self._original_mixed_voice_state = None
         if parent is not None:
             self._original_profile_name = getattr(parent, "selected_profile_name", None)
-            self._original_mixed_voice_state = getattr(
-                parent, "mixed_voice_state", None
-            )
+            self._original_mixed_voice_state = getattr(parent, "mixed_voice_state", None)
         profiles = load_profiles()
         self._virtual_new_profile = False
         if not profiles:
@@ -430,9 +412,7 @@ class VoiceFormulaDialog(QDialog):
             profiles = {}  # Do not add to JSON yet
         else:
             self.current_profile = (
-                selected_profile
-                if selected_profile in profiles
-                else list(profiles.keys())[0]
+                selected_profile if selected_profile in profiles else next(iter(profiles.keys()))
             )
             self._profile_dirty = {name: False for name in profiles}
         # Track unsaved states per profile
@@ -489,23 +469,15 @@ class VoiceFormulaDialog(QDialog):
             self.profile_list.setCurrentRow(idx)
         profile_layout.addWidget(self.profile_list)
         self.profile_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.profile_list.customContextMenuRequested.connect(
-            self.show_profile_context_menu
-        )
-        self.profile_list.setItemWidget = (
-            self.profile_list.setItemWidget
-        )  # for type hints
+        self.profile_list.customContextMenuRequested.connect(self.show_profile_context_menu)
+        self.profile_list.setItemWidget = self.profile_list.setItemWidget  # for type hints
         # Save and management buttons
         mgmt_layout = QVBoxLayout()
         self.btn_import_profiles = QPushButton("Import profile(s)")
-        self.btn_import_profiles.setToolTip(
-            "Import one or more voice profiles from a file."
-        )
+        self.btn_import_profiles.setToolTip("Import one or more voice profiles from a file.")
         mgmt_layout.addWidget(self.btn_import_profiles)
         self.btn_export_profiles = QPushButton("Export profiles")
-        self.btn_export_profiles.setToolTip(
-            "Export selected or all voice profiles to a file."
-        )
+        self.btn_export_profiles.setToolTip("Export selected or all voice profiles to a file.")
         mgmt_layout.addWidget(self.btn_export_profiles)
         profile_layout.addLayout(mgmt_layout)
         # prepare mixer widget
@@ -525,9 +497,7 @@ class VoiceFormulaDialog(QDialog):
         self.last_enabled_voice = None
 
         # Header label and language selector
-        self.header_label = QLabel(
-            "Adjust voice weights to create your preferred voice mix."
-        )
+        self.header_label = QLabel("Adjust voice weights to create your preferred voice mix.")
         self.header_label.setStyleSheet("font-size: 13px;")
         self.header_label.setWordWrap(True)
         header_row = QHBoxLayout()
@@ -548,7 +518,7 @@ class VoiceFormulaDialog(QDialog):
         prof = profiles.get(self.current_profile, {})
         lang = prof.get("language") if isinstance(prof, dict) else None
         if not lang:
-            lang = list(LANGUAGE_DESCRIPTIONS.keys())[0]
+            lang = next(iter(LANGUAGE_DESCRIPTIONS.keys()))
         idx = self.language_combo.findData(lang)
         if idx >= 0:
             self.language_combo.setCurrentIndex(idx)
@@ -562,9 +532,7 @@ class VoiceFormulaDialog(QDialog):
         mixer_layout.addLayout(header_row)
 
         # Error message
-        self.error_label = QLabel(
-            "Please select at least one voice and set its weight above 0."
-        )
+        self.error_label = QLabel("Please select at least one voice and set its weight above 0.")
         self.error_label.setStyleSheet("color: red; font-weight: bold;")
         self.error_label.setWordWrap(True)
         self.error_label.hide()
@@ -585,12 +553,8 @@ class VoiceFormulaDialog(QDialog):
         # Voice list scroll area
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
-        self.scroll_area.setHorizontalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAsNeeded
-        )
-        self.scroll_area.setVerticalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAsNeeded
-        )
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.scroll_area.viewport().installEventFilter(self)
 
         self.voice_list_widget = QWidget()
@@ -607,9 +571,7 @@ class VoiceFormulaDialog(QDialog):
         clear_all_button = QPushButton("Clear all")
         ok_button = QPushButton("OK")
         cancel_button = QPushButton("Cancel")
-        clear_all_button.setToolTip(
-            "Disable all voices and reset their effective selection."
-        )
+        clear_all_button.setToolTip("Disable all voices and reset their effective selection.")
         ok_button.setToolTip("Apply this mix and close the dialog.")
         cancel_button.setToolTip("Close without applying new changes.")
 
@@ -806,28 +768,18 @@ class VoiceFormulaDialog(QDialog):
         first_enabled_voice = None
         for voice in VOICES_INTERNAL:
             language_code = voice[0]  # First character is the language code
-            matching_voice = next(
-                (item for item in initial_state if item[0] == voice), None
-            )
+            matching_voice = next((item for item in initial_state if item[0] == voice), None)
             initial_status = matching_voice is not None
             initial_weight = matching_voice[1] if matching_voice else 1.0
-            voice_mixer = self.add_voice(
-                voice, language_code, initial_status, initial_weight
-            )
+            voice_mixer = self.add_voice(voice, language_code, initial_status, initial_weight)
             if initial_status and first_enabled_voice is None:
                 first_enabled_voice = voice_mixer
 
         if first_enabled_voice:
-            QTimer.singleShot(
-                0, lambda: self.scroll_area.ensureWidgetVisible(first_enabled_voice)
-            )
+            QTimer.singleShot(0, lambda: self.scroll_area.ensureWidgetVisible(first_enabled_voice))
 
-    def add_voice(
-        self, voice_name, language_code, initial_status=False, initial_weight=1.0
-    ):
-        voice_mixer = VoiceMixer(
-            voice_name, language_code, initial_status, initial_weight
-        )
+    def add_voice(self, voice_name, language_code, initial_status=False, initial_weight=1.0):
+        voice_mixer = VoiceMixer(voice_name, language_code, initial_status, initial_weight)
         self.voice_mixers.append(voice_mixer)
         self.voice_list_layout.addWidget(voice_mixer)
         voice_mixer.checkbox.stateChanged.connect(
@@ -838,9 +790,7 @@ class VoiceFormulaDialog(QDialog):
         voice_mixer.spin_box.valueChanged.connect(self._schedule_profile_modified)
         # Checkbox changes are immediate since they're not high-frequency
         voice_mixer.checkbox.stateChanged.connect(self.update_weighted_sums)
-        voice_mixer.checkbox.stateChanged.connect(
-            lambda *_: self.mark_profile_modified()
-        )
+        voice_mixer.checkbox.stateChanged.connect(lambda *_: self.mark_profile_modified())
         return voice_mixer
 
     def handle_voice_checkbox(self, voice_mixer, state):
@@ -850,11 +800,7 @@ class VoiceFormulaDialog(QDialog):
         self.update_weighted_sums()
 
     def get_selected_voices(self):
-        return [
-            v
-            for v in (m.get_voice_weight() for m in self.voice_mixers)
-            if v and v[1] > 0
-        ]
+        return [v for v in (m.get_voice_weight() for m in self.voice_mixers) if v and v[1] > 0]
 
     def _schedule_weighted_update(self):
         """Schedule a debounced weighted sums update."""
@@ -903,7 +849,7 @@ class VoiceFormulaDialog(QDialog):
 
             # Get current voice names in display
             current_names = set(self._voice_labels.keys())
-            new_names = set(name for name, _ in selected)
+            new_names = {name for name, _ in selected}
 
             # Remove labels for voices no longer selected
             for name in current_names - new_names:
@@ -1093,9 +1039,8 @@ class VoiceFormulaDialog(QDialog):
             self.reject()
             return
         # Prompt to save if unsaved changes, then check for zero-weight error after save
-        if self._has_unsaved_changes():
-            if not self._prompt_save_changes():
-                return
+        if self._has_unsaved_changes() and not self._prompt_save_changes():
+            return
         if self._handle_zero_weight_profiles():
             return
         selected_voices = self.get_selected_voices()
@@ -1129,9 +1074,8 @@ class VoiceFormulaDialog(QDialog):
             if hasattr(self, "_original_mixed_voice_state"):
                 parent.mixed_voice_state = self._original_mixed_voice_state
         # Prompt to save if unsaved changes, then check for zero-weight error after save
-        if self._has_unsaved_changes():
-            if not self._prompt_save_changes():
-                return
+        if self._has_unsaved_changes() and not self._prompt_save_changes():
+            return
         if self._handle_zero_weight_profiles():
             return
         super().reject()
@@ -1145,10 +1089,9 @@ class VoiceFormulaDialog(QDialog):
             if hasattr(self, "_original_mixed_voice_state"):
                 parent.mixed_voice_state = self._original_mixed_voice_state
         # Prompt to save if unsaved changes, then check for zero-weight error after save
-        if self._has_unsaved_changes():
-            if not self._prompt_save_changes():
-                event.ignore()
-                return
+        if self._has_unsaved_changes() and not self._prompt_save_changes():
+            event.ignore()
+            return
         if self._handle_zero_weight_profiles():
             event.ignore()
             return
@@ -1217,9 +1160,7 @@ class VoiceFormulaDialog(QDialog):
             }
             save_profiles(profiles)
             self.profile_list.addItem(
-                QListWidgetItem(
-                    QIcon(get_resource_path("abogen.assets", "profile.png")), name
-                )
+                QListWidgetItem(QIcon(get_resource_path("abogen.assets", "profile.png")), name)
             )
             self.profile_list.setCurrentRow(self.profile_list.count() - 1)
             # reset UI mixers
@@ -1262,9 +1203,7 @@ class VoiceFormulaDialog(QDialog):
             export_profiles(path)
 
     def import_profiles_dialog(self):
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Import Profiles", "", "JSON Files (*.json)"
-        )
+        path, _ = QFileDialog.getOpenFileName(self, "Import Profiles", "", "JSON Files (*.json)")
         if path:
             from abogen.voice_profiles import load_profiles, save_profiles
 
@@ -1292,9 +1231,7 @@ class VoiceFormulaDialog(QDialog):
                     return
                 count = len(imported_profiles)
             except Exception:
-                QMessageBox.warning(
-                    self, "Import Error", "Could not read the selected file."
-                )
+                QMessageBox.warning(self, "Import Error", "Could not read the selected file.")
                 return
             if count == 0:
                 QMessageBox.information(
@@ -1350,9 +1287,7 @@ class VoiceFormulaDialog(QDialog):
             profiles = load_profiles()
             for nm in profiles:
                 self.profile_list.addItem(
-                    QListWidgetItem(
-                        QIcon(get_resource_path("abogen.assets", "profile.png")), nm
-                    )
+                    QListWidgetItem(QIcon(get_resource_path("abogen.assets", "profile.png")), nm)
                 )
             if self.profile_list.count() > 0:
                 self.profile_list.setCurrentRow(0)
@@ -1426,17 +1361,13 @@ class VoiceFormulaDialog(QDialog):
         if self._profile_dirty.get(name, False) and not (
             self._virtual_new_profile and name == "New profile"
         ):
-            QMessageBox.warning(
-                self, "Unsaved Changes", "Please save the profile before renaming."
-            )
+            QMessageBox.warning(self, "Unsaved Changes", "Please save the profile before renaming.")
             return
         old = item.text().lstrip("*")
         import re
 
         while True:
-            new, ok = QInputDialog.getText(
-                self, "Rename Profile", "Profile name:", text=old
-            )
+            new, ok = QInputDialog.getText(self, "Rename Profile", "Profile name:", text=old)
             if not ok or not new or new == old:
                 break
             new = new.strip()  # Remove leading/trailing spaces
@@ -1533,9 +1464,7 @@ class VoiceFormulaDialog(QDialog):
             i += 1
         duplicate_profile(src, new)
         self.profile_list.addItem(
-            QListWidgetItem(
-                QIcon(get_resource_path("abogen.assets", "profile.png")), new
-            )
+            QListWidgetItem(QIcon(get_resource_path("abogen.assets", "profile.png")), new)
         )
         parent = self.parent()
         if hasattr(parent, "populate_profiles_in_voice_combo"):
@@ -1552,9 +1481,7 @@ class VoiceFormulaDialog(QDialog):
             item = self.profile_list.item(i)
             name = item.text().lstrip("*")
             if item.text().startswith("*"):
-                widget = SaveButtonWidget(
-                    self.profile_list, name, self.save_profile_by_name
-                )
+                widget = SaveButtonWidget(self.profile_list, name, self.save_profile_by_name)
                 self.profile_list.setItemWidget(item, widget)
 
     def update_profile_list_colors(self):
@@ -1565,10 +1492,7 @@ class VoiceFormulaDialog(QDialog):
         for i in range(self.profile_list.count()):
             item = self.profile_list.item(i)
             name = item.text().lstrip("*")
-            if self._virtual_new_profile and name == "New profile":
-                color = self._parse_rgba_to_qcolor(COLORS.get("YELLOW_BACKGROUND"))
-                item.setData(Qt.ItemDataRole.BackgroundRole, color)
-            elif item.text().startswith("*"):
+            if self._virtual_new_profile and name == "New profile" or item.text().startswith("*"):
                 color = self._parse_rgba_to_qcolor(COLORS.get("YELLOW_BACKGROUND"))
                 item.setData(Qt.ItemDataRole.BackgroundRole, color)
             else:
@@ -1603,9 +1527,7 @@ class VoiceFormulaDialog(QDialog):
             parent.selected_profile_name = None
             lang = self.language_combo.currentData()
             parent.selected_lang = lang
-            parent.subtitle_combo.setEnabled(
-                lang in SUPPORTED_LANGUAGES_FOR_SUBTITLE_GENERATION
-            )
+            parent.subtitle_combo.setEnabled(lang in SUPPORTED_LANGUAGES_FOR_SUBTITLE_GENERATION)
             # Reset start flag and trigger preview
             self._started = False
             parent.preview_voice()

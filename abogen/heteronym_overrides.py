@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import re
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Any
 
 try:  # pragma: no cover - optional dependency
     import spacy  # type: ignore
-except Exception:  # pragma: no cover - spaCy may be unavailable in minimal environments
+except ImportError:  # pragma: no cover - spaCy may be unavailable in minimal environments
     spacy = None
 
 
@@ -22,7 +23,7 @@ class HeteronymVariant:
 @dataclass(frozen=True)
 class HeteronymSpec:
     token: str
-    variants: Tuple[HeteronymVariant, HeteronymVariant]
+    variants: tuple[HeteronymVariant, HeteronymVariant]
 
     def default_choice_for_token(self, spacy_token: Any) -> str:
         """Return the most likely variant key for this token."""
@@ -49,7 +50,7 @@ class HeteronymSpec:
 # Minimal, high-confidence starter set.
 # NOTE: These replacements intentionally prioritize speech output.
 # Some replacements may not be appropriate for subtitles/text exports.
-_HETERONYM_SPECS: Dict[str, HeteronymSpec] = {
+_HETERONYM_SPECS: dict[str, HeteronymSpec] = {
     "wind": HeteronymSpec(
         token="wind",
         variants=(
@@ -143,7 +144,7 @@ def _hash_id(*parts: str) -> str:
     return digest[:12]
 
 
-_WORD_BOUNDARY_CACHE: Dict[str, re.Pattern[str]] = {}
+_WORD_BOUNDARY_CACHE: dict[str, re.Pattern[str]] = {}
 
 
 def _word_boundary_pattern(token: str) -> re.Pattern[str]:
@@ -152,9 +153,7 @@ def _word_boundary_pattern(token: str) -> re.Pattern[str]:
     if cached is not None:
         return cached
     escaped = re.escape(token)
-    pattern = re.compile(
-        rf"(?i)(?<!\w){escaped}(?P<possessive>'s|\u2019s|\u2019)?(?!\w)"
-    )
+    pattern = re.compile(rf"(?i)(?<!\w){escaped}(?P<possessive>'s|\u2019s|\u2019)?(?!\w)")
     _WORD_BOUNDARY_CACHE[key] = pattern
     return pattern
 
@@ -169,9 +168,7 @@ def _preserve_case(replacement: str, original: str) -> str:
     return replacement
 
 
-def _build_replacement_sentence(
-    sentence: str, token: str, replacement_token: str
-) -> str:
+def _build_replacement_sentence(sentence: str, token: str, replacement_token: str) -> str:
     pattern = _word_boundary_pattern(token)
 
     def _repl(match: re.Match[str]) -> str:
@@ -193,7 +190,7 @@ def _load_spacy(language: str) -> Any:
     if lang.startswith("en"):
         try:
             return spacy.load("en_core_web_sm")
-        except Exception:
+        except (OSError, ImportError):
             return spacy.blank("en")
     return spacy.blank("xx")
 
@@ -202,8 +199,8 @@ def extract_heteronym_overrides(
     chapters: Sequence[Mapping[str, Any]],
     *,
     language: str,
-    existing: Optional[Iterable[Mapping[str, Any]]] = None,
-) -> List[Dict[str, Any]]:
+    existing: Iterable[Mapping[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
     """Extract distinct heteronym-containing sentences from chapters.
 
     Returns entries shaped for persistence + UI.
@@ -228,7 +225,7 @@ def extract_heteronym_overrides(
     if nlp is None:
         return []
 
-    previous_choices: Dict[str, str] = {}
+    previous_choices: dict[str, str] = {}
     if existing:
         for item in existing:
             if not isinstance(item, Mapping):
@@ -238,7 +235,7 @@ def extract_heteronym_overrides(
             if entry_id and choice:
                 previous_choices[entry_id] = choice
 
-    results: List[Dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
 
     for chapter in chapters:
@@ -272,7 +269,7 @@ def extract_heteronym_overrides(
                 default_choice = spec.default_choice_for_token(token)
                 choice = previous_choices.get(entry_id, default_choice)
 
-                options: List[Dict[str, Any]] = []
+                options: list[dict[str, Any]] = []
                 for variant in spec.variants:
                     replacement_sentence = _build_replacement_sentence(
                         sentence,
