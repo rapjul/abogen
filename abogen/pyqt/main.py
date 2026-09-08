@@ -3,7 +3,6 @@ import os
 import platform
 import signal
 import sys
-from typing import Any
 
 from abogen.utils import (
     get_resource_path,
@@ -95,6 +94,7 @@ if platform.system() == "Windows":
 
 from PyQt6.QtCore import (
     QLibraryInfo,
+    QMessageLogContext,
     QtMsgType,
     qInstallMessageHandler,
 )
@@ -145,8 +145,21 @@ if platform.system() == "Darwin" and platform.processor() == "arm":
 
 
 # Custom message handler to filter out specific Qt warnings
-def qt_message_handler(mode: QtMsgType, context: Any, message: str) -> None:
-    """Filter out benign Qt runtime warnings across platforms."""
+def qt_message_handler(
+    mode: QtMsgType,
+    context: QMessageLogContext,
+    message: str | None,
+) -> None:
+    """Filter out benign Qt runtime warnings across platforms.
+
+    Args:
+        mode: Severity level of the Qt message (e.g. warning, critical, info).
+        context: Additional metadata regarding source file, line, and function.
+        message: Descriptive log text emitted by Qt, or None.
+    """
+    if not message:
+        return
+
     # In PyQt6, the mode is an enum, so we compare with the enum members
     if "Wayland does not support QWindow::requestActivate()" in message:
         return  # Suppress this specific message
