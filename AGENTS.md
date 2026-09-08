@@ -71,7 +71,7 @@ uv tool install --compile-bytecode .[mlx]
 > python abogen/scripts/apply_patches.py
 > ```
 >
-> Patches live in [`patches/`](./patches/) and are idempotent (safe to re-run).
+> Patches live in [`patches/`](./abogen/patches/) and are idempotent (safe to re-run).
 > See [§ Dependency Patches](#5-dependency-patches) below for details.
 
 
@@ -168,7 +168,7 @@ For macOS ARM64 systems, `abogen` leverages the MLX framework via `mlx-audio` fo
 
 ### 5. Dependency Patches
 
-Some upstream packages contain bugs that have not yet been fixed in a released version. Rather than maintaining a full fork, `abogen` stores minimal unified-diff patch files in [`patches/`](./patches/) and applies them post-install via [`abogen/apply_patches.py`](./abogen/apply_patches.py).
+Some upstream packages contain bugs that have not yet been fixed in a released version. Rather than maintaining a full fork, `abogen` stores minimal unified-diff patch files in [`patches/`](./abogen/patches/) and applies them post-install via [`abogen/apply_patches.py`](./abogen/scripts/apply_patches.py).
 
 #### How it works
 
@@ -229,6 +229,7 @@ for p in sys.path:
 **Bug:** `check_array_shape` in `mlx_audio/tts/models/base.py` incorrectly identifies the shape of 1D convolutional weights (like `weight_v`) when loading PyTorch models on MLX. It assumes that `kH == KW` which is only true for 2D or symmetric convolutions, causing Kokoro models to fail to initialize with `Expected shape (512, 3, 512) but received shape (512, 512, 3)`.
 
 **Fix (this patch):**
+
 - Modifies `check_array_shape` to correctly detect if the weight array is already in MLX format by comparing the middle dimension (`kernel_size`) to the last dimension (`in_channels`).
 
 **Upstream status:** Not yet fixed as of `mlx-audio` 0.5.2 (verified 2026-09-07).
@@ -258,6 +259,7 @@ for p in sys.path:
 **Bug:** In `mlx_audio/tts/models/kokoro/kokoro.py`, unquantized projection weights (`F0_proj.weight` and `N_proj.weight`) are unconditionally transposed with `state_dict.transpose(0, 2, 1)` without checking whether the weights are already in MLX layout, causing dimension errors when loading model checkpoints.
 
 **Fix (this patch):**
+
 - Checks `check_array_shape(state_dict)` conditionally before transposing so weights already in MLX shape are preserved.
 
 **Upstream status:** Not yet fixed as of `mlx-audio` 0.5.2 (verified 2026-09-07).
@@ -286,7 +288,7 @@ for p in sys.path:
 
 #### Adding a new patch
 
-1. Make the fix in the installed venv file.
+1. Make the fix in the installed `.venv` file.
 2. Generate the patch: `diff -u original.py patched.py > patches/my_fix.patch`
 3. Add an entry to the `PATCHES` list in `abogen/apply_patches.py` with `patch`, `target`, and `sentinel` keys.
 4. Document the patch in a `##### ...` block in this section (bug, fix, upstream status, check command).
