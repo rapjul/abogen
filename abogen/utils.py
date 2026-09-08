@@ -969,7 +969,7 @@ def log_startup_diagnostics(interface_name: str = "PyQt6 Desktop") -> None:
     - Operating system, machine architecture, and Python version.
     - Resolved user cache and configuration paths.
     - Available TTS compute backends (Apple Silicon MLX, PyTorch CUDA/ROCm/MPS/CPU,
-      SuperTonic ONNX) sorted by platform-specific execution suitability.
+    SuperTonic ONNX) sorted by platform-specific execution suitability.
     - Engines unsupported on the current platform displayed in a distinct section.
     - Available audio processing and phonemization tools (FFmpeg, eSpeak-ng).
 
@@ -1011,15 +1011,15 @@ def log_startup_diagnostics(interface_name: str = "PyQt6 Desktop") -> None:
         available_backends.append(("Apple Silicon MLX", f"Error checking ({exc})"))
 
     # 2. Inspect PyTorch acceleration (CUDA, ROCm, MPS, CPU)
-    torch_available = False
+    torch: Any = None
     try:
-        import torch  # type: ignore[import-not-found]
+        import torch as _torch  # type: ignore[import-not-found]
 
-        torch_available = True
+        torch = _torch
     except ImportError:
         pass
 
-    if torch_available:
+    if torch is not None:
         # Check Apple Silicon MPS
         if system_os == "Darwin" and machine_arch == "arm64":
             if (
