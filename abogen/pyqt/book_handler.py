@@ -24,6 +24,7 @@ from PyQt6.QtGui import (
     QShortcut,
     QTextCharFormat,
     QTextCursor,
+    QTextOption,
 )
 from PyQt6.QtWidgets import (
     QCheckBox,
@@ -35,6 +36,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMenu,
+    QPlainTextEdit,
     QPushButton,
     QSizePolicy,
     QSpinBox,
@@ -145,6 +147,107 @@ def _extract_chapter_number(title: str) -> int | None:
         return int(all_numbers[0])
 
     return None
+
+
+class FindInputTextEdit(QPlainTextEdit):
+    """Compact, expandable multi-line text input for Find and Replace operations.
+
+    Dynamically adjusts its height between 1 line (~30px) and up to 4 lines (~90px)
+    based on the content. If text exceeds 4 lines, the height is capped and vertical
+    scrolling is enabled. Long lines wrap softly without requiring horizontal scrolling.
+
+    Signals:
+        returnPressed: Emitted when Return/Enter is pressed alone (to navigate to next match).
+        shiftReturnPressed: Emitted when Shift+Return is pressed (to navigate to previous match).
+        escapePressed: Emitted when Escape is pressed (to dismiss the find and replace panel).
+    """
+
+    returnPressed: ClassVar[pyqtSignal] = pyqtSignal()
+    shiftReturnPressed: ClassVar[pyqtSignal] = pyqtSignal()
+    escapePressed: ClassVar[pyqtSignal] = pyqtSignal()
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        """Initialize the FindInputTextEdit component with dynamic height and soft wrapping.
+
+        Args:
+            parent: Optional parent widget. Defaults to None.
+        """
+        super().__init__(parent)
+        self.setTabChangesFocus(True)
+        self.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
+        self.setWordWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.document().setDocumentMargin(3.0)
+        self.textChanged.connect(self._adjust_height)
+        self._adjust_height()
+
+    def text(self) -> str:
+        """Return plain text content for QLineEdit API compatibility.
+
+        Returns:
+            The plain text string in the editor.
+        """
+        return self.toPlainText()
+
+    def setText(self, text: str) -> None:
+        """Set plain text content for QLineEdit API compatibility.
+
+        Args:
+            text: Text to set in the editor.
+        """
+        self.setPlainText(text)
+
+    def _adjust_height(self) -> None:
+        """Dynamically adjust widget height based on number of text lines (1 to 4 lines)."""
+        content = self.toPlainText()
+        line_count = len(content.splitlines()) if content else 1
+        if content.endswith("\n"):
+            line_count += 1
+        visible_lines = min(max(line_count, 1), 4)
+
+        # Base height calculation: ~30px for 1 line, ~50px for 2 lines, ~70px for 3 lines, ~90px for 4 lines
+        target_height = 10 + visible_lines * 20
+        self.setFixedHeight(target_height)
+
+    def keyPressEvent(self, e: QKeyEvent | None) -> None:
+        """Handle keyboard navigation: Enter for next match, Shift+Enter for prev match, Cmd/Ctrl/Alt+Enter for newline, Escape to dismiss.
+
+        Args:
+            e: The key event to process.
+        """
+        if e is not None:
+            if e.key() == Qt.Key.Key_Escape:
+                self.escapePressed.emit()
+                return
+
+            if e.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                modifiers = e.modifiers()
+                has_ctrl_alt_meta = bool(
+                    modifiers
+                    & (
+                        Qt.KeyboardModifier.ControlModifier
+                        | Qt.KeyboardModifier.AltModifier
+                        | Qt.KeyboardModifier.MetaModifier
+                    )
+                )
+                has_shift = bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
+
+                # Command/Control/Alt (Option) + Enter inserts an explicit newline
+                if has_ctrl_alt_meta:
+                    self.insertPlainText("\n")
+                    return
+
+                # Shift+Enter navigates to the previous match
+                if has_shift:
+                    self.shiftReturnPressed.emit()
+                    return
+
+                # Plain Enter navigates to the next match
+                self.returnPressed.emit()
+                return
+
+        super().keyPressEvent(e)
 
 
 class HandlerDialog(QDialog):
@@ -865,12 +968,18 @@ class HandlerDialog(QDialog):
 
         # Row 1: Find input + match count + prev/next + close
         row1 = QHBoxLayout()
-        self.fr_find_input = QLineEdit(self.find_replace_frame)
+        row1.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.fr_find_input = FindInputTextEdit(self.find_replace_frame)
         self.fr_find_input.setPlaceholderText("Find text or pattern...")
         self.fr_find_input.textChanged.connect(self._on_find_text_changed)
+        self.fr_find_input.returnPressed.connect(self._find_next_match)
+        self.fr_find_input.shiftReturnPressed.connect(self._find_prev_match)
+        self.fr_find_input.escapePressed.connect(self._dismiss_find_replace_panel)
+        self.fr_find_input.installEventFilter(self)
 
         self.fr_match_count_label = QLabel("0 matches", self.find_replace_frame)
-        self.fr_match_count_label.setStyleSheet("color: #666; font-size: 12px;")
+        self.fr_match_count_label.setStyleSheet("color: #666; font-size: 11px;")
+        self.fr_match_count_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self.fr_prev_btn = QPushButton("▲ Prev", self.find_replace_frame)
         self.fr_prev_btn.setFixedWidth(65)
@@ -882,7 +991,7 @@ class HandlerDialog(QDialog):
 
         self.fr_close_btn = QPushButton("✕", self.find_replace_frame)
         self.fr_close_btn.setFixedWidth(30)
-        self.fr_close_btn.clicked.connect(lambda: self.find_replace_frame.hide())
+        self.fr_close_btn.clicked.connect(self._dismiss_find_replace_panel)
 
         row1.addWidget(self.fr_find_input, 1)
         row1.addWidget(self.fr_match_count_label, 0)
@@ -893,8 +1002,11 @@ class HandlerDialog(QDialog):
 
         # Row 2: Replace input + Replace + Replace All + Save to Substitutions
         row2 = QHBoxLayout()
-        self.fr_replace_input = QLineEdit(self.find_replace_frame)
+        row2.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.fr_replace_input = FindInputTextEdit(self.find_replace_frame)
         self.fr_replace_input.setPlaceholderText("Replace with...")
+        self.fr_replace_input.escapePressed.connect(self._dismiss_find_replace_panel)
+        self.fr_replace_input.installEventFilter(self)
 
         self.fr_replace_btn = QPushButton("Replace", self.find_replace_frame)
         self.fr_replace_btn.clicked.connect(self._perform_replace_single)
@@ -1051,7 +1163,7 @@ class HandlerDialog(QDialog):
         self.treeWidget.installEventFilter(self)
 
         # Keyboard Shortcut: Ctrl+F / Cmd+F to open Find & Replace
-        self.find_shortcut = QShortcut(QKeySequence("Ctrl+F"), self)
+        self.find_shortcut = QShortcut(QKeySequence(QKeySequence.StandardKey.Find), self)
         self.find_shortcut.activated.connect(self.toggle_find_replace_panel)
 
         checkbox_text = (
@@ -1295,19 +1407,96 @@ class HandlerDialog(QDialog):
         self._update_count_label()
 
     def toggle_find_replace_panel(self) -> None:
-        """Toggle visibility of the Find & Replace panel."""
+        """Toggle visibility of the Find & Replace panel or populate selection on shortcut."""
+        cursor = self.previewEdit.textCursor() if hasattr(self, "previewEdit") else None
+        has_selection = cursor is not None and cursor.hasSelection()
         is_visible = not self.find_replace_frame.isHidden()
+
+        if has_selection and cursor is not None:
+            # Normalize Qt paragraph separator (\u2029) into standard newline (\n)
+            selected_text = cursor.selectedText().replace("\u2029", "\n")
+            if not is_visible:
+                self.find_replace_frame.show()
+            self.fr_find_input.setText(selected_text)
+            self.fr_find_input.setFocus()
+            self.fr_find_input.selectAll()
+            self._on_find_text_changed()
+            return
+
         if is_visible:
-            self.find_replace_frame.hide()
+            self._dismiss_find_replace_panel()
         else:
             self.find_replace_frame.show()
             self.fr_find_input.setFocus()
             self.fr_find_input.selectAll()
             self._on_find_text_changed()
 
+    def _dismiss_find_replace_panel(self) -> None:
+        """Dismiss the Find & Replace panel and return focus to the chapter text preview."""
+        self.find_replace_frame.hide()
+        if hasattr(self, "previewEdit"):
+            self.previewEdit.setFocus()
+
     def _on_find_text_changed(self) -> None:
         """Execute search when find text or search option checkboxes change."""
+        if hasattr(self, "fr_find_input"):
+            text = self.fr_find_input.text()
+            if "\n" in text or "\r" in text:
+                line_count = len(text.splitlines())
+                self.fr_find_input.setToolTip(
+                    f"Multiline search query ({line_count} lines):\n{text}"
+                )
+            else:
+                self.fr_find_input.setToolTip("")
         self._search_matches()
+
+    def _compile_search_pattern(self, find_text: str) -> re.Pattern[str]:
+        """Compile a search pattern respecting regex, match case, whole word, and multiline options.
+
+        Args:
+            find_text: Search text or regular expression string.
+
+        Returns:
+            A compiled regular expression pattern object.
+        """
+        use_regex = self.fr_use_regex_cb.isChecked()
+        match_case = self.fr_match_case_cb.isChecked()
+        whole_word = self.fr_whole_word_cb.isChecked()
+        flags = 0 if match_case else re.IGNORECASE
+
+        if use_regex:
+            return re.compile(find_text, flags)
+
+        if "\n" in find_text or "\r" in find_text:
+            tokens = re.split(r"\s+", find_text)
+            escaped_tokens = [re.escape(tok) for tok in tokens if tok]
+            core_pattern = r"\s+".join(escaped_tokens)
+        else:
+            core_pattern = re.escape(find_text)
+
+        prefix = r"\b" if whole_word and re.match(r"^\w", find_text) else ""
+        suffix = r"\b" if whole_word and re.search(r"\w$", find_text) else ""
+        return re.compile(prefix + core_pattern + suffix, flags)
+
+    def _update_match_count_label(self, current_idx: int, total_matches: int) -> None:
+        """Update match count label, moving 'matches' to a second line when multiline.
+
+        Args:
+            current_idx: Active match index (1-based), or 0 if no active matches.
+            total_matches: Total number of matches found.
+        """
+        is_multiline = False
+        if hasattr(self, "fr_find_input"):
+            content = self.fr_find_input.toPlainText()
+            is_multiline = "\n" in content or len(content.splitlines()) > 1
+
+        if total_matches <= 0:
+            text = "0\nmatches" if is_multiline else "0 matches"
+        else:
+            sep = "\n" if is_multiline else " "
+            text = f"{current_idx} of {total_matches}{sep}matches"
+
+        self.fr_match_count_label.setText(text)
 
     def _search_matches(self) -> None:
         """Find and highlight matches in the active chapter text preview."""
@@ -1323,58 +1512,43 @@ class HandlerDialog(QDialog):
         self.fr_error_label.setToolTip("")
 
         if not find_text:
-            self.fr_match_count_label.setText("0 matches")
+            self._update_match_count_label(0, 0)
             self.previewEdit.setExtraSelections([])
             return
 
         doc_text = self.previewEdit.toPlainText()
-        use_regex = self.fr_use_regex_cb.isChecked()
-        match_case = self.fr_match_case_cb.isChecked()
-        whole_word = self.fr_whole_word_cb.isChecked()
-
         matches = []
-        if use_regex:
-            try:
-                flags = 0 if match_case else re.IGNORECASE
-                pattern = re.compile(find_text, flags)
-                for m in pattern.finditer(doc_text):
-                    matches.append((m.start(), m.end()))
-            except re.error as e:
-                self.fr_error_label.setStyleSheet("QLabel { font-size: 11px; max-width: 800px; }")
-                escaped_msg = html.escape(e.msg)
-                self.fr_error_label.setText(
-                    f'<span style="color: #d9534f; font-weight: bold;">Invalid regex:</span> <span>{escaped_msg}</span>'
-                )
-                self.fr_error_label.setToolTip(f"Invalid regex: {e.msg}")
-                self.fr_match_count_label.setText("0 matches")
-                self.previewEdit.setExtraSelections([])
-                return
-        else:
-            pattern_str = re.escape(find_text)
-            if whole_word:
-                pattern_str = rf"\b{pattern_str}\b"
-            flags = 0 if match_case else re.IGNORECASE
-            try:
-                pattern = re.compile(pattern_str, flags)
-                for m in pattern.finditer(doc_text):
-                    matches.append((m.start(), m.end()))
-            except Exception as e:
-                self.fr_error_label.setStyleSheet("QLabel { font-size: 11px; max-width: 800px; }")
-                escaped_err = html.escape(str(e))
-                self.fr_error_label.setText(
-                    f'<span style="color: #d9534f; font-weight: bold;">Search error:</span> <span>{escaped_err}</span>'
-                )
-                self.fr_error_label.setToolTip(f"Search error: {e}")
-                self.fr_match_count_label.setText("0 matches")
-                self.previewEdit.setExtraSelections([])
-                return
+        try:
+            pattern = self._compile_search_pattern(find_text)
+            for m in pattern.finditer(doc_text):
+                matches.append((m.start(), m.end()))
+        except re.error as e:
+            self.fr_error_label.setStyleSheet("QLabel { font-size: 11px; max-width: 800px; }")
+            escaped_msg = html.escape(e.msg)
+            self.fr_error_label.setText(
+                f'<span style="color: #d9534f; font-weight: bold;">Invalid regex:</span> <span>{escaped_msg}</span>'
+            )
+            self.fr_error_label.setToolTip(f"Invalid regex: {e.msg}")
+            self._update_match_count_label(0, 0)
+            self.previewEdit.setExtraSelections([])
+            return
+        except Exception as e:
+            self.fr_error_label.setStyleSheet("QLabel { font-size: 11px; max-width: 800px; }")
+            escaped_err = html.escape(str(e))
+            self.fr_error_label.setText(
+                f'<span style="color: #d9534f; font-weight: bold;">Search error:</span> <span>{escaped_err}</span>'
+            )
+            self.fr_error_label.setToolTip(f"Search error: {e}")
+            self._update_match_count_label(0, 0)
+            self.previewEdit.setExtraSelections([])
+            return
 
         self._active_search_matches = matches
         if matches:
             self._active_match_idx = 0
-            self.fr_match_count_label.setText(f"1 of {len(matches)} matches")
+            self._update_match_count_label(1, len(matches))
         else:
-            self.fr_match_count_label.setText("0 matches")
+            self._update_match_count_label(0, 0)
 
         self._update_find_highlights()
 
@@ -1417,9 +1591,7 @@ class HandlerDialog(QDialog):
         if not self._active_search_matches:
             return
         self._active_match_idx = (self._active_match_idx + 1) % len(self._active_search_matches)
-        self.fr_match_count_label.setText(
-            f"{self._active_match_idx + 1} of {len(self._active_search_matches)} matches"
-        )
+        self._update_match_count_label(self._active_match_idx + 1, len(self._active_search_matches))
         self._update_find_highlights()
 
     def _find_prev_match(self) -> None:
@@ -1427,9 +1599,7 @@ class HandlerDialog(QDialog):
         if not self._active_search_matches:
             return
         self._active_match_idx = (self._active_match_idx - 1) % len(self._active_search_matches)
-        self.fr_match_count_label.setText(
-            f"{self._active_match_idx + 1} of {len(self._active_search_matches)} matches"
-        )
+        self._update_match_count_label(self._active_match_idx + 1, len(self._active_search_matches))
         self._update_find_highlights()
 
     def _perform_replace_single(self) -> None:
@@ -1478,22 +1648,9 @@ class HandlerDialog(QDialog):
             return
 
         text = self.previewEdit.toPlainText()
-        use_regex = self.fr_use_regex_cb.isChecked()
-        match_case = self.fr_match_case_cb.isChecked()
-        whole_word = self.fr_whole_word_cb.isChecked()
-
         try:
-            if use_regex:
-                flags = 0 if match_case else re.IGNORECASE
-                pattern = re.compile(find_text, flags)
-                new_text = pattern.sub(replace_text, text)
-            else:
-                pattern_str = re.escape(find_text)
-                if whole_word:
-                    pattern_str = rf"\b{pattern_str}\b"
-                flags = 0 if match_case else re.IGNORECASE
-                pattern = re.compile(pattern_str, flags)
-                new_text = pattern.sub(replace_text, text)
+            pattern = self._compile_search_pattern(find_text)
+            new_text = pattern.sub(replace_text, text)
         except Exception as e:
             self.fr_error_label.setStyleSheet("QLabel { font-size: 11px; max-width: 800px; }")
             escaped_err = html.escape(str(e))
@@ -1514,7 +1671,7 @@ class HandlerDialog(QDialog):
 
     @staticmethod
     def _truncate_substitution_text(text: str, max_length: int = 40) -> str:
-        """Truncate and sanitize substitution text for display in status labels.
+        """Truncate a substitution text string for compact display in UI labels.
 
         Args:
             text: Raw input string to format.
@@ -1540,20 +1697,8 @@ class HandlerDialog(QDialog):
         Returns:
             A tuple of (modified_chapters_count, total_replacements_count).
         """
-        use_regex = self.fr_use_regex_cb.isChecked()
-        match_case = self.fr_match_case_cb.isChecked()
-        whole_word = self.fr_whole_word_cb.isChecked()
-
         try:
-            if use_regex:
-                flags = 0 if match_case else re.IGNORECASE
-                pattern = re.compile(find_text, flags)
-            else:
-                pattern_str = re.escape(find_text)
-                if whole_word:
-                    pattern_str = rf"\b{pattern_str}\b"
-                flags = 0 if match_case else re.IGNORECASE
-                pattern = re.compile(pattern_str, flags)
+            pattern = self._compile_search_pattern(find_text)
         except Exception:
             return 0, 0
 
@@ -1585,9 +1730,9 @@ class HandlerDialog(QDialog):
         raw_find = self.fr_find_input.text().strip()
         raw_replace = self.fr_replace_input.text().strip()
 
-        # Sanitize newlines so line-based substitution storage is preserved
-        find_text = re.sub(r"[\r\n]+", " ", raw_find).strip()
-        replace_text = re.sub(r"[\r\n]+", " ", raw_replace).strip()
+        # Normalize line endings without collapsing them into spaces
+        find_text = raw_find.replace("\r\n", "\n").replace("\r", "\n")
+        replace_text = raw_replace.replace("\r\n", "\n").replace("\r", "\n")
 
         if not find_text:
             self.fr_error_label.setStyleSheet("QLabel { font-size: 11px; max-width: 800px; }")
@@ -1634,7 +1779,9 @@ class HandlerDialog(QDialog):
 
             cfg = load_config()
             sub_list = cfg.get("word_substitutions_list", "")
-            new_rule = f"{find_text}|{replace_text}"
+            stored_find = find_text.replace("\n", r"\n")
+            stored_replace = replace_text.replace("\n", r"\n")
+            new_rule = f"{stored_find}|{stored_replace}"
 
             lines = [line.strip() for line in sub_list.split("\n") if line.strip()]
             if replace_text:
@@ -1794,6 +1941,40 @@ class HandlerDialog(QDialog):
             iterator += 1
 
     def eventFilter(self, a0: QObject | None, a1: QEvent | None) -> bool:
+        if (
+            a0 is not None
+            and a1 is not None
+            and hasattr(self, "fr_find_input")
+            and a0 in (self.fr_find_input, getattr(self, "fr_replace_input", None))
+            and a1.type() == QEvent.Type.KeyPress
+            and isinstance(a1, QKeyEvent)
+        ):
+            if a1.key() == Qt.Key.Key_Escape:
+                self._dismiss_find_replace_panel()
+                return True
+
+            if a0 == self.fr_find_input and a1.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                modifiers = a1.modifiers()
+                has_ctrl_alt_meta = bool(
+                    modifiers
+                    & (
+                        Qt.KeyboardModifier.ControlModifier
+                        | Qt.KeyboardModifier.AltModifier
+                        | Qt.KeyboardModifier.MetaModifier
+                    )
+                )
+                has_shift = bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
+
+                if has_ctrl_alt_meta:
+                    self.fr_find_input.insertPlainText("\n")
+                    return True
+                elif has_shift:
+                    self._find_prev_match()
+                    return True
+                else:
+                    self._find_next_match()
+                    return True
+
         if (
             a0 is not None
             and a1 is not None
