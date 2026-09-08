@@ -3,6 +3,7 @@ import os
 import platform
 import signal
 import sys
+import threading
 
 from abogen.utils import (
     get_resource_path,
@@ -95,6 +96,7 @@ if platform.system() == "Windows":
 from PyQt6.QtCore import (
     QLibraryInfo,
     QMessageLogContext,
+    QTimer,
     QtMsgType,
     qInstallMessageHandler,
 )
@@ -193,8 +195,6 @@ if platform.system() == "Linux":
 
 def main() -> None:
     """Main entry point for console usage."""
-    log_startup_diagnostics("PyQt6 Desktop")
-
     app = QApplication(sys.argv)
 
     # Clean up process sleep inhibition on exit
@@ -214,6 +214,20 @@ def main() -> None:
 
     ex = abogen()
     ex.show()
+
+    def _run_background_diagnostics() -> None:
+        """Run startup diagnostics in a daemon background thread to keep UI responsive."""
+        thread = threading.Thread(
+            target=log_startup_diagnostics,
+            args=("PyQt6 Desktop",),
+            daemon=True,
+            name="StartupDiagnosticsThread",
+        )
+        thread.start()
+
+    # Schedule hardware & backend diagnostics immediately after the window renders
+    QTimer.singleShot(50, _run_background_diagnostics)
+
     rc = app.exec()
 
     # Restore the default Qt message handler BEFORE interpreter shutdown.
