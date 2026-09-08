@@ -309,3 +309,111 @@ def test_fix_tts_pronunciations() -> None:
     assert fix_tts_pronunciations("'N.'") == "'en.'"
     assert fix_tts_pronunciations('"N?!"') == '"en?!"'
     assert fix_tts_pronunciations('"Never"') == '"Never"'
+
+
+def test_parse_substitutions_list_multiline_encoded() -> None:
+    """Test parsing substitutions with encoded newlines."""
+    subs_str = "Line 1\\nLine 2|Replacement\\nMultiline\nSingle|Word\nRemove Me\\n\\nNow|"
+    subs = parse_substitutions_list(subs_str)
+    assert subs == [
+        ("Line 1\nLine 2", "Replacement\nMultiline"),
+        ("Single", "Word"),
+        ("Remove Me\n\nNow", ""),
+    ]
+
+
+def test_apply_word_replacements_multiline_line_endings() -> None:
+    """Test multi-line replacement across various line endings and whitespace differences."""
+    # Case 1: Standard Unix \n in text matching \n in substitution
+    text_unix = "Chapter Start\nHey friends!\nWelcome back.\nChapter Continues"
+    subs1 = [("Hey friends!\nWelcome back.", "")]
+    result1 = apply_word_replacements(text_unix, subs1)
+    assert "Hey friends!" not in result1
+    assert "Welcome back." not in result1
+    assert "Chapter Start" in result1
+    assert "Chapter Continues" in result1
+
+    # Case 2: Windows CRLF \r\n in text matching \n in substitution
+    text_crlf = "Prologue\r\nAuthor Note:\r\nSupport my work.\r\nMain Content"
+    subs2 = [("Author Note:\nSupport my work.", "")]
+    result2 = apply_word_replacements(text_crlf, subs2)
+    assert "Author Note:" not in result2
+    assert "Support my work." not in result2
+    assert "Prologue" in result2
+    assert "Main Content" in result2
+
+    # Case 3: Extra blank lines and indentation between paragraphs
+    text_indented = "Intro\n\n   Author Note Line 1   \n\n   Author Note Line 2   \n\nOutro"
+    subs3 = [("Author Note Line 1\nAuthor Note Line 2", "")]
+    result3 = apply_word_replacements(text_indented, subs3)
+    assert "Author Note Line 1" not in result3
+    assert "Author Note Line 2" not in result3
+    assert "Intro" in result3
+    assert "Outro" in result3
+
+    # Case 4: Multi-paragraph removal at the end of the text
+    text_trailing = "Story finished.\n\nThanks for reading!\nJoin our Discord (xyz)!\nSee you soon!"
+    subs4 = [("Thanks for reading!\nJoin our Discord (xyz)!\nSee you soon!", "")]
+    result4 = apply_word_replacements(text_trailing, subs4)
+    assert "Thanks for reading!" not in result4
+    assert "Join our Discord (xyz)!" not in result4
+    assert "See you soon!" not in result4
+    assert "Story finished." in result4.strip()
+
+
+def test_apply_word_replacements_punctuation() -> None:
+    """Test word and phrase replacements with starting, trailing, or internal punctuation."""
+    # Case 1: Ending in exclamation point
+    text1 = "I hope to see you there! Next sentence starts here."
+    subs1 = [("see you there!", "meet you soon!")]
+    assert (
+        apply_word_replacements(text1, subs1)
+        == "I hope to meet you soon! Next sentence starts here."
+    )
+
+    # Case 2: Removal of phrase ending in exclamation mark
+    text2 = "All done. Can't wait to see you there!\nEnd of chapter."
+    subs2 = [("Can't wait to see you there!", "")]
+    assert "Can't wait to see you there!" not in apply_word_replacements(text2, subs2)
+
+    # Case 3: Starting with em-dash and ending with question mark
+    text3 = '"—have you got a better script, Harry?" Susan asked.'
+    subs3 = [("—have you got a better script, Harry?", "—are you ready, Harry?")]
+    assert apply_word_replacements(text3, subs3) == '"—are you ready, Harry?" Susan asked.'
+
+    # Case 4: Ellipsis at end
+    text4 = "Wait for it... It never happened."
+    subs4 = [("Wait for it...", "Hold on...")]
+    assert apply_word_replacements(text4, subs4) == "Hold on... It never happened."
+
+    # Case 5: Quoted phrase with punctuation
+    text5 = 'He shouted, "Never give up!" and ran.'
+    subs5 = [('"Never give up!"', '"Keep going!"')]
+    assert apply_word_replacements(text5, subs5) == 'He shouted, "Keep going!" and ran.'
+
+    # Case 6: Phrase ending in comma before newline
+    text6 = "Warm regards,\nThe Author"
+    subs6 = [("Warm regards,", "Best wishes,")]
+    assert apply_word_replacements(text6, subs6) == "Best wishes,\nThe Author"
+
+
+def test_apply_word_substitutions_mixed_rules() -> None:
+    """Test applying a mix of single-word, multi-line, and removal rules together."""
+    raw_substitutions_str = (
+        "cat|feline\n"
+        "dog|canine\n"
+        "Hey everyone!\\n\\nEnjoy the chapter!|\n"
+        "Discord (abc123)|community server\n"
+    )
+    input_text = (
+        "The cat chased the dog.\n\n"
+        "Hey everyone!\n\n"
+        "Enjoy the chapter!\n\n"
+        "Check out our Discord (abc123) for updates."
+    )
+
+    result = apply_word_substitutions(input_text, raw_substitutions_str)
+    assert "feline chased the canine" in result
+    assert "Hey everyone!" not in result
+    assert "Enjoy the chapter!" not in result
+    assert "community server for updates" in result

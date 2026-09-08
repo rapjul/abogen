@@ -80,17 +80,19 @@ def apply_word_substitutions(
     return "".join(processed_segments)
 
 
-def parse_substitutions_list(substitutions_str):
-    """
-    Parse newline-separated "Word|NewWord" format.
+def parse_substitutions_list(substitutions_str: str) -> list[tuple[str, str]]:
+    """Parse newline-separated "Word|NewWord" format.
+
+    Supports encoded newlines using literal '\\n' sequences, allowing multi-line
+    search and replacement rules to be safely stored within a single line.
 
     Args:
-        substitutions_str: String with substitutions, one per line
+        substitutions_str: String with substitutions, one rule per line.
 
     Returns:
         List of tuples: [(word, replacement), ...]
     """
-    substitutions = []
+    substitutions: list[tuple[str, str]] = []
     for line in substitutions_str.strip().split("\n"):
         line = line.strip()
         if not line or "|" not in line:
@@ -98,20 +100,21 @@ def parse_substitutions_list(substitutions_str):
 
         parts = line.split("|", 1)
         if len(parts) == 2:
-            word = parts[0].strip()
-            replacement = parts[1].strip()
+            word = parts[0].strip().replace(r"\r\n", "\n").replace(r"\n", "\n").replace(r"\r", "\n")
+            replacement = (
+                parts[1].strip().replace(r"\r\n", "\n").replace(r"\n", "\n").replace(r"\r", "\n")
+            )
             if word:  # Only add if word is not empty
                 substitutions.append((word, replacement))
 
     return substitutions
 
 
-def split_text_preserving_markers(text):
-    """
-    Split text into segments alternating between markers and content.
+def split_text_preserving_markers(text: str) -> list[tuple[str, str]]:
+    """Split text into segments alternating between markers and content.
 
     Args:
-        text: Input text with potential markers
+        text: Input text with potential markers.
 
     Returns:
         List of tuples: [("marker"|"content", text), ...]
@@ -121,7 +124,7 @@ def split_text_preserving_markers(text):
         r"(<<CHAPTER_MARKER:[^>]*>>|<<VOICE:[^>]*>>|<<METADATA_[^:]+:[^>]*>>|\d{1,2}:\d{2}:\d{2}(?:[.,]\d{1,3})?)"
     )
 
-    segments = []
+    segments: list[tuple[str, str]] = []
     last_end = 0
 
     for match in marker_pattern.finditer(text):
@@ -140,24 +143,35 @@ def split_text_preserving_markers(text):
     return segments
 
 
-def apply_word_replacements(text, substitutions, case_sensitive=False):
-    """
-    Apply word substitutions using whole-word matching.
+def apply_word_replacements(
+    text: str, substitutions: list[tuple[str, str]], case_sensitive: bool = False
+) -> str:
+    """Apply word substitutions using whole-word and whitespace-tolerant matching.
 
     Args:
-        text: Input text
-        substitutions: List of (word, replacement) tuples
-        case_sensitive: If True, match case-sensitively
+        text: Input text to process.
+        substitutions: List of (word, replacement) tuples.
+        case_sensitive: If True, match words case-sensitively. Defaults to False.
 
     Returns:
-        Text with substitutions applied
+        Text with substitutions applied.
     """
     for word, replacement in substitutions:
-        # Use word boundaries for exact matching
-        # Escape special regex characters
-        escaped_word = re.escape(word)
+        # Split tokens by whitespace runs to build a whitespace-tolerant regex.
+        # This allows matching across newlines (\\r\\n vs \\n) and varying spaces.
+        tokens = re.split(r"\s+", word)
+        escaped_tokens = [re.escape(tok) for tok in tokens if tok]
+        if not escaped_tokens:
+            continue
+        core_pattern = r"\s+".join(escaped_tokens)
+
+        # Apply word boundaries (\\b) only where the edge characters are alphanumeric word characters.
+        # This prevents breaking matches when terms start/end with punctuation (e.g. '!', '?', quotes, dashes).
+        prefix = r"\b" if re.match(r"^\w", word) else ""
+        suffix = r"\b" if re.search(r"\w$", word) else ""
+
         pattern = re.compile(
-            r"\b" + escaped_word + r"\b",
+            prefix + core_pattern + suffix,
             0 if case_sensitive else re.IGNORECASE,
         )
         text = pattern.sub(replacement, text)
