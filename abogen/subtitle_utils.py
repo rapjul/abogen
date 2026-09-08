@@ -125,6 +125,27 @@ def is_sentence_boundary(
     return False
 
 
+def _extract_time_range(
+    tokens: list[dict[str, Any]],
+    default_start: float = 0.0,
+) -> tuple[float, float]:
+    """Extract validated start and end timestamps as floats from a list of tokens.
+
+    Args:
+        tokens (list[dict[str, Any]]): List of token dictionaries containing 'start' and 'end'.
+        default_start (float): Fallback start time if the first token's start time is missing or None.
+
+    Returns:
+        tuple[float, float]: Validated start and end times in seconds.
+    """
+    raw_start = tokens[0].get("start") if tokens else None
+    start_time = float(raw_start) if raw_start is not None else default_start
+
+    raw_end = tokens[-1].get("end") if tokens else None
+    end_time = float(raw_end) if raw_end is not None else start_time
+    return start_time, end_time
+
+
 def apply_fallback_end_time(
     subtitle_entries: list[tuple[float, float, str]],
     fallback_end_time: float | None,
@@ -238,8 +259,7 @@ def process_subtitle_tokens(
             is_boundary = is_sentence_boundary(token, current_sentence, separator)
             if is_boundary or word_count >= max_subtitle_words:
                 if current_sentence:
-                    start_time = current_sentence[0].get("start", 0.0)
-                    end_time = current_sentence[-1].get("end", start_time)
+                    start_time, end_time = _extract_time_range(current_sentence)
 
                     karaoke_text = ""
                     for t in current_sentence:
@@ -266,8 +286,7 @@ def process_subtitle_tokens(
                     word_count = 0
 
         if current_sentence:
-            start_time = current_sentence[0].get("start", 0.0)
-            end_time = current_sentence[-1].get("end", start_time)
+            start_time, end_time = _extract_time_range(current_sentence)
 
             karaoke_text = ""
             for t in current_sentence:
@@ -395,8 +414,7 @@ def process_subtitle_tokens(
                     )
                     if at_boundary or word_count >= max_subtitle_words:
                         if current_sentence:
-                            start_time = current_sentence[0].get("start", 0.0)
-                            end_time = current_sentence[-1].get("end", start_time)
+                            start_time, end_time = _extract_time_range(current_sentence)
                             sentence_text = "".join(
                                 str(t.get("text", "")) + (t.get("whitespace") or "")
                                 for t in current_sentence
@@ -412,8 +430,7 @@ def process_subtitle_tokens(
                             boundary_idx += 1
 
                 if current_sentence:
-                    start_time = current_sentence[0].get("start", 0.0)
-                    end_time = current_sentence[-1].get("end", start_time)
+                    start_time, end_time = _extract_time_range(current_sentence)
                     sentence_text = "".join(
                         str(t.get("text", "")) + (t.get("whitespace") or "")
                         for t in current_sentence
@@ -442,8 +459,7 @@ def process_subtitle_tokens(
             is_boundary = is_sentence_boundary(token, current_sentence, separator)
             if is_boundary or word_count >= max_subtitle_words:
                 if current_sentence:
-                    start_time = current_sentence[0].get("start", 0.0)
-                    end_time = current_sentence[-1].get("end", start_time)
+                    start_time, end_time = _extract_time_range(current_sentence)
                     sentence_text = "".join(
                         str(t.get("text", "")) + (t.get("whitespace") or "")
                         for t in current_sentence
@@ -454,8 +470,7 @@ def process_subtitle_tokens(
                     word_count = 0
 
         if current_sentence:
-            start_time = current_sentence[0].get("start", 0.0)
-            end_time = current_sentence[-1].get("end", start_time)
+            start_time, end_time = _extract_time_range(current_sentence)
             sentence_text = "".join(
                 str(t.get("text", "")) + (t.get("whitespace") or "") for t in current_sentence
             ).strip()
@@ -519,13 +534,8 @@ def process_subtitle_tokens(
                         str(t.get("text", "")) + (t.get("whitespace") or "") for t in current_group
                     ).strip()
                     if text:
-                        subtitle_entries.append(
-                            (
-                                current_group[0].get("start", 0.0),
-                                current_group[-1].get("end", 0.0),
-                                text,
-                            )
-                        )
+                        start_time, end_time = _extract_time_range(current_group)
+                        subtitle_entries.append((start_time, end_time, text))
                     current_group = []
                     space_count = 0
 
@@ -534,13 +544,8 @@ def process_subtitle_tokens(
                 str(t.get("text", "")) + (t.get("whitespace") or "") for t in current_group
             ).strip()
             if text:
-                subtitle_entries.append(
-                    (
-                        current_group[0].get("start", 0.0),
-                        current_group[-1].get("end", 0.0),
-                        text,
-                    )
-                )
+                start_time, end_time = _extract_time_range(current_group)
+                subtitle_entries.append((start_time, end_time, text))
 
         apply_fallback_end_time(subtitle_entries, fallback_end_time)
 
