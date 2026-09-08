@@ -12,6 +12,7 @@ from abogen.utils import (
     get_user_cache_path,
     get_user_output_path,
     get_user_settings_dir,
+    log_startup_diagnostics,
 )
 
 from .conversion_runner import run_conversion_job
@@ -137,6 +138,8 @@ def create_app(config: dict[str, Any] | None = None) -> Flask:
         logging.getLogger("werkzeug").addFilter(_SuppressSuccessfulAccessFilter())
         logging.getLogger("phonemizer").addFilter(_SuppressPhonemizerWarnings())
         _access_log_filter_attached = True
+
+    log_startup_diagnostics("Flask WebUI")
 
     return app
 

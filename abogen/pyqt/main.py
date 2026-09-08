@@ -5,7 +5,12 @@ import signal
 import sys
 from typing import Any
 
-from abogen.utils import get_resource_path, load_config, prevent_sleep_end
+from abogen.utils import (
+    get_resource_path,
+    load_config,
+    log_startup_diagnostics,
+    prevent_sleep_end,
+)
 
 # Fix PyTorch DLL loading issue ([WinError 1114]) on Windows before importing PyQt6
 if platform.system() == "Windows":
@@ -175,6 +180,8 @@ if platform.system() == "Linux":
 
 def main() -> None:
     """Main entry point for console usage."""
+    log_startup_diagnostics("PyQt6 Desktop")
+
     app = QApplication(sys.argv)
 
     # Clean up process sleep inhibition on exit
