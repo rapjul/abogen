@@ -959,3 +959,213 @@ def load_numpy_kpipeline() -> tuple[Any, Any]:
     from kokoro import KPipeline  # type: ignore[import-not-found]
 
     return np, KPipeline
+
+
+def log_startup_diagnostics(interface_name: str = "PyQt6 Desktop") -> None:
+    """Log startup diagnostics including platform, paths, and acceleration engines.
+
+    Provides immediate visibility into:
+    - Application version and running interface.
+    - Operating system, machine architecture, and Python version.
+    - Resolved user cache and configuration paths.
+    - Available TTS compute backends (Apple Silicon MLX, PyTorch CUDA/ROCm/MPS/CPU,
+      SuperTonic ONNX) sorted by platform-specific execution suitability.
+    - Engines unsupported on the current platform displayed in a distinct section.
+    - Available audio processing and phonemization tools (FFmpeg, eSpeak-ng).
+
+    Args:
+        interface_name: The human-readable name of the interface starting up
+            (e.g., 'PyQt6 Desktop', 'Flask WebUI').
+    """
+    from abogen.constants import PROGRAM_NAME, VERSION
+
+    system_os = platform.system()
+    machine_arch = platform.machine().lower()
+    py_version = sys.version.split()[0]
+    os_release = platform.release()
+
+    # Resolve active filesystem cache and config paths using pathlib.Path
+    cache_path = Path(get_user_cache_path()).resolve()
+    config_path = Path(get_user_config_path()).resolve()
+
+    available_backends: list[tuple[str, str]] = []
+    unsupported_backends: list[tuple[str, str]] = []
+
+    # 1. Inspect Apple Silicon MLX backend
+    try:
+        from abogen.tts_mlx import is_mlx_available, recommended_quantization
+
+        if is_mlx_available():
+            quant_name = recommended_quantization().display_label
+            available_backends.append(
+                ("Apple Silicon MLX", f"Available (Default Quantization: {quant_name})")
+            )
+        else:
+            if system_os == "Darwin" and machine_arch == "arm64":
+                available_backends.append(
+                    ("Apple Silicon MLX", "Not Available (mlx-audio package not installed)")
+                )
+            else:
+                unsupported_backends.append(("Apple Silicon MLX", "macOS ARM64 only"))
+    except (ImportError, RuntimeError, OSError, AttributeError) as exc:
+        available_backends.append(("Apple Silicon MLX", f"Error checking ({exc})"))
+
+    # 2. Inspect PyTorch acceleration (CUDA, ROCm, MPS, CPU)
+    torch_available = False
+    try:
+        import torch  # type: ignore[import-not-found]
+
+        torch_available = True
+    except ImportError:
+        pass
+
+    if torch_available:
+        # Check Apple Silicon MPS
+        if system_os == "Darwin" and machine_arch == "arm64":
+            if (
+                hasattr(torch, "backends")
+                and hasattr(torch.backends, "mps")
+                and torch.backends.mps.is_available()
+            ):
+                available_backends.append(("PyTorch MPS", "Available"))
+            else:
+                available_backends.append(("PyTorch MPS", "Not Available on this system"))
+        else:
+            unsupported_backends.append(("PyTorch MPS", "macOS Apple Silicon only"))
+
+        # Check PyTorch GPU (CUDA or ROCm exclusively)
+        if system_os == "Darwin":
+            unsupported_backends.append(
+                ("PyTorch CUDA / AMD ROCm", "Requires Linux or Windows GPU")
+            )
+        else:
+            hip_version = getattr(torch.version, "hip", None)
+            cuda_version = getattr(torch.version, "cuda", None)
+            gpu_available = torch.cuda.is_available()
+
+            if hip_version is not None:
+                # AMD ROCm / HIP environment
+                if gpu_available:
+                    gpu_name = torch.cuda.get_device_name(0)
+                    props = torch.cuda.get_device_properties(0)
+                    vram_mb = props.total_memory // (1024**2)
+                    status_desc = f"Available ({gpu_name} - {vram_mb} MB, ROCm {hip_version})"
+                else:
+                    status_desc = f"Not Available (ROCm {hip_version} build, but GPU not detected)"
+                available_backends.append(("PyTorch ROCm", status_desc))
+            else:
+                # NVIDIA CUDA environment
+                if gpu_available:
+                    gpu_name = torch.cuda.get_device_name(0)
+                    props = torch.cuda.get_device_properties(0)
+                    vram_mb = props.total_memory // (1024**2)
+                    cuda_ver_str = f", CUDA {cuda_version}" if cuda_version else ""
+                    status_desc = f"Available ({gpu_name} - {vram_mb} MB{cuda_ver_str})"
+                else:
+                    status_desc = "Not Available (NVIDIA GPU or CUDA driver not detected)"
+                available_backends.append(("PyTorch CUDA", status_desc))
+    else:
+        available_backends.append(("PyTorch", "Not installed"))
+
+    # 3. Inspect SuperTonic TTS Engine & ONNX Runtime Providers
+    try:
+        import importlib.util
+
+        has_supertonic = importlib.util.find_spec("supertonic") is not None
+        if has_supertonic:
+            try:
+                import onnxruntime as ort  # type: ignore[import-not-found]
+
+                providers = ort.get_available_providers()
+                clean_providers: list[str] = []
+                for p in providers:
+                    name = p.replace("ExecutionProvider", "")
+                    if name not in clean_providers:
+                        clean_providers.append(name)
+                provider_str = ", ".join(clean_providers) if clean_providers else "None"
+                available_backends.append(
+                    ("SuperTonic TTS", f"Available (ONNX Providers: {provider_str})")
+                )
+            except ImportError:
+                available_backends.append(
+                    ("SuperTonic TTS", "Available (onnxruntime not installed)")
+                )
+        else:
+            available_backends.append(
+                ("SuperTonic TTS", "Not Installed (supertonic package missing)")
+            )
+    except (ImportError, RuntimeError, OSError, AttributeError) as exc:
+        available_backends.append(("SuperTonic TTS", f"Error checking ({exc})"))
+
+    # 4. PyTorch CPU fallback (always placed last among available backends)
+    core_count = os.cpu_count() or 1
+    available_backends.append(("PyTorch CPU", f"Available ({core_count} cores)"))
+
+    # Platform-specific ordering for available backends:
+    # On macOS: MLX -> MPS -> SuperTonic -> PyTorch CPU
+    # On other platforms: PyTorch GPU (CUDA/ROCm) -> SuperTonic -> PyTorch CPU
+    def _backend_sort_key(item: tuple[str, str]) -> int:
+        name = item[0]
+        if system_os == "Darwin":
+            order = {
+                "Apple Silicon MLX": 10,
+                "PyTorch MPS": 20,
+                "SuperTonic TTS": 30,
+                "PyTorch CPU": 99,
+            }
+        else:
+            order = {
+                "PyTorch ROCm": 10,
+                "PyTorch CUDA": 10,
+                "SuperTonic TTS": 20,
+                "PyTorch CPU": 99,
+            }
+        return order.get(name, 50)
+
+    available_backends.sort(key=_backend_sort_key)
+
+    # 5. Audio and phonemization tools
+    tools: list[tuple[str, str]] = []
+    ffmpeg_bin = shutil.which("ffmpeg")
+    if ffmpeg_bin:
+        tools.append(("FFmpeg", f"Detected ({Path(ffmpeg_bin).resolve()})"))
+    else:
+        tools.append(("FFmpeg", "Not found on $PATH (audiobook generation may fail)"))
+
+    espeak_bin = shutil.which("espeak-ng") or shutil.which("espeak")
+    if espeak_bin:
+        tools.append(("eSpeak-ng", f"Detected ({Path(espeak_bin).resolve()})"))
+    else:
+        tools.append(("eSpeak-ng", "Not found on $PATH"))
+
+    # Build and print the banner
+    border = "=" * 62
+    divider = "-" * 62
+    header_line = f" {PROGRAM_NAME} v{VERSION} ({interface_name})"
+    platform_desc = f"{system_os} {os_release} ({machine_arch}) | Python {py_version}"
+
+    lines: list[str] = [
+        border,
+        header_line,
+        f" Platform:    {platform_desc}",
+        f" Cache Path:  {cache_path}",
+        f" Config Path: {config_path}",
+        divider,
+        " Available Compute & TTS Acceleration:",
+    ]
+
+    for name, status in available_backends:
+        lines.append(f"   • {name + ':':<22} {status}")
+
+    if unsupported_backends:
+        lines.append(" Unsupported on This Platform:")
+        for name, reason in unsupported_backends:
+            lines.append(f"   • {name:<22} ({reason})")
+
+    lines.append(" Audio & Processing Tools:")
+    for name, status in tools:
+        lines.append(f"   • {name + ':':<22} {status}")
+
+    lines.append(border)
+
+    print("\n" + "\n".join(lines) + "\n", flush=True)
