@@ -300,7 +300,9 @@ class QueueManager(QDialog):
         # Remove button
         self.remove_button = QPushButton("Remove Selected")
         self.remove_button.setFixedHeight(40)
-        self.remove_button.setToolTip("Remove the selected item(s) from the queue.")
+        self.remove_button.setToolTip(
+            "Remove the selected item(s) from the queue (Delete / Backspace)."
+        )
         self.remove_button.clicked.connect(self.remove_item)
         button_row.addWidget(self.remove_button)
 
@@ -336,28 +338,32 @@ class QueueManager(QDialog):
         # 1. Move to Top button
         self.move_top_button = QPushButton("Move to Top")
         self.move_top_button.setFixedHeight(36)
-        self.move_top_button.setToolTip("Move selected item(s) to the beginning of the queue.")
+        self.move_top_button.setToolTip(
+            "Move selected item(s) to the beginning of the queue (Alt+Home or Alt+Cmd+Up)."
+        )
         self.move_top_button.clicked.connect(self.move_selected_to_top)
         reorder_row.addWidget(self.move_top_button)
 
         # 2. Move Up button
         self.move_up_button = QPushButton("Move Up")
         self.move_up_button.setFixedHeight(36)
-        self.move_up_button.setToolTip("Move selected item(s) up by one position.")
+        self.move_up_button.setToolTip("Move selected item(s) up by one position (Alt+Up).")
         self.move_up_button.clicked.connect(self.move_selected_up)
         reorder_row.addWidget(self.move_up_button)
 
         # 3. Move Down button
         self.move_down_button = QPushButton("Move Down")
         self.move_down_button.setFixedHeight(36)
-        self.move_down_button.setToolTip("Move selected item(s) down by one position.")
+        self.move_down_button.setToolTip("Move selected item(s) down by one position (Alt+Down).")
         self.move_down_button.clicked.connect(self.move_selected_down)
         reorder_row.addWidget(self.move_down_button)
 
         # 4. Move to Bottom button
         self.move_bottom_button = QPushButton("Move to Bottom")
         self.move_bottom_button.setFixedHeight(36)
-        self.move_bottom_button.setToolTip("Move selected item(s) to the end of the queue.")
+        self.move_bottom_button.setToolTip(
+            "Move selected item(s) to the end of the queue (Alt+End or Alt+Cmd+Down)."
+        )
         self.move_bottom_button.clicked.connect(self.move_selected_to_bottom)
         reorder_row.addWidget(self.move_bottom_button)
 
@@ -1468,26 +1474,49 @@ class QueueManager(QDialog):
         self.queue.extend(deepcopy(self._original_queue))
         super().reject()
 
-    def keyPressEvent(self, a0: QKeyEvent | None):
+    def keyPressEvent(self, a0: QKeyEvent | None) -> None:
+        """Handle keyboard navigation for the queue manager dialog.
+
+        Binds Delete and Backspace keys to remove selected items. Binds Alt+Up/Down
+        to move items up/down, and Alt+Home/End or Alt+Cmd+Up/Down to move
+        items to the top/bottom of the queue.
+
+        Args:
+            a0: The key event to process.
+        """
         from PyQt6.QtCore import Qt
 
         if a0 is None:
             return
 
-        if a0.key() == Qt.Key.Key_Delete:
+        if a0.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
             self.remove_item()
-        elif a0.modifiers() == Qt.KeyboardModifier.AltModifier:
+            return
+
+        modifiers = a0.modifiers()
+        is_alt = bool(modifiers & Qt.KeyboardModifier.AltModifier)
+        is_cmd = bool(
+            modifiers & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.MetaModifier)
+        )
+
+        if is_alt:
             if a0.key() == Qt.Key.Key_Up:
-                self.move_selected_up()
+                if is_cmd:
+                    self.move_selected_to_top()
+                else:
+                    self.move_selected_up()
                 return
-            if a0.key() == Qt.Key.Key_Down:
-                self.move_selected_down()
+            elif a0.key() == Qt.Key.Key_Down:
+                if is_cmd:
+                    self.move_selected_to_bottom()
+                else:
+                    self.move_selected_down()
                 return
-            if a0.key() == Qt.Key.Key_Home:
+            elif a0.key() == Qt.Key.Key_Home:
                 self.move_selected_to_top()
                 return
-            if a0.key() == Qt.Key.Key_End:
+            elif a0.key() == Qt.Key.Key_End:
                 self.move_selected_to_bottom()
                 return
-        else:
-            super().keyPressEvent(a0)
+
+        super().keyPressEvent(a0)

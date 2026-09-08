@@ -642,9 +642,17 @@ class VoiceFormulaDialog(QDialog):
         self.update_profile_list_colors()
 
     def keyPressEvent(self, a0: QKeyEvent | None) -> None:
+        """Handle keyboard navigation: Delete/Backspace key to delete the selected voice profile.
+
+        Args:
+            a0: The key event to process.
+        """
         if a0 is not None:
-            # Bind Delete key to delete_profile when a profile is selected
-            if a0.key() == Qt.Key.Key_Delete and self.profile_list.hasFocus():
+            # Bind Delete and Backspace keys to delete_profile when a profile is selected
+            if (
+                a0.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace)
+                and self.profile_list.hasFocus()
+            ):
                 item = self.profile_list.currentItem()
                 if item:
                     self.delete_profile(item)
