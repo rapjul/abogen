@@ -21,8 +21,8 @@ if "ebooklib" not in sys.modules:
     sys.modules["ebooklib"] = ebooklib_stub
     sys.modules["ebooklib.epub"] = ebooklib_epub_stub
 
-if "fitz" not in sys.modules:
-    sys.modules["fitz"] = types.ModuleType("fitz")
+if "pymupdf" not in sys.modules:
+    sys.modules["pymupdf"] = types.ModuleType("pymupdf")
 
 if "markdown" not in sys.modules:
     markdown_stub = types.ModuleType("markdown")

@@ -12,8 +12,8 @@ from pathlib import Path
 from typing import Any, cast
 
 import ebooklib  # type: ignore[import]
-import fitz  # type: ignore[import]
 import markdown  # type: ignore[import]
+import pymupdf  # type: ignore[import]
 from bs4 import BeautifulSoup, NavigableString  # type: ignore[import]
 from ebooklib import epub  # type: ignore[import]
 
@@ -228,7 +228,7 @@ def _build_metadata_payload(
 
 
 def _extract_pdf_cover(
-    document: fitz.Document,
+    document: pymupdf.Document,
 ) -> tuple[bytes | None, str | None]:
     """
     Extract the first page of a PDF as a cover image.
@@ -242,7 +242,7 @@ def _extract_pdf_cover(
 
         first_page = cast(Any, document[0])
         # Render at 150 DPI: matrix of (2, 2) = 72*2 = 144 DPI, use (2.08, 2.08) for 150 DPI
-        matrix = fitz.Matrix(2.08, 2.08)
+        matrix = pymupdf.Matrix(2.08, 2.08)
         pixmap = first_page.get_pixmap(matrix=matrix, alpha=False)
 
         # Convert to PNG
@@ -259,13 +259,13 @@ def _extract_pdf(path: Path) -> ExtractionResult:
     cover_image: bytes | None = None
     cover_mime: str | None = None
 
-    with fitz.open(str(path)) as document:
+    with pymupdf.open(str(path)) as document:
         metadata_source = _collect_pdf_metadata(document)
 
         # Extract cover from first page
         cover_image, cover_mime = _extract_pdf_cover(document)
 
-        pages = cast(Iterable[fitz.Page], document)
+        pages = cast(Iterable[pymupdf.Page], document)
         for index, page in enumerate(pages):
             page_obj = cast(Any, page)
             text = _clean_pdf_text(page_obj.get_text())
@@ -284,7 +284,7 @@ def _extract_pdf(path: Path) -> ExtractionResult:
     )
 
 
-def _collect_pdf_metadata(document: fitz.Document) -> MetadataSource:
+def _collect_pdf_metadata(document: pymupdf.Document) -> MetadataSource:
     metadata = MetadataSource()
     info = document.metadata or {}
     if info.get("title"):

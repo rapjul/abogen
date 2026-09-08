@@ -2,7 +2,7 @@ import os
 import shutil
 import unittest
 
-import fitz  # PyMuPDF
+import pymupdf
 
 from abogen.book_parser import PdfParser
 
@@ -21,7 +21,7 @@ class TestPdfStructure(unittest.TestCase):
 
     def test_pdf_structure_with_toc(self):
         # Create PDF
-        doc = fitz.open()
+        doc = pymupdf.open()
         p1 = doc.new_page()
         p1.insert_text((50, 50), "Page 1 Content")
         p2 = doc.new_page()
@@ -65,7 +65,7 @@ class TestPdfStructure(unittest.TestCase):
 
     def test_pdf_structure_without_toc(self):
         # Create PDF without TOC
-        doc = fitz.open()
+        doc = pymupdf.open()
         p1 = doc.new_page()
         p1.insert_text((50, 50), "Start")
         p2 = doc.new_page()
@@ -90,7 +90,7 @@ class TestPdfStructure(unittest.TestCase):
 
     def test_pdf_structure_nested_toc(self):
         # Create PDF
-        doc = fitz.open()
+        doc = pymupdf.open()
         doc.new_page()  # Chap 1
         doc.new_page()  # Sec 1.1
         doc.new_page()  # Chap 2

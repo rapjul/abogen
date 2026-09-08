@@ -3,7 +3,7 @@ import shutil
 import sys
 import unittest
 
-import fitz  # PyMuPDF
+import pymupdf
 from ebooklib import epub
 
 # Ensure we can import the module
@@ -32,7 +32,7 @@ class TestBookParser(unittest.TestCase):
             shutil.rmtree(self.test_dir)
 
     def _create_sample_pdf(self):
-        doc = fitz.open()
+        doc = pymupdf.open()
 
         # Page 1
         page1 = doc.new_page()

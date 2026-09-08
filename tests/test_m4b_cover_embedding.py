@@ -128,7 +128,7 @@ def test_validate_cover_image_jpeg_case_insensitive(tmp_path):
 def test_pdf_cover_extraction():
     """Test that PDF cover extraction works and returns PNG bytes."""
     # This is a placeholder for PDF cover extraction tests.
-    # Integration with fitz library would need actual PDF test files.
+    # Integration with pymupdf library would need actual PDF test files.
 
 
 def test_persist_cover_image_with_valid_bytes(tmp_path):

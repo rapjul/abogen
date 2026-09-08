@@ -10,8 +10,8 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 import ebooklib
-import fitz  # PyMuPDF
 import markdown
+import pymupdf
 from bs4 import BeautifulSoup
 from bs4.element import NavigableString
 from ebooklib import epub
@@ -163,7 +163,7 @@ class PdfParser(BaseBookParser):
 
     def load(self):
         try:
-            self.pdf_doc = fitz.open(self.book_path)
+            self.pdf_doc = pymupdf.open(self.book_path)
         except Exception as e:
             logging.error(f"Error loading PDF {self.book_path}: {e}")
             raise
@@ -247,7 +247,7 @@ class PdfParser(BaseBookParser):
         if pdf_doc is None:
             return []
         # 1. Flatten TOC to easier list (page_num, title, level)
-        # fitz TOC is [[lvl, title, page, dest], ...]
+        # pymupdf TOC is [[lvl, title, page, dest], ...]
 
         bookmarks = []
         for entry in toc:

@@ -67,8 +67,8 @@ def _install_dependency_stubs() -> None:
         setattr(soundfile_stub, "write", lambda *_args, **_kwargs: None)
         sys.modules["soundfile"] = soundfile_stub
 
-    if "fitz" not in sys.modules:
-        sys.modules["fitz"] = types.ModuleType("fitz")
+    if "pymupdf" not in sys.modules:
+        sys.modules["pymupdf"] = types.ModuleType("pymupdf")
 
     if "markdown" not in sys.modules:
         markdown_stub = types.ModuleType("markdown")
