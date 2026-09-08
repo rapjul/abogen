@@ -221,10 +221,10 @@ def process_subtitle_tokens(
     if not tokens_with_timestamps:
         return
 
-    if hasattr(subtitle_mode, "value"):
+    if isinstance(subtitle_mode, Enum):
         mode_str = str(subtitle_mode.value)
     else:
-        mode_str = str(subtitle_mode).strip()
+        mode_str = subtitle_mode.strip()
 
     if mode_str in (SubtitleMode.DISABLED.value, "Disabled"):
         return

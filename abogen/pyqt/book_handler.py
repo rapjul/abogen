@@ -178,7 +178,8 @@ class FindInputTextEdit(QPlainTextEdit):
         self.setWordWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.document().setDocumentMargin(3.0)
+        if (doc := self.document()) is not None:
+            doc.setDocumentMargin(3.0)
         self.textChanged.connect(self._adjust_height)
         self._adjust_height()
 

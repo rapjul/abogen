@@ -21,7 +21,7 @@ import sys
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol, cast
+from typing import Literal, Protocol, cast
 
 import numpy as np  # type: ignore
 from numpy.typing import NDArray  # type: ignore
@@ -417,7 +417,7 @@ def resample_audio_mlx(
 def load_audio_mlx(
     file_path: str | Path,
     target_sample_rate: int | None = None,
-    dtype: str = "float32",
+    dtype: Literal["float64", "float32", "int32", "int16"] = "float32",
 ) -> tuple[NDArray[np.float32], int]:
     """Load an audio file into a NumPy array using native macOS decoders.
 
