@@ -542,6 +542,45 @@ class TestBookHandlerRegression(unittest.TestCase):
 
         dialog.close()
 
+    def test_toggle_fr_btn_native_shortcut_tooltip(self) -> None:
+        """Test that toggle_fr_btn tooltip uses the native QKeySequence text representation."""
+        from PyQt6.QtGui import QKeySequence
+
+        dialog = HandlerDialog(self.sample_epub_path)
+        if (
+            hasattr(dialog, "_loader_thread")
+            and dialog._loader_thread is not None
+            and dialog._loader_thread.isRunning()
+        ):
+            dialog._loader_thread.wait()
+
+        expected_key = QKeySequence(QKeySequence.StandardKey.Find).toString(
+            QKeySequence.SequenceFormat.NativeText
+        )
+        self.assertIn(expected_key, dialog.toggle_fr_btn.toolTip())
+        dialog.close()
+
+    def test_replace_input_return_pressed_triggers_replace(self) -> None:
+        """Test that pressing Return in fr_replace_input triggers _perform_replace_single."""
+        called = []
+        with patch.object(
+            HandlerDialog,
+            "_perform_replace_single",
+            autospec=True,
+            side_effect=lambda self: called.append(True),
+        ):
+            dialog = HandlerDialog(self.sample_epub_path)
+            if (
+                hasattr(dialog, "_loader_thread")
+                and dialog._loader_thread is not None
+                and dialog._loader_thread.isRunning()
+            ):
+                dialog._loader_thread.wait()
+
+            dialog.fr_replace_input.returnPressed.emit()
+            self.assertTrue(called)
+            dialog.close()
+
 
 if __name__ == "__main__":
     unittest.main()

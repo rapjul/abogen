@@ -945,7 +945,10 @@ class HandlerDialog(QDialog):
         btn_box.addWidget(self.toggle_edit_btn)
 
         self.toggle_fr_btn = QPushButton("Find && Replace", self.chapter_info_frame)
-        self.toggle_fr_btn.setToolTip("Open Find & Replace panel (Ctrl+F)")
+        find_shortcut_str = QKeySequence(QKeySequence.StandardKey.Find).toString(
+            QKeySequence.SequenceFormat.NativeText
+        )
+        self.toggle_fr_btn.setToolTip(f"Open Find & Replace panel ({find_shortcut_str})")
         self.toggle_fr_btn.clicked.connect(self.toggle_find_replace_panel)
         btn_box.addWidget(self.toggle_fr_btn)
 
@@ -1006,6 +1009,7 @@ class HandlerDialog(QDialog):
         row2.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.fr_replace_input = FindInputTextEdit(self.find_replace_frame)
         self.fr_replace_input.setPlaceholderText("Replace with...")
+        self.fr_replace_input.returnPressed.connect(self._perform_replace_single)
         self.fr_replace_input.escapePressed.connect(self._dismiss_find_replace_panel)
         self.fr_replace_input.installEventFilter(self)
 
