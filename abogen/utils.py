@@ -507,6 +507,40 @@ def clean_text(text, *args, **kwargs):
 default_encoding: str = sys.getfilesystemencoding()
 
 
+def ensure_ffmpeg() -> bool:
+    """Ensure that `FFmpeg` is available on the system `$PATH`.
+
+    Checks if `FFmpeg` is already installed and available on the system `$PATH`.
+    If not found, falls back to downloading or locating standalone binaries via
+    the `static_ffmpeg` package into the internal cache directory.
+
+    Returns:
+        bool: `True` if `FFmpeg` is available on `$PATH`, `False` otherwise.
+    """
+    if shutil.which("ffmpeg"):
+        return True
+
+    try:
+        import static_ffmpeg
+
+        ffmpeg_cache_root = Path(get_internal_cache_path("ffmpeg"))
+        platform_cache = ffmpeg_cache_root / sys.platform
+        platform_cache.mkdir(parents=True, exist_ok=True)
+
+        try:
+            import static_ffmpeg.run as static_ffmpeg_run  # type: ignore
+
+            static_ffmpeg_run.LOCK_FILE = str(ffmpeg_cache_root / "lock.file")
+        except (ImportError, AttributeError):
+            pass
+
+        static_ffmpeg.add_paths(weak=True, download_dir=str(platform_cache))
+        return shutil.which("ffmpeg") is not None
+    except Exception as exc:  # noqa: BLE001 - catch any unexpected static_ffmpeg download or setup failure
+        logger.warning("Failed to initialize or resolve FFmpeg: %s", exc)
+        return False
+
+
 def create_process(
     cmd: str | Sequence[str],
     stdin: Any = None,
