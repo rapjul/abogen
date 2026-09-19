@@ -44,6 +44,7 @@ from abogen.utils import (
     calculate_text_length,
     create_process,
     ensure_ffmpeg,
+    get_ffmpeg_info,
     get_user_cache_path,
     get_user_output_path,
     load_config,
@@ -1667,6 +1668,11 @@ def _embed_m4b_metadata(
 
 def run_conversion_job(job: Job) -> None:  # pyright: ignore[reportGeneralTypeIssues]
     job.add_log("Preparing conversion pipeline")
+    ffmpeg_info = get_ffmpeg_info()
+    if ffmpeg_info:
+        job.add_log(
+            f"FFmpeg: {ffmpeg_info.source.capitalize()} v{ffmpeg_info.version} ({ffmpeg_info.path})"
+        )
     canceller = _make_canceller(job)
 
     normalization_settings = get_runtime_settings()

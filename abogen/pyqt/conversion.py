@@ -49,6 +49,7 @@ from abogen.utils import (
     create_process,
     detect_encoding,
     ensure_ffmpeg,
+    get_ffmpeg_info,
     get_user_cache_path,
 )
 from abogen.voice_formulas import extract_voice_ids, get_new_voice
@@ -1546,6 +1547,11 @@ class ConversionThread(QThread):
 
         # Output format and location
         self.log_updated.emit(f"  - Output format: {self.output_format}")
+        ffmpeg_info = get_ffmpeg_info()
+        if ffmpeg_info:
+            self.log_updated.emit(
+                f"  - FFmpeg: {ffmpeg_info.source.capitalize()} v{ffmpeg_info.version} ({ffmpeg_info.path})"
+            )
         self.log_updated.emit(f"  - Save option: {self.save_option}")
         if self.save_option == "Choose output folder":
             self.log_updated.emit(f"  - Output folder: {self.output_folder or os.getcwd()}")
