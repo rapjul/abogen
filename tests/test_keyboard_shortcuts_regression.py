@@ -173,7 +173,16 @@ class TestKeyboardShortcutsRegression(unittest.TestCase):
 
     def test_voice_formula_delete_and_backspace_keys(self) -> None:
         """Test that VoiceFormulaDialog handles both Key_Delete and Key_Backspace with profile_list focused."""
-        with patch("abogen.pyqt.voice_formula_gui.load_profiles", return_value={"Profile A": {}}):
+        mock_profiles: dict[str, dict[str, object]] = {
+            "Profile A": {
+                "voices": [("af_heart", 1.0)],
+                "language": "a",
+            }
+        }
+        with (
+            patch("abogen.pyqt.voice_formula_gui.load_profiles", return_value=mock_profiles),
+            patch("abogen.pyqt.voice_formula_gui.QMessageBox.question"),
+        ):
             dialog = VoiceFormulaDialog(parent=None)
 
             # Focus the profile list
