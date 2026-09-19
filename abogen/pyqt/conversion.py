@@ -18,7 +18,6 @@ from pathlib import Path
 from typing import Any, NamedTuple, Self
 
 import soundfile as sf
-import static_ffmpeg
 from platformdirs import user_desktop_dir
 from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QCloseEvent, QKeyEvent
@@ -49,6 +48,7 @@ from abogen.subtitle_utils import (
 from abogen.utils import (
     create_process,
     detect_encoding,
+    ensure_ffmpeg,
     get_user_cache_path,
 )
 from abogen.voice_formulas import extract_voice_ids, get_new_voice
@@ -1215,7 +1215,7 @@ class ConversionThread(QThread):
 
         encoders: set[str] = set()
         try:
-            static_ffmpeg.add_paths()
+            ensure_ffmpeg()
             proc = create_process(
                 ["ffmpeg", "-hide_banner", "-encoders"],
                 capture_output=True,
@@ -2127,7 +2127,7 @@ class ConversionThread(QThread):
                     ffmpeg_proc = None
                 elif self.output_format == "m4b":
                     # Real-time M4B generation using FFmpeg pipe
-                    static_ffmpeg.add_paths()
+                    ensure_ffmpeg()
                     merged_out_file = None
                     ffmpeg_proc = None
                     metadata_options, cover_path, m4b_atom_metadata = (
@@ -2163,7 +2163,7 @@ class ConversionThread(QThread):
                     cmd.append(merged_out_path)
                     ffmpeg_proc = create_process(cmd, stdin=subprocess.PIPE, text=False)
                 elif self.output_format == "opus":
-                    static_ffmpeg.add_paths()
+                    ensure_ffmpeg()
                     cmd = [
                         "ffmpeg",
                         "-y",
@@ -2324,7 +2324,7 @@ class ConversionThread(QThread):
                             )
                             chapter_ffmpeg_proc = None
                         elif separate_chapters_format == "opus":
-                            static_ffmpeg.add_paths()
+                            ensure_ffmpeg()
                             cmd = [
                                 "ffmpeg",
                                 "-y",
@@ -2822,7 +2822,7 @@ class ConversionThread(QThread):
                                 f.write(f"END={int(chapter['end'] * 1000)}\n")
                                 f.write(f"title={chapter_title}\n\n")
                         # Fast mux chapters into m4b (write to temp file, then replace original)
-                        static_ffmpeg.add_paths()
+                        ensure_ffmpeg()
                         orig_path = merged_out_path
                         assert orig_path is not None
                         root, ext = os.path.splitext(orig_path)
@@ -2989,7 +2989,7 @@ class ConversionThread(QThread):
                     format=self.output_format,
                 )
             else:
-                static_ffmpeg.add_paths()
+                ensure_ffmpeg()
                 cmd = [
                     "ffmpeg",
                     "-y",
@@ -3174,7 +3174,7 @@ class ConversionThread(QThread):
                             (f"  -> FFmpeg time-stretch: {speed_factor:.2f}x", "grey")
                         )
 
-                        static_ffmpeg.add_paths()
+                        ensure_ffmpeg()
                         num_stages = max(
                             1,
                             int(self.np.ceil(self.np.log(speed_factor) / self.np.log(2.0))),
@@ -3649,7 +3649,7 @@ class ConversionThread(QThread):
     def _optimize_cover_image_for_m4b(self, cover_path):
         """Best-effort cover optimization for large images while preserving compatibility."""
         try:
-            static_ffmpeg.add_paths()
+            ensure_ffmpeg()
             source = os.path.normpath(cover_path)
             stem = os.path.splitext(os.path.basename(source))[0]
             cache_dir = get_user_cache_path()
@@ -3784,7 +3784,7 @@ class ConversionThread(QThread):
     def _convert_cover_to_jpeg(self, cover_path, quality_percent=75):
         """Convert a cover image to JPEG using FFmpeg with a target quality percentage."""
         try:
-            static_ffmpeg.add_paths()
+            ensure_ffmpeg()
             source = os.path.normpath(cover_path)
             stem = os.path.splitext(os.path.basename(source))[0]
             cache_dir = get_user_cache_path()

@@ -6,7 +6,6 @@ import math
 import os
 import re
 import subprocess
-import sys
 import tempfile
 import traceback
 from collections import defaultdict
@@ -19,7 +18,6 @@ from typing import Any, cast
 
 import numpy as np
 import soundfile as sf
-import static_ffmpeg
 
 from abogen.constants import VOICES_INTERNAL
 from abogen.entity_analysis import normalize_manual_override_token
@@ -45,7 +43,7 @@ from abogen.tts_supertonic import DEFAULT_SUPERTONIC_VOICES, SupertonicPipeline
 from abogen.utils import (
     calculate_text_length,
     create_process,
-    get_internal_cache_path,
+    ensure_ffmpeg,
     get_user_cache_path,
     get_user_output_path,
     load_config,
@@ -1600,6 +1598,7 @@ def _embed_m4b_metadata(
         return
 
     job.add_log("Embedding metadata into m4b output")
+    ensure_ffmpeg()
 
     command: list[str] = ["ffmpeg", "-y", "-i", str(audio_path)]
     metadata_index: int | None = None
@@ -2790,17 +2789,7 @@ def _open_audio_sink(
     fmt: str | None = None,
     metadata: dict[str, str] | None = None,
 ) -> AudioSink:
-    ffmpeg_cache_root = get_internal_cache_path("ffmpeg")
-    platform_cache = os.path.join(ffmpeg_cache_root, sys.platform)
-    os.makedirs(platform_cache, exist_ok=True)
-    try:
-        import static_ffmpeg.run as static_ffmpeg_run  # type: ignore
-
-        static_ffmpeg_run.LOCK_FILE = os.path.join(ffmpeg_cache_root, "lock.file")
-    except Exception:
-        pass
-
-    static_ffmpeg.add_paths(weak=True, download_dir=platform_cache)
+    ensure_ffmpeg()
     fmt_value = (fmt or job.output_format).lower()
 
     if fmt_value in {"wav", "flac"}:
