@@ -13,7 +13,7 @@ from collections.abc import Sequence
 from functools import lru_cache
 from pathlib import Path
 from threading import Thread
-from typing import Any
+from typing import Any, NamedTuple
 from uuid import uuid4
 
 from dotenv import find_dotenv, load_dotenv
@@ -507,6 +507,84 @@ def clean_text(text, *args, **kwargs):
 default_encoding: str = sys.getfilesystemencoding()
 
 
+class FFmpegInfo(NamedTuple):
+    """Metadata describing the active `FFmpeg` binary.
+
+    Attributes:
+        path: Absolute path to the resolved executable.
+        version: Detected version string (e.g. '9.0.1' or 'unknown').
+        source: Origin of the binary ('system' or 'static').
+    """
+
+    path: Path
+    version: str
+    source: str
+
+
+_ffmpeg_info: FFmpegInfo | None = None
+_ffmpeg_logged: bool = False
+
+
+def get_ffmpeg_version(ffmpeg_path: Path | str | None = None) -> str:
+    """Retrieve the version string of the given or active `FFmpeg` executable.
+
+    Args:
+        ffmpeg_path: Optional path to the `FFmpeg` executable. If None,
+            defaults to the result of `shutil.which('ffmpeg')`.
+
+    Returns:
+        str: The detected version string (e.g. '9.0.1'), or 'unknown'.
+    """
+    target = str(ffmpeg_path) if ffmpeg_path else shutil.which("ffmpeg")
+    if not target:
+        return "unknown"
+    try:
+        proc = subprocess.Popen(
+            [target, "-version"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        stdout, _ = proc.communicate(timeout=5)
+        if proc.returncode == 0 and stdout:
+            first_line = stdout.splitlines()[0]
+            match = re.search(r"ffmpeg\s+version\s+([^\s]+)", first_line, re.IGNORECASE)
+            if match:
+                return match.group(1)
+    except Exception:  # noqa: BLE001 - ignore execution errors and fallback to unknown
+        pass
+    return "unknown"
+
+
+def get_ffmpeg_info(force_refresh: bool = False) -> FFmpegInfo | None:
+    """Retrieve details about the resolved `FFmpeg` executable.
+
+    Args:
+        force_refresh: Whether to ignore cached info and re-inspect the binary.
+
+    Returns:
+        FFmpegInfo | None: An `FFmpegInfo` tuple if an `FFmpeg` binary is resolved, or `None`.
+    """
+    global _ffmpeg_info
+    if _ffmpeg_info is not None and not force_refresh:
+        return _ffmpeg_info
+
+    binary = shutil.which("ffmpeg")
+    if not binary:
+        return None
+
+    resolved_path = Path(binary).resolve()
+    ffmpeg_cache_root = Path(get_internal_cache_path("ffmpeg")).resolve()
+
+    # Determine whether it is the standalone static download or system install
+    is_static = ffmpeg_cache_root in resolved_path.parents or "static_ffmpeg" in str(resolved_path)
+    source = "static" if is_static else "system"
+    version = get_ffmpeg_version(resolved_path)
+
+    _ffmpeg_info = FFmpegInfo(path=resolved_path, version=version, source=source)
+    return _ffmpeg_info
+
+
 def ensure_ffmpeg() -> bool:
     """Ensure that `FFmpeg` is available on the system `$PATH`.
 
@@ -517,28 +595,41 @@ def ensure_ffmpeg() -> bool:
     Returns:
         bool: `True` if `FFmpeg` is available on `$PATH`, `False` otherwise.
     """
+    global _ffmpeg_logged
+
+    resolved = False
     if shutil.which("ffmpeg"):
-        return True
-
-    try:
-        import static_ffmpeg
-
-        ffmpeg_cache_root = Path(get_internal_cache_path("ffmpeg"))
-        platform_cache = ffmpeg_cache_root / sys.platform
-        platform_cache.mkdir(parents=True, exist_ok=True)
-
+        resolved = True
+    else:
         try:
-            import static_ffmpeg.run as static_ffmpeg_run  # type: ignore
+            import static_ffmpeg
 
-            static_ffmpeg_run.LOCK_FILE = str(ffmpeg_cache_root / "lock.file")
-        except (ImportError, AttributeError):
-            pass
+            ffmpeg_cache_root = Path(get_internal_cache_path("ffmpeg"))
+            platform_cache = ffmpeg_cache_root / sys.platform
+            platform_cache.mkdir(parents=True, exist_ok=True)
 
-        static_ffmpeg.add_paths(weak=True, download_dir=str(platform_cache))
-        return shutil.which("ffmpeg") is not None
-    except Exception as exc:  # noqa: BLE001 - catch any unexpected static_ffmpeg download or setup failure
-        logger.warning("Failed to initialize or resolve FFmpeg: %s", exc)
-        return False
+            try:
+                import static_ffmpeg.run as static_ffmpeg_run  # type: ignore
+
+                static_ffmpeg_run.LOCK_FILE = str(ffmpeg_cache_root / "lock.file")
+            except (ImportError, AttributeError):
+                pass
+
+            static_ffmpeg.add_paths(weak=True, download_dir=str(platform_cache))
+            resolved = shutil.which("ffmpeg") is not None
+        except Exception as exc:  # noqa: BLE001 - catch any unexpected static_ffmpeg download or setup failure
+            logger.warning("Failed to initialize or resolve FFmpeg: %s", exc)
+            return False
+
+    if resolved and not _ffmpeg_logged:
+        info = get_ffmpeg_info(force_refresh=True)
+        if info:
+            label = "system" if info.source == "system" else "standalone static"
+            logger.info("FFmpeg: Using %s FFmpeg v%s (%s)", label, info.version, info.path)
+            print(f"FFmpeg: Using {label} FFmpeg v{info.version} ({info.path})")
+            _ffmpeg_logged = True
+
+    return resolved
 
 
 def create_process(
@@ -1160,9 +1251,14 @@ def log_startup_diagnostics(interface_name: str = "PyQt6 Desktop") -> None:
 
     # 5. Audio and phonemization tools
     tools: list[tuple[str, str]] = []
-    ffmpeg_bin = shutil.which("ffmpeg")
-    if ffmpeg_bin:
-        tools.append(("FFmpeg", f"Detected ({Path(ffmpeg_bin).resolve()})"))
+    ffmpeg_info = get_ffmpeg_info()
+    if ffmpeg_info:
+        tools.append(
+            (
+                "FFmpeg",
+                f"Detected ({ffmpeg_info.source}: {ffmpeg_info.path} - v{ffmpeg_info.version})",
+            )
+        )
     else:
         tools.append(("FFmpeg", "Not found on $PATH (audiobook generation may fail)"))
 
