@@ -1797,9 +1797,9 @@ class ConversionThread(QThread):
                         else:
                             self.log_updated.emit("Initialising MLX Kokoro pipeline...")
                             # If we have an incompatible shared model, it will be replaced
-                            from mlx_audio.tts.utils import load_model  # type: ignore
+                            from mlx_audio.tts.utils import load  # type: ignore
 
-                            mlx_model = load_model(Path(mlx_quant.model_path))
+                            mlx_model = load(mlx_quant.model_path)
                             self.model_created.emit(
                                 mlx_model,
                                 {"backend": "mlx", "quantization": mlx_quant_name},

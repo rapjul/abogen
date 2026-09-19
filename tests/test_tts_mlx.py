@@ -256,6 +256,7 @@ class TestMLXKokoroPipelineCall(unittest.TestCase):
         )
         mock_model = MagicMock()
         mock_model.generate.return_value = iter([fake_result])
+        stub.tts.utils.load.return_value = mock_model
         stub.tts.utils.load_model.return_value = mock_model
 
         with (
@@ -485,6 +486,63 @@ class TestMLXBackendPatches(unittest.TestCase):
             self.assertEqual(sine_waves.shape[1], length)
             self.assertEqual(noise.shape[0], 1)
             self.assertEqual(noise.shape[1], length)
+
+
+class TestMLXKokoroPipelineInit(unittest.TestCase):
+    """Verify initialization and model loading behavior of :class:`MLXKokoroPipeline`."""
+
+    def test_init_calls_load_with_str_path(self) -> None:
+        """Pipeline should pass model_path as a string to mlx_audio.tts.utils.load."""
+        from abogen.tts_mlx import MLXKokoroPipeline, MLXQuantization
+
+        mock_load = MagicMock()
+        mock_model = MagicMock()
+        mock_load.return_value = mock_model
+
+        with (
+            patch("abogen.tts_mlx.is_mlx_available", return_value=True),
+            patch.dict(
+                "sys.modules",
+                {
+                    "mlx_audio": MagicMock(),
+                    "mlx_audio.tts": MagicMock(),
+                    "mlx_audio.tts.utils": MagicMock(load=mock_load),
+                },
+            ),
+        ):
+            pipeline = MLXKokoroPipeline(quantization=MLXQuantization.BF16)
+
+        self.assertIs(pipeline._model, mock_model)
+        mock_load.assert_called_once()
+        called_arg: Any = mock_load.call_args[0][0]
+        self.assertIsInstance(called_arg, str)
+        self.assertEqual(called_arg, MLXQuantization.BF16.model_path)
+
+    def test_init_with_existing_model_skips_load(self) -> None:
+        """Pipeline should reuse provided model instance and not invoke load."""
+        from abogen.tts_mlx import MLXKokoroPipeline, MLXQuantization
+
+        mock_load = MagicMock()
+        mock_model = MagicMock()
+
+        with (
+            patch("abogen.tts_mlx.is_mlx_available", return_value=True),
+            patch.dict(
+                "sys.modules",
+                {
+                    "mlx_audio": MagicMock(),
+                    "mlx_audio.tts": MagicMock(),
+                    "mlx_audio.tts.utils": MagicMock(load=mock_load),
+                },
+            ),
+        ):
+            pipeline = MLXKokoroPipeline(
+                quantization=MLXQuantization.BF16,
+                model=mock_model,
+            )
+
+        self.assertIs(pipeline._model, mock_model)
+        mock_load.assert_not_called()
 
 
 if __name__ == "__main__":

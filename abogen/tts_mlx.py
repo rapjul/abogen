@@ -216,7 +216,7 @@ class _TTSModel(Protocol):
 class MLXKokoroPipeline:
     """MLX-audio Kokoro pipeline adapter matching KPipeline's interface.
 
-    This class wraps ``mlx_audio.tts.utils.load_model`` and exposes an
+    This class wraps ``mlx_audio.tts.utils.load`` and exposes an
     ``__call__`` iterator interface compatible with ``KPipeline``, so it
     can be used as an alternative backend in the conversion pipeline.
 
@@ -243,13 +243,9 @@ class MLXKokoroPipeline:
         if model is not None:
             self._model = cast(_TTSModel, model)
         else:
-            from mlx_audio.tts.utils import load_model  # type: ignore
+            from mlx_audio.tts.utils import load  # type: ignore
 
-            # Upstream load_model is typed as `model_path: Path`, but expects `str`
-            # for Hugging Face repos. Converting to Path at runtime causes FileNotFoundError.
-            # Cast through `object` to satisfy type checker overlap validation without
-            # altering the runtime string.
-            loaded_model: object = load_model(cast(Path, cast(object, quantization.model_path)))
+            loaded_model: object = load(quantization.model_path)
             self._model = cast(_TTSModel, loaded_model)
 
         self._lang_code = lang_code
